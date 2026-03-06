@@ -4,6 +4,7 @@ from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Phonetic, Source, Word
 from vocab_qc.core.models.enums import (
     AiStrategy,
+    BatchStatus,
     ContentDimension,
     MnemonicType,
     QcRunStatus,
@@ -11,13 +12,18 @@ from vocab_qc.core.models.enums import (
     ReviewReason,
     ReviewResolution,
     ReviewStatus,
+    UserRole,
 )
+from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.package_layer import Package, PackageMeaning
 from vocab_qc.core.models.quality_layer import AuditLogV2, QcRuleResult, QcRun, RetryCounter, ReviewItem
+from vocab_qc.core.models.user import User, VerificationCode
 
 __all__ = [
     "AiStrategy",
     "AuditLogV2",
+    "BatchStatus",
+    "ReviewBatch",
     "ContentDimension",
     "ContentItem",
     "Meaning",
@@ -35,5 +41,8 @@ __all__ = [
     "ReviewResolution",
     "ReviewStatus",
     "Source",
+    "User",
+    "UserRole",
+    "VerificationCode",
     "Word",
 ]

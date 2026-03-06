@@ -25,7 +25,7 @@ class ReviewItemResponse(BaseModel):
 
 
 class ApproveRequest(BaseModel):
-    reviewer: str
+    reviewer: Optional[str] = None
     note: Optional[str] = None
 
 
@@ -36,6 +36,6 @@ class RegenerateResponse(BaseModel):
 
 
 class ManualEditRequest(BaseModel):
-    reviewer: str
+    reviewer: Optional[str] = None
     new_content: str
     new_content_cn: Optional[str] = None

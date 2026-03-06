@@ -126,6 +126,10 @@ class ReviewItem(Base):
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+    # Phase 3: 批次派发字段（nullable，向后兼容）
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("review_batches.id"), nullable=True, index=True)
+    assigned_to_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
     content_item_rel: Mapped["ContentItem"] = relationship(back_populates="review_items")
 
     def __repr__(self) -> str:

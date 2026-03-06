@@ -74,6 +74,21 @@ class MnemonicType(str, enum.Enum):
     EXAM_APPLICATION = "考试应用"
 
 
+class UserRole(str, enum.Enum):
+    """用户角色."""
+
+    ADMIN = "admin"
+    REVIEWER = "reviewer"
+    VIEWER = "viewer"
+
+
+class BatchStatus(str, enum.Enum):
+    """批次状态."""
+
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
 class PromptStatus(str, enum.Enum):
     """Prompt 版本状态."""
 

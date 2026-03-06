@@ -5,8 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from vocab_qc.api.deps import get_db, get_review_service
+from vocab_qc.api.deps import get_current_user, get_db, get_review_service, require_role
 from vocab_qc.api.schemas import ApproveRequest, ManualEditRequest, RegenerateResponse, ReviewItemResponse
+from vocab_qc.core.models.user import User
 from vocab_qc.core.services.review_service import ReviewService
 
 router = APIRouter(prefix="/api/reviews", tags=["审核"])
@@ -19,6 +20,7 @@ def list_reviews(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     service: ReviewService = Depends(get_review_service),
+    _current_user: User = Depends(get_current_user),
 ):
     """获取待审核队列."""
     items = service.get_pending_reviews(db, dimension=dimension, limit=limit, offset=offset)
@@ -31,10 +33,12 @@ def approve_review(
     request: ApproveRequest,
     db: Session = Depends(get_db),
     service: ReviewService = Depends(get_review_service),
+    current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """通过审核."""
+    reviewer = request.reviewer or current_user.name
     try:
-        result = service.approve(db, review_id, reviewer=request.reviewer, note=request.note)
+        result = service.approve(db, review_id, reviewer=reviewer, note=request.note)
         return ReviewItemResponse.model_validate(result)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -43,13 +47,15 @@ def approve_review(
 @router.post("/{review_id}/regenerate", response_model=RegenerateResponse)
 def regenerate(
     review_id: int,
-    reviewer: str = Query(...),
+    reviewer: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     service: ReviewService = Depends(get_review_service),
+    current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """触发重新生成（≤3次）."""
+    actual_reviewer = reviewer or current_user.name
     try:
-        result = service.regenerate(db, review_id, reviewer=reviewer)
+        result = service.regenerate(db, review_id, reviewer=actual_reviewer)
         return RegenerateResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -61,13 +67,15 @@ def manual_edit(
     request: ManualEditRequest,
     db: Session = Depends(get_db),
     service: ReviewService = Depends(get_review_service),
+    current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """人工修改."""
+    reviewer = request.reviewer or current_user.name
     try:
         result = service.manual_edit(
             db,
             review_id,
-            reviewer=request.reviewer,
+            reviewer=reviewer,
             new_content=request.new_content,
             new_content_cn=request.new_content_cn,
         )

@@ -33,7 +33,7 @@ VocabularyDataCleaning1.0/
 │   │   │   ├── base.py          ← RuleResult, ItemCheckResult, RuleChecker 协议
 │   │   │   ├── registry.py      ← 装饰器注册中心
 │   │   │   ├── runner.py        ← Layer 1 运行器
-│   │   │   ├── layer1/          ← 22 条算法规则（M3-M6, P1-P2, S1-S4, C1-C5, E6-E8, N1-N5）
+│   │   │   ├── layer1/          ← 22 条算法规则（M3-M6, P1-P2, S1-S4, C1-C2 + C4-C5, E6-E8, N1-N5）
 │   │   │   └── layer2/          ← AI 语义校验（13 per-rule + 3 unified 检查器）
 │   │   ├── services/
 │   │   │   ├── qc_service.py    ← 质检编排

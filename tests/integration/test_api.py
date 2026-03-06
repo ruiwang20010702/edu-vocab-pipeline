@@ -5,10 +5,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from vocab_qc.api.deps import get_db
+from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 from vocab_qc.core.db import Base
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, ReviewItem, ReviewReason, Source, Word
+from vocab_qc.core.models.user import User
 from vocab_qc.core.services.review_service import ReviewService
 
 
@@ -30,7 +31,11 @@ def test_app():
         finally:
             session.close()
 
+    # Mock admin 用户，绕过认证
+    mock_user = User(id=1, email="admin@test.com", name="TestAdmin", role="admin", is_active=True)
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: mock_user
 
     # 插入测试数据
     session = TestSession()
