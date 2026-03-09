@@ -30,7 +30,10 @@ export interface Source {
 
 /* ===== 内容层类型 ===== */
 
-export type ContentDimension = 'meaning' | 'phonetic' | 'syllable' | 'chunk' | 'sentence' | 'mnemonic'
+export type ContentDimension =
+  | 'meaning' | 'phonetic' | 'syllable' | 'chunk' | 'sentence'
+  | 'mnemonic_root_affix' | 'mnemonic_word_in_word'
+  | 'mnemonic_sound_meaning' | 'mnemonic_exam_app'
 export type QcStatus = 'pending' | 'layer1_passed' | 'layer1_failed' | 'layer2_passed' | 'layer2_failed' | 'approved' | 'rejected'
 
 export interface ContentItem {
@@ -113,7 +116,7 @@ export interface WordDetail extends Word {
     chunk?: ContentItem
     sentence?: ContentItem
   })[]
-  mnemonic?: ContentItem
+  mnemonics: ContentItem[]
   issues: QualityIssue[]
 }
 

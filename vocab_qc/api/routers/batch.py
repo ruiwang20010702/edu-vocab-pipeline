@@ -14,8 +14,12 @@ from vocab_qc.api.schemas.batch import (
 from vocab_qc.api.schemas.batch_info import BatchInfoResponse
 from vocab_qc.core.models.package_layer import Package
 from vocab_qc.core.models.user import User
+import logging
+
 from vocab_qc.core.services import batch_service
 from vocab_qc.core.services.production_service import run_production
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/batches", tags=["批次"])
 
@@ -144,8 +148,11 @@ def produce_batch(
     try:
         result = run_production(db, batch_id)
         return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.exception("生产流水线执行失败 batch_id=%s", batch_id)
+        raise HTTPException(status_code=500, detail="生产流水线执行失败，请稍后重试")
 
 
 @router.get("/stats", response_model=BatchStatsResponse)

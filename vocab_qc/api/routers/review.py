@@ -1,8 +1,10 @@
 """审核 API 路由."""
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db, get_review_service, require_role
@@ -18,6 +20,8 @@ from vocab_qc.api.schemas.review import (
 from vocab_qc.core.models import ContentItem, QcRuleResult, Word
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services.review_service import ReviewService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/reviews", tags=["审核"])
 
@@ -85,30 +89,37 @@ def approve_review(
     current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """通过审核."""
-    reviewer = (request.reviewer if request else None) or current_user.name
     note = request.note if request else None
     try:
-        result = service.approve(db, review_id, reviewer=reviewer, note=note)
+        result = service.approve(db, review_id, reviewer=current_user.name, note=note, user_id=current_user.id)
         return _enrich_review(db, result)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="审核项不存在")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception:
+        logger.exception("审核通过操作失败 review_id=%s", review_id)
+        raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
 @router.post("/{review_id}/regenerate", response_model=RegenerateResponse)
 def regenerate(
     review_id: int,
-    reviewer: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     service: ReviewService = Depends(get_review_service),
     current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """触发重新生成（≤3次）."""
-    actual_reviewer = reviewer or current_user.name
     try:
-        result = service.regenerate(db, review_id, reviewer=actual_reviewer)
+        result = service.regenerate(db, review_id, reviewer=current_user.name, user_id=current_user.id)
         return RegenerateResponse(**result)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="审核项不存在")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception:
+        logger.exception("重新生成操作失败 review_id=%s", review_id)
+        raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
 @router.post("/{review_id}/edit", response_model=ReviewItemResponse)
@@ -120,15 +131,20 @@ def manual_edit(
     current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """人工修改."""
-    reviewer = request.reviewer or current_user.name
     try:
         result = service.manual_edit(
             db,
             review_id,
-            reviewer=reviewer,
+            reviewer=current_user.name,
             new_content=request.content,
             new_content_cn=request.content_cn,
+            user_id=current_user.id,
         )
         return _enrich_review(db, result)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="审核项不存在")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception:
+        logger.exception("人工修改操作失败 review_id=%s", review_id)
+        raise HTTPException(status_code=500, detail="服务器内部错误")

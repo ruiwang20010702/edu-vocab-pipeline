@@ -305,10 +305,12 @@ function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; 
             </div>
 
             {/* 助记 */}
-            {word.mnemonic && word.mnemonic.content && (
+            {word.mnemonics && word.mnemonics.filter(m => m.content).length > 0 && (
               <div className="mt-4 bg-yellow-400/10 rounded-2xl p-4">
                 <p className="text-sm text-yellow-200/80 font-medium mb-1">助记</p>
-                <p className="text-white/80">{word.mnemonic.content}</p>
+                {word.mnemonics.filter(m => m.content).map(m => (
+                  <p key={m.id} className="text-white/80">{m.content}</p>
+                ))}
               </div>
             )}
 

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from typing import Optional
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models import (
@@ -113,9 +114,13 @@ class ReviewService:
                 "message": f"已达到最大重试次数({self.max_retries})，请使用人工修改",
             }
 
-        # 递增计数
-        counter.count += 1
-        counter.last_retry_at = datetime.now(UTC)
+        # 原子递增计数（防止并发重试超限）
+        session.execute(
+            update(RetryCounter)
+            .where(RetryCounter.id == counter.id)
+            .values(count=RetryCounter.count + 1, last_retry_at=datetime.now(UTC))
+        )
+        session.refresh(counter)
         content_item.retry_count = counter.count
 
         # 更新审核项
