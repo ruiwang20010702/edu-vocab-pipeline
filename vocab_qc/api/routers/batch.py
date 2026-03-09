@@ -12,12 +12,23 @@ from vocab_qc.api.schemas.batch import (
     BatchWordResponse,
 )
 from vocab_qc.api.schemas.batch_info import BatchInfoResponse
-from vocab_qc.core.models.data_layer import Word
-from vocab_qc.core.models.package_layer import Package, PackageMeaning
+from vocab_qc.core.models.package_layer import Package
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import batch_service
 
 router = APIRouter(prefix="/api/batches", tags=["批次"])
+
+
+def _package_to_info(pkg: Package) -> BatchInfoResponse:
+    return BatchInfoResponse(
+        id=str(pkg.id),
+        name=pkg.name,
+        status=pkg.status,
+        total_words=pkg.total_words,
+        processed_words=pkg.processed_words,
+        pass_rate=None,
+        created_at=pkg.created_at,
+    )
 
 
 @router.get("", response_model=list[BatchInfoResponse])
@@ -27,25 +38,7 @@ def list_batches(
 ):
     """获取生产批次列表（基于 Package）。"""
     packages = db.query(Package).order_by(Package.created_at.desc()).all()
-    result = []
-    for pkg in packages:
-        total_words = (
-            db.query(PackageMeaning.meaning_id)
-            .filter_by(package_id=pkg.id)
-            .join(Word, PackageMeaning.meaning_id == Word.id)
-            .distinct()
-            .count()
-        )
-        result.append(BatchInfoResponse(
-            id=str(pkg.id),
-            name=pkg.name,
-            status="completed",
-            total_words=total_words,
-            processed_words=total_words,
-            pass_rate=None,
-            created_at=pkg.created_at,
-        ))
-    return result
+    return [_package_to_info(pkg) for pkg in packages]
 
 
 @router.get("/info/{batch_id}", response_model=BatchInfoResponse)
@@ -58,23 +51,7 @@ def get_batch_info(
     pkg = db.query(Package).filter_by(id=batch_id).first()
     if pkg is None:
         raise HTTPException(status_code=404, detail="批次不存在")
-
-    total_words = (
-        db.query(PackageMeaning.meaning_id)
-        .filter_by(package_id=pkg.id)
-        .join(Word, PackageMeaning.meaning_id == Word.id)
-        .distinct()
-        .count()
-    )
-    return BatchInfoResponse(
-        id=str(pkg.id),
-        name=pkg.name,
-        status="completed",
-        total_words=total_words,
-        processed_words=total_words,
-        pass_rate=None,
-        created_at=pkg.created_at,
-    )
+    return _package_to_info(pkg)
 
 
 @router.post("/assign", response_model=BatchResponse | None)

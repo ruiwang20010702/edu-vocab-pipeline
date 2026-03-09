@@ -6,11 +6,60 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db, get_review_service, require_role
-from vocab_qc.api.schemas import ApproveRequest, ManualEditRequest, RegenerateResponse, ReviewItemResponse
+from vocab_qc.api.schemas.review import (
+    ApproveRequest,
+    EmbeddedContentItem,
+    EmbeddedIssue,
+    EmbeddedWord,
+    ManualEditRequest,
+    RegenerateResponse,
+    ReviewItemResponse,
+)
+from vocab_qc.core.models import ContentItem, QcRuleResult, Word
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services.review_service import ReviewService
 
 router = APIRouter(prefix="/api/reviews", tags=["审核"])
+
+
+def _enrich_review(db: Session, review) -> ReviewItemResponse:
+    """将 ORM ReviewItem 转为嵌套响应。"""
+    content_item = db.query(ContentItem).filter_by(id=review.content_item_id).first()
+    word = db.query(Word).filter_by(id=review.word_id).first()
+    issues = (
+        db.query(QcRuleResult)
+        .filter_by(content_item_id=review.content_item_id, passed=False)
+        .all()
+    )
+
+    return ReviewItemResponse(
+        id=review.id,
+        content_item_id=review.content_item_id,
+        word_id=review.word_id,
+        meaning_id=review.meaning_id,
+        dimension=review.dimension,
+        reason=review.reason,
+        priority=review.priority,
+        status=review.status,
+        resolution=review.resolution,
+        reviewer=review.reviewer,
+        review_note=review.review_note,
+        resolved_at=review.resolved_at,
+        created_at=review.created_at,
+        content_item=EmbeddedContentItem.model_validate(content_item) if content_item else None,
+        word=EmbeddedWord.model_validate(word) if word else None,
+        issues=[
+            EmbeddedIssue(
+                id=iss.id,
+                content_item_id=iss.content_item_id,
+                rule_code=iss.rule_id,
+                field=iss.dimension,
+                message=iss.detail or "",
+                severity="error",
+            )
+            for iss in issues
+        ],
+    )
 
 
 @router.get("", response_model=list[ReviewItemResponse])
@@ -24,22 +73,23 @@ def list_reviews(
 ):
     """获取待审核队列."""
     items = service.get_pending_reviews(db, dimension=dimension, limit=limit, offset=offset)
-    return [ReviewItemResponse.model_validate(item) for item in items]
+    return [_enrich_review(db, item) for item in items]
 
 
 @router.post("/{review_id}/approve", response_model=ReviewItemResponse)
 def approve_review(
     review_id: int,
-    request: ApproveRequest,
+    request: Optional[ApproveRequest] = None,
     db: Session = Depends(get_db),
     service: ReviewService = Depends(get_review_service),
     current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """通过审核."""
-    reviewer = request.reviewer or current_user.name
+    reviewer = (request.reviewer if request else None) or current_user.name
+    note = request.note if request else None
     try:
-        result = service.approve(db, review_id, reviewer=reviewer, note=request.note)
-        return ReviewItemResponse.model_validate(result)
+        result = service.approve(db, review_id, reviewer=reviewer, note=note)
+        return _enrich_review(db, result)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -76,9 +126,9 @@ def manual_edit(
             db,
             review_id,
             reviewer=reviewer,
-            new_content=request.resolved_content,
-            new_content_cn=request.resolved_content_cn,
+            new_content=request.content,
+            new_content_cn=request.content_cn,
         )
-        return ReviewItemResponse.model_validate(result)
+        return _enrich_review(db, result)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))

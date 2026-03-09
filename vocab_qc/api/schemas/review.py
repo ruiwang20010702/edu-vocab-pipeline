@@ -6,6 +6,37 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class EmbeddedWord(BaseModel):
+    id: int
+    word: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class EmbeddedContentItem(BaseModel):
+    id: int
+    word_id: int
+    meaning_id: Optional[int]
+    dimension: str
+    content: str
+    content_cn: Optional[str]
+    qc_status: str
+    retry_count: int
+
+    model_config = {"from_attributes": True}
+
+
+class EmbeddedIssue(BaseModel):
+    id: int
+    content_item_id: int
+    rule_code: str
+    field: str
+    message: str
+    severity: str
+
+
 class ReviewItemResponse(BaseModel):
     id: int
     content_item_id: int
@@ -20,6 +51,11 @@ class ReviewItemResponse(BaseModel):
     review_note: Optional[str]
     resolved_at: Optional[datetime]
     created_at: Optional[datetime]
+
+    # 嵌套对象 — 供前端直接使用
+    content_item: Optional[EmbeddedContentItem] = None
+    word: Optional[EmbeddedWord] = None
+    issues: list[EmbeddedIssue] = []
 
     model_config = {"from_attributes": True}
 
@@ -37,17 +73,5 @@ class RegenerateResponse(BaseModel):
 
 class ManualEditRequest(BaseModel):
     reviewer: Optional[str] = None
-    new_content: Optional[str] = None
-    new_content_cn: Optional[str] = None
-    # 兼容前端字段名
-    content: Optional[str] = None
+    content: str
     content_cn: Optional[str] = None
-
-    @property
-    def resolved_content(self) -> str:
-        """优先使用 content，其次 new_content。"""
-        return self.content or self.new_content or ""
-
-    @property
-    def resolved_content_cn(self) -> Optional[str]:
-        return self.content_cn or self.new_content_cn
