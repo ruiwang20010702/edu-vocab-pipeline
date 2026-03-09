@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Search, RefreshCw, Edit3, CheckCircle2, Loader2, X } from 'lucide-react'
+import { Search, RefreshCw, Edit3, CheckCircle2, Loader2, X, SkipForward, PackagePlus } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
-import type { ReviewItem } from '../types'
+import type { ReviewItem, ReviewBatch, BatchDetail } from '../types'
 
 interface Props {
   onBack: () => void
@@ -18,24 +18,79 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
   const [selectedItem, setSelectedItem] = useState<ReviewItem | null>(null)
   const [actionLoading, setActionLoading] = useState<number | null>(null)
 
-  const loadItems = async () => {
+  // 批次状态
+  const [batch, setBatch] = useState<ReviewBatch | null>(null)
+  const [batchLoading, setBatchLoading] = useState(true)
+  const [assignLoading, setAssignLoading] = useState(false)
+
+  const loadBatch = useCallback(async () => {
+    setBatchLoading(true)
+    try {
+      const data = await api.get<ReviewBatch | null>('/batches/current')
+      setBatch(data)
+    } catch {
+      setBatch(null)
+    } finally {
+      setBatchLoading(false)
+    }
+  }, [])
+
+  const loadItems = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.get<ReviewItem[]>('/reviews')
-      setItems(data)
+      if (batch) {
+        // 有批次时从批次加载
+        const detail = await api.get<BatchDetail>(`/batches/${batch.id}/words`)
+        // 同时加载完整审核列表以获取嵌套对象
+        const allReviews = await api.get<ReviewItem[]>('/reviews')
+        const reviewMap = new Map(allReviews.map(r => [r.id, r]))
+
+        // 从批次词汇中提取 review_id，匹配完整 ReviewItem
+        const batchReviewIds = new Set(
+          detail.words.flatMap(w => w.items.map(i => i.review_id))
+        )
+        setItems(allReviews.filter(r => batchReviewIds.has(r.id)))
+      } else {
+        // 无批次时加载全部待审
+        const data = await api.get<ReviewItem[]>('/reviews')
+        setItems(data)
+      }
     } catch {
       setItems([])
     } finally {
       setLoading(false)
     }
+  }, [batch])
+
+  useEffect(() => { loadBatch() }, [loadBatch])
+  useEffect(() => { if (!batchLoading) loadItems() }, [batchLoading, loadItems])
+
+  const handleAssign = async () => {
+    setAssignLoading(true)
+    try {
+      const data = await api.post<ReviewBatch | null>('/batches/assign')
+      setBatch(data)
+    } catch {
+      // ignore
+    } finally {
+      setAssignLoading(false)
+    }
   }
 
-  useEffect(() => { loadItems() }, [])
+  const handleSkipWord = async (wordId: number) => {
+    if (!batch) return
+    setActionLoading(wordId)
+    try {
+      await api.post(`/batches/${batch.id}/words/${wordId}/skip`)
+      setItems(prev => prev.filter(i => i.word_id !== wordId))
+    } catch { /* ignore */ }
+    finally { setActionLoading(null) }
+  }
 
   const filtered = items.filter(item => {
-    if (search && !item.word.word.toLowerCase().includes(search.toLowerCase())) return false
-    if (tab === 'can_retry' && item.content_item.retry_count >= 3) return false
-    if (tab === 'must_manual' && item.content_item.retry_count < 3) return false
+    if (search && !item.word?.word.toLowerCase().includes(search.toLowerCase())) return false
+    if (tab === 'can_retry' && item.content_item?.retry_count >= 3) return false
+    if (tab === 'must_manual' && item.content_item?.retry_count < 3) return false
     return true
   })
 
@@ -60,12 +115,59 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'all', label: `全部 (${items.length})` },
-    { key: 'can_retry', label: `可重试 (${items.filter(i => i.content_item.retry_count < 3).length})` },
-    { key: 'must_manual', label: `需手动 (${items.filter(i => i.content_item.retry_count >= 3).length})` },
+    { key: 'can_retry', label: `可重试 (${items.filter(i => i.content_item?.retry_count < 3).length})` },
+    { key: 'must_manual', label: `需手动 (${items.filter(i => i.content_item?.retry_count >= 3).length})` },
   ]
 
   return (
     <div className="space-y-4">
+      {/* 批次面板 */}
+      <div className="glass-card rounded-2xl p-4">
+        {batchLoading ? (
+          <div className="flex items-center gap-2 text-white/50">
+            <Loader2 size={16} className="animate-spin" />
+            <span className="text-sm">加载批次信息...</span>
+          </div>
+        ) : batch ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <PackagePlus size={18} className="text-blue-300" />
+                <span className="text-white font-medium">当前批次 #{batch.id}</span>
+              </div>
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-white/60">
+                  进度: <span className="text-white">{batch.reviewed_count}/{batch.word_count}</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded-lg text-xs ${
+                  batch.status === 'completed' ? 'bg-green-400/20 text-green-200' : 'bg-blue-400/20 text-blue-200'
+                }`}>
+                  {batch.status === 'completed' ? '已完成' : '进行中'}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => { setBatch(null); loadItems() }}
+              className="text-sm text-white/40 hover:text-white/70 transition-colors"
+            >
+              查看全部待审
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <span className="text-white/50 text-sm">暂无进行中的批次</span>
+            <button
+              onClick={handleAssign}
+              disabled={assignLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 rounded-xl transition-all text-sm font-medium disabled:opacity-50"
+            >
+              {assignLoading ? <Loader2 size={14} className="animate-spin" /> : <PackagePlus size={14} />}
+              领取批次
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* 搜索 + 过滤 */}
       <div className="flex items-center gap-3">
         <div className="flex-1 relative">
@@ -119,9 +221,9 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="font-bold text-white text-lg">{item.word.word}</span>
-                  <span className="ml-3 text-sm text-white/50">{item.content_item.dimension}</span>
-                  <span className="ml-2 text-xs text-white/40">重试 {item.content_item.retry_count}/3</span>
+                  <span className="font-bold text-white text-lg">{item.word?.word}</span>
+                  <span className="ml-3 text-sm text-white/50">{item.content_item?.dimension}</span>
+                  <span className="ml-2 text-xs text-white/40">重试 {item.content_item?.retry_count ?? 0}/3</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-1 rounded-lg text-xs ${
@@ -142,7 +244,7 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
                       >
                         <CheckCircle2 size={16} />
                       </button>
-                      {item.content_item.retry_count < 3 && (
+                      {item.content_item?.retry_count < 3 && (
                         <button
                           onClick={e => { e.stopPropagation(); handleRegenerate(item.id) }}
                           className="p-2 rounded-xl hover:bg-blue-400/20 text-blue-300 transition-colors"
@@ -158,6 +260,15 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
                       >
                         <Edit3 size={16} />
                       </button>
+                      {batch && (
+                        <button
+                          onClick={e => { e.stopPropagation(); handleSkipWord(item.word_id) }}
+                          className="p-2 rounded-xl hover:bg-white/10 text-white/40 transition-colors"
+                          title="跳过此词"
+                        >
+                          <SkipForward size={16} />
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -202,8 +313,8 @@ function ReviewDetailModal({
   onRegenerate: (id: number) => void
   onSaved: () => void
 }) {
-  const [editContent, setEditContent] = useState(item.content_item.content)
-  const [editContentCn, setEditContentCn] = useState(item.content_item.content_cn ?? '')
+  const [editContent, setEditContent] = useState(item.content_item?.content ?? '')
+  const [editContentCn, setEditContentCn] = useState(item.content_item?.content_cn ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -240,7 +351,7 @@ function ReviewDetailModal({
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-white">{item.word.word}</h3>
+          <h3 className="text-xl font-bold text-white">{item.word?.word}</h3>
           <button onClick={onClose} className="text-white/40 hover:text-white/80">
             <X size={20} />
           </button>
@@ -248,7 +359,7 @@ function ReviewDetailModal({
 
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-white/60 mb-1 block">维度: {item.content_item.dimension}</label>
+            <label className="text-sm text-white/60 mb-1 block">维度: {item.content_item?.dimension}</label>
             <label className="text-sm text-white/60 mb-1 block">原因: {item.reason}</label>
           </div>
 
@@ -279,7 +390,7 @@ function ReviewDetailModal({
               <div className="space-y-1">
                 {item.issues.map((issue, i) => (
                   <div key={i} className="text-sm bg-red-400/10 text-red-200 px-3 py-2 rounded-xl">
-                    <span className="font-mono text-xs text-red-300 mr-2">[{issue.rule_code}]</span>
+                    <span className="font-mono text-xs text-red-300 mr-2">[{issue.rule_id}]</span>
                     {issue.message}
                   </div>
                 ))}
@@ -296,12 +407,12 @@ function ReviewDetailModal({
             >
               通过
             </button>
-            {item.content_item.retry_count < 3 && (
+            {item.content_item?.retry_count < 3 && (
               <button
                 onClick={() => onRegenerate(item.id)}
                 className="flex-1 py-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 rounded-2xl transition-all text-sm font-medium"
               >
-                重新生成 ({item.content_item.retry_count}/3)
+                重新生成 ({item.content_item?.retry_count ?? 0}/3)
               </button>
             )}
             <button

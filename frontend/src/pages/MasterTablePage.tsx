@@ -1,8 +1,14 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Search, Download, ChevronLeft, ChevronRight, X, Loader2 } from 'lucide-react'
+import { Search, Download, ChevronLeft, ChevronRight, X, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { api } from '../lib/api'
 import type { WordDetail, PaginatedResponse } from '../types'
+
+interface ExportReadiness {
+  total_words: number
+  approved_words: number
+  ready: boolean
+}
 
 export default function MasterTablePage() {
   const [words, setWords] = useState<WordDetail[]>([])
@@ -10,7 +16,11 @@ export default function MasterTablePage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
-  const [selectedWord, setSelectedWord] = useState<WordDetail | null>(null)
+  const [selectedWordId, setSelectedWordId] = useState<number | null>(null)
+  const [detailWord, setDetailWord] = useState<WordDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [exportInfo, setExportInfo] = useState<ExportReadiness | null>(null)
+  const [exportLoading, setExportLoading] = useState(false)
   const limit = 50
 
   const loadWords = async () => {
@@ -34,6 +44,37 @@ export default function MasterTablePage() {
   const handleSearch = () => { setPage(1); loadWords() }
   const totalPages = Math.ceil(total / limit)
 
+  const handleOpenDetail = async (wordId: number) => {
+    setSelectedWordId(wordId)
+    setDetailLoading(true)
+    setDetailWord(null)
+    try {
+      const data = await api.get<WordDetail>(`/words/${wordId}`)
+      setDetailWord(data)
+    } catch {
+      setDetailWord(null)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const handleCloseDetail = () => {
+    setSelectedWordId(null)
+    setDetailWord(null)
+  }
+
+  const handleExport = async () => {
+    setExportLoading(true)
+    try {
+      const data = await api.get<ExportReadiness>('/export/readiness')
+      setExportInfo(data)
+    } catch {
+      setExportInfo(null)
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* 搜索 + 导出 */}
@@ -50,13 +91,50 @@ export default function MasterTablePage() {
           />
         </div>
         <button
-          onClick={() => api.get('/export/readiness')}
-          className="flex items-center gap-2 px-5 py-3 glass-module rounded-2xl text-white/70 hover:text-white transition-colors"
+          onClick={handleExport}
+          disabled={exportLoading}
+          className="flex items-center gap-2 px-5 py-3 glass-module rounded-2xl text-white/70 hover:text-white transition-colors disabled:opacity-50"
         >
-          <Download size={18} />
-          <span className="text-sm">导出</span>
+          {exportLoading ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+          <span className="text-sm">导出检查</span>
         </button>
       </div>
+
+      {/* 导出就绪状态 */}
+      <AnimatePresence>
+        {exportInfo && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="glass-card rounded-2xl p-4"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {exportInfo.ready ? (
+                  <CheckCircle2 size={20} className="text-green-300" />
+                ) : (
+                  <AlertTriangle size={20} className="text-yellow-300" />
+                )}
+                <div>
+                  <p className="text-white text-sm font-medium">
+                    {exportInfo.ready ? '数据就绪，可以导出' : '部分数据未审核通过'}
+                  </p>
+                  <p className="text-white/50 text-xs">
+                    已审核 {exportInfo.approved_words}/{exportInfo.total_words} 词
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setExportInfo(null)}
+                className="text-white/40 hover:text-white/70"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 表格 */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass-card rounded-3xl overflow-hidden">
@@ -83,15 +161,19 @@ export default function MasterTablePage() {
                   <tr
                     key={w.id}
                     className="border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors"
-                    onClick={() => setSelectedWord(w)}
+                    onClick={() => handleOpenDetail(w.id)}
                   >
                     <td className="px-6 py-3 text-white font-medium">{w.word}</td>
                     <td className="px-6 py-3 text-white/60 font-mono text-sm">{w.phonetics[0]?.ipa ?? '-'}</td>
                     <td className="px-6 py-3 text-white/60">{w.meanings.length}</td>
                     <td className="px-6 py-3">
-                      <span className="px-2 py-1 rounded-lg text-xs bg-green-400/20 text-green-200">approved</span>
+                      {w.issues.length > 0 ? (
+                        <span className="px-2 py-1 rounded-lg text-xs bg-red-400/20 text-red-200">有问题</span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-lg text-xs bg-green-400/20 text-green-200">正常</span>
+                      )}
                     </td>
-                    <td className="px-6 py-3 text-white/40 text-sm">{w.updated_at}</td>
+                    <td className="px-6 py-3 text-white/40 text-sm">{w.updated_at ? new Date(w.updated_at).toLocaleDateString() : '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -123,15 +205,19 @@ export default function MasterTablePage() {
 
       {/* 详情弹窗 */}
       <AnimatePresence>
-        {selectedWord && (
-          <WordDetailModal word={selectedWord} onClose={() => setSelectedWord(null)} />
+        {selectedWordId !== null && (
+          <WordDetailModal
+            word={detailWord}
+            loading={detailLoading}
+            onClose={handleCloseDetail}
+          />
         )}
       </AnimatePresence>
     </div>
   )
 }
 
-function WordDetailModal({ word, onClose }: { word: WordDetail; onClose: () => void }) {
+function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; loading: boolean; onClose: () => void }) {
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -147,50 +233,75 @@ function WordDetailModal({ word, onClose }: { word: WordDetail; onClose: () => v
         className="glass-card rounded-3xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-2xl font-bold text-white">{word.word}</h3>
-            {word.phonetics[0] && (
-              <p className="text-white/50 font-mono">{word.phonetics[0].ipa} · {word.phonetics[0].syllables}</p>
-            )}
+        {loading ? (
+          <div className="flex items-center justify-center h-40">
+            <Loader2 size={24} className="animate-spin text-white/50" />
           </div>
-          <button onClick={onClose} className="text-white/40 hover:text-white/80">
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* 义项 */}
-        <div className="space-y-4">
-          {word.meanings.map((m) => (
-            <div key={m.id} className="bg-white/5 rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="px-2 py-0.5 bg-blue-400/20 text-blue-200 rounded-lg text-xs">{m.pos}</span>
-                <span className="text-white">{m.definition}</span>
+        ) : !word ? (
+          <div className="text-center text-white/50 py-10">加载失败</div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-2xl font-bold text-white">{word.word}</h3>
+                {word.phonetics[0] && (
+                  <p className="text-white/50 font-mono">{word.phonetics[0].ipa} · {word.phonetics[0].syllables}</p>
+                )}
               </div>
-              {m.sources && m.sources.length > 0 && (
-                <p className="text-xs text-white/40">来源: {m.sources.map(s => s.source_name).join(', ')}</p>
-              )}
-              {m.chunk && (
-                <div className="mt-2 pl-3 border-l-2 border-blue-400/30">
-                  <p className="text-sm text-white/70">语块: {m.chunk.content}</p>
-                </div>
-              )}
-              {m.sentence && (
-                <div className="mt-1 pl-3 border-l-2 border-green-400/30">
-                  <p className="text-sm text-white/70">例句: {m.sentence.content}</p>
-                  {m.sentence.content_cn && <p className="text-sm text-white/50">{m.sentence.content_cn}</p>}
-                </div>
-              )}
+              <button onClick={onClose} className="text-white/40 hover:text-white/80">
+                <X size={20} />
+              </button>
             </div>
-          ))}
-        </div>
 
-        {/* 助记 */}
-        {word.mnemonic && (
-          <div className="mt-4 bg-yellow-400/10 rounded-2xl p-4">
-            <p className="text-sm text-yellow-200/80 font-medium mb-1">助记</p>
-            <p className="text-white/80">{word.mnemonic.content}</p>
-          </div>
+            {/* 义项 */}
+            <div className="space-y-4">
+              {word.meanings.map((m) => (
+                <div key={m.id} className="bg-white/5 rounded-2xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-2 py-0.5 bg-blue-400/20 text-blue-200 rounded-lg text-xs">{m.pos}</span>
+                    <span className="text-white">{m.definition}</span>
+                  </div>
+                  {m.sources && m.sources.length > 0 && (
+                    <p className="text-xs text-white/40">来源: {m.sources.map(s => s.source_name).join(', ')}</p>
+                  )}
+                  {m.chunk && m.chunk.content && (
+                    <div className="mt-2 pl-3 border-l-2 border-blue-400/30">
+                      <p className="text-sm text-white/70">语块: {m.chunk.content}</p>
+                    </div>
+                  )}
+                  {m.sentence && m.sentence.content && (
+                    <div className="mt-1 pl-3 border-l-2 border-green-400/30">
+                      <p className="text-sm text-white/70">例句: {m.sentence.content}</p>
+                      {m.sentence.content_cn && <p className="text-sm text-white/50">{m.sentence.content_cn}</p>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* 助记 */}
+            {word.mnemonic && word.mnemonic.content && (
+              <div className="mt-4 bg-yellow-400/10 rounded-2xl p-4">
+                <p className="text-sm text-yellow-200/80 font-medium mb-1">助记</p>
+                <p className="text-white/80">{word.mnemonic.content}</p>
+              </div>
+            )}
+
+            {/* 质检问题 */}
+            {word.issues.length > 0 && (
+              <div className="mt-4">
+                <p className="text-sm text-white/60 mb-2">质检问题 ({word.issues.length})</p>
+                <div className="space-y-1">
+                  {word.issues.map((issue, i) => (
+                    <div key={i} className="text-sm bg-red-400/10 text-red-200 px-3 py-2 rounded-xl">
+                      <span className="font-mono text-xs text-red-300 mr-2">[{issue.rule_id}]</span>
+                      {issue.message}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </motion.div>
     </motion.div>

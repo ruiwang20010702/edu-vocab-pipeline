@@ -49,7 +49,7 @@ export interface ContentItem {
 export interface QualityIssue {
   id: number
   content_item_id: number
-  rule_code: string
+  rule_id: string
   field: string
   message: string
   severity: string
@@ -58,12 +58,51 @@ export interface QualityIssue {
 export interface ReviewItem {
   id: number
   content_item_id: number
+  word_id: number
+  meaning_id: number | null
+  dimension: ContentDimension
   reason: string
+  priority: number
   status: 'pending' | 'in_progress' | 'resolved'
   resolution: string | null
+  reviewer: string | null
+  review_note: string | null
+  resolved_at: string | null
+  created_at: string | null
   content_item: ContentItem
   word: Word
   issues: QualityIssue[]
+}
+
+/* ===== 审核批次类型 ===== */
+
+export interface ReviewBatch {
+  id: number
+  user_id: number
+  status: string
+  word_count: number
+  reviewed_count: number
+  created_at: string | null
+  completed_at: string | null
+}
+
+export interface BatchWordItem {
+  review_id: number
+  content_item_id: number
+  dimension: string
+  reason: string
+  status: string
+  resolution: string | null
+}
+
+export interface BatchWordGroup {
+  word_id: number
+  items: BatchWordItem[]
+}
+
+export interface BatchDetail {
+  batch: ReviewBatch
+  words: BatchWordGroup[]
 }
 
 /* ===== 聚合视图类型 ===== */
