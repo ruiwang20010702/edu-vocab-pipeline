@@ -49,7 +49,7 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
     session.add(batch)
     session.flush()
 
-    # 分配这些词的所有 ReviewItems
+    # 分配这些词的所有 ReviewItems（二次检查 assigned_to_id 防并发）
     items = (
         session.query(ReviewItem)
         .filter(ReviewItem.word_id.in_(word_ids))
@@ -57,9 +57,19 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
         .filter(ReviewItem.assigned_to_id.is_(None))
         .all()
     )
+    if not items:
+        # 并发场景下所有词已被他人领走
+        session.delete(batch)
+        session.flush()
+        return None
+
     for item in items:
         item.batch_id = batch.id
         item.assigned_to_id = user_id
+
+    # 更新实际分配到的词数（可能比查询时少）
+    actual_word_ids = {item.word_id for item in items}
+    batch.word_count = len(actual_word_ids)
 
     session.flush()
     return batch

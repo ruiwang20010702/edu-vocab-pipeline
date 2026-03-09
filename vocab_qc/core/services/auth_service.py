@@ -67,10 +67,7 @@ def create_jwt(user: User) -> str:
 
 def decode_jwt(token: str) -> dict[str, Any]:
     """解析并验证 JWT。无效时抛出 JWTError。"""
-    try:
-        return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-    except JWTError:
-        raise
+    return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
 
 
 def send_email(to: str, code: str) -> None:

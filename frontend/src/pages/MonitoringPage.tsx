@@ -23,8 +23,8 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
         if (b.status === 'completed' || b.status === 'failed') {
           clearInterval(pollingRef.current)
         }
-      } catch {
-        // ignore
+      } catch (e) {
+        console.error('轮询批次状态失败', e)
       }
     }
 

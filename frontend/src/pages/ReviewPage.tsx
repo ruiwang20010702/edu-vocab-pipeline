@@ -28,7 +28,8 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
     try {
       const data = await api.get<ReviewBatch | null>('/batches/current')
       setBatch(data)
-    } catch {
+    } catch (e) {
+      console.error('加载批次信息失败', e)
       setBatch(null)
     } finally {
       setBatchLoading(false)
@@ -55,7 +56,8 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
         const data = await api.get<ReviewItem[]>('/reviews')
         setItems(data)
       }
-    } catch {
+    } catch (e) {
+      console.error('加载审核列表失败', e)
       setItems([])
     } finally {
       setLoading(false)
@@ -70,8 +72,8 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
     try {
       const data = await api.post<ReviewBatch | null>('/batches/assign')
       setBatch(data)
-    } catch {
-      // ignore
+    } catch (e) {
+      console.error('领取批次失败', e)
     } finally {
       setAssignLoading(false)
     }
@@ -83,7 +85,7 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
     try {
       await api.post(`/batches/${batch.id}/words/${wordId}/skip`)
       setItems(prev => prev.filter(i => i.word_id !== wordId))
-    } catch { /* ignore */ }
+    } catch (e) { console.error('跳过单词失败', e) }
     finally { setActionLoading(null) }
   }
 
@@ -100,7 +102,7 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
       await api.post(`/reviews/${id}/approve`)
       setItems(prev => prev.filter(i => i.id !== id))
       if (selectedItem?.id === id) setSelectedItem(null)
-    } catch { /* ignore */ }
+    } catch (e) { console.error('审核通过失败', e) }
     finally { setActionLoading(null) }
   }
 
@@ -109,7 +111,7 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
     try {
       await api.post(`/reviews/${id}/regenerate`)
       await loadItems()
-    } catch { /* ignore */ }
+    } catch (e) { console.error('重新生成失败', e) }
     finally { setActionLoading(null) }
   }
 

@@ -1,6 +1,8 @@
 """内容生成器基类."""
 
 import json
+import logging
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -36,7 +38,6 @@ class ContentGenerator:
             if prompt and prompt.content:
                 return prompt.content
         except Exception:
-            import logging
             logging.getLogger(__name__).warning("从数据库获取自定义 Prompt 失败", exc_info=True)
         return None
 
@@ -86,8 +87,6 @@ class ContentGenerator:
             except Exception as e:
                 last_error = e
                 if attempt < settings.ai_max_retries - 1:
-                    import time
-
                     time.sleep(2**attempt)
 
         raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")

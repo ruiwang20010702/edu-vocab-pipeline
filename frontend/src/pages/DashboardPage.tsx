@@ -22,8 +22,8 @@ export default function DashboardPage({ onViewBatch }: Props) {
         ])
         setStats(s)
         setBatches(b)
-      } catch {
-        // 后端尚未实现时 fallback
+      } catch (e) {
+        console.error('加载仪表板数据失败', e)
         setStats({ total_words: 0, approved_count: 0, pending_count: 0, rejected_count: 0, pass_rate: 0 })
         setBatches([])
       } finally {
