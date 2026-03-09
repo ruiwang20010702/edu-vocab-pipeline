@@ -34,6 +34,12 @@ export default function ImportPage({ onStartProduction }: Props) {
       fd.append('batch_name', batchName.trim())
       fd.append('model', model)
       const res = await api.upload<{ batch_id: string }>('/import', fd)
+      // 导入成功后触发生产流水线
+      try {
+        await api.post(`/batches/${res.batch_id}/produce`)
+      } catch {
+        // 生产触发失败不阻塞跳转，监控页会显示状态
+      }
       onStartProduction(res.batch_id)
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : '导入失败')

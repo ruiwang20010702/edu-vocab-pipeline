@@ -15,6 +15,7 @@ from vocab_qc.api.schemas.batch_info import BatchInfoResponse
 from vocab_qc.core.models.package_layer import Package
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import batch_service
+from vocab_qc.core.services.production_service import run_production
 
 router = APIRouter(prefix="/api/batches", tags=["批次"])
 
@@ -126,6 +127,25 @@ def skip_word(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"message": "已跳过"}
+
+
+@router.post("/{batch_id}/produce")
+def produce_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """触发生产流水线: 生成内容→Layer1 质检→失败项入队审核。"""
+    pkg = db.query(Package).filter_by(id=batch_id).first()
+    if pkg is None:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    if pkg.status == "processing":
+        raise HTTPException(status_code=409, detail="该批次正在生产中")
+    try:
+        result = run_production(db, batch_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats", response_model=BatchStatsResponse)
