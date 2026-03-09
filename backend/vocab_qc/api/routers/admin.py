@@ -25,6 +25,7 @@ def create_user(
     if existing:
         raise HTTPException(status_code=409, detail="邮箱已注册")
     user = user_service.create_user(db, email=request.email, name=request.name, role=request.role)
+    db.commit()
     return UserResponse.model_validate(user)
 
 

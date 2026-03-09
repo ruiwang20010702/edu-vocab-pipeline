@@ -31,6 +31,12 @@ _GENERATORS = {
 }
 
 
+# TODO(perf): 当前 run_production 在单个 session 事务中执行所有操作（包括 AI 调用），
+# 会导致长事务占用数据库连接。应拆分为多个独立 session：
+# 1. session1: 生成内容 → commit
+# 2. session2: Layer 1 质检 → commit
+# 3. session3: Layer 2 AI 质检 → commit
+# 每步失败后需将 Package.status 标记为 failed。
 def run_production(
     session: Session,
     package_id: int,

@@ -30,6 +30,15 @@ class ReviewService:
         if review.assigned_to_id is not None and user_id is not None and review.assigned_to_id != user_id:
             raise ValueError("该审核项已分配给其他审核员")
 
+    def _lock_review_item(self, session: Session, review_id: int) -> ReviewItem:
+        """查询并锁定审核项（PostgreSQL 用 FOR UPDATE，SQLite 跳过）。"""
+        query = session.query(ReviewItem).filter_by(id=review_id)
+        dialect = session.bind.dialect.name if session.bind else ""
+        if dialect == "postgresql":
+            query = query.with_for_update()
+        review = query.one()
+        return review
+
     def create_review_item(
         self,
         session: Session,
@@ -38,6 +47,14 @@ class ReviewService:
         priority: int = 0,
     ) -> ReviewItem:
         """创建审核项（入队）."""
+        # 防止重复入队：已有 pending 项则直接返回
+        existing = session.query(ReviewItem).filter_by(
+            content_item_id=content_item.id,
+            status=ReviewStatus.PENDING.value,
+        ).first()
+        if existing:
+            return existing
+
         review = ReviewItem(
             content_item_id=content_item.id,
             word_id=content_item.word_id,
@@ -60,7 +77,7 @@ class ReviewService:
         user_id: Optional[int] = None,
     ) -> ReviewItem:
         """通过审核."""
-        review = session.query(ReviewItem).filter_by(id=review_id).one()
+        review = self._lock_review_item(session, review_id)
         self._check_concurrency(review, user_id)
 
         content_item = session.query(ContentItem).filter_by(id=review.content_item_id).one()
@@ -100,7 +117,7 @@ class ReviewService:
         Returns:
             {"success": bool, "retry_count": int, "message": str}
         """
-        review = session.query(ReviewItem).filter_by(id=review_id).one()
+        review = self._lock_review_item(session, review_id)
         self._check_concurrency(review, user_id)
 
         content_item = session.query(ContentItem).filter_by(id=review.content_item_id).one()
@@ -108,19 +125,18 @@ class ReviewService:
         # 获取或创建重试计数器
         counter = self._get_or_create_counter(session, content_item)
 
-        if counter.count >= self.max_retries:
+        # 原子递增计数 + 上限检查（单条 UPDATE 防止并发重试超限）
+        result = session.execute(
+            update(RetryCounter)
+            .where(RetryCounter.id == counter.id, RetryCounter.count < self.max_retries)
+            .values(count=RetryCounter.count + 1, last_retry_at=datetime.now(UTC))
+        )
+        if result.rowcount == 0:
             return {
                 "success": False,
                 "retry_count": counter.count,
-                "message": f"已达到最大重试次数({self.max_retries})，请使用人工修改",
+                "message": "已达到最大重试次数，请手动修改",
             }
-
-        # 原子递增计数（防止并发重试超限）
-        session.execute(
-            update(RetryCounter)
-            .where(RetryCounter.id == counter.id)
-            .values(count=RetryCounter.count + 1, last_retry_at=datetime.now(UTC))
-        )
         session.refresh(counter)
         content_item.retry_count = counter.count
 
@@ -157,7 +173,7 @@ class ReviewService:
         user_id: Optional[int] = None,
     ) -> ReviewItem:
         """人工修改内容."""
-        review = session.query(ReviewItem).filter_by(id=review_id).one()
+        review = self._lock_review_item(session, review_id)
         self._check_concurrency(review, user_id)
 
         content_item = session.query(ContentItem).filter_by(id=review.content_item_id).one()

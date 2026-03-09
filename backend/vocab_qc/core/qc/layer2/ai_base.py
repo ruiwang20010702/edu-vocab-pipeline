@@ -40,6 +40,13 @@ class AiClient:
         self.model = model or settings.ai_model
         self.max_retries = max_retries
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._http_client = httpx.AsyncClient(
+            timeout=60.0,
+            limits=httpx.Limits(
+                max_connections=max_concurrency,
+                max_keepalive_connections=max_concurrency,
+            ),
+        )
 
     async def check(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         """发送 AI 校验请求，返回 JSON 结果."""
@@ -62,24 +69,23 @@ class AiClient:
             logger.warning("AI API 未配置，占位模式跳过校验")
             return {"passed": True, "detail": "占位模式 - 未配置 AI API"}
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            return json.loads(content)
+        response = await self._http_client.post(
+            f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        return json.loads(content)
 
 
 class AiRuleChecker:

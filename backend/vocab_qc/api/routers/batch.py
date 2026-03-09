@@ -1,9 +1,13 @@
 """批次派发 API 路由."""
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db, require_role
+from vocab_qc.api.routers.auth import limiter
 from vocab_qc.api.schemas.batch import (
     BatchDetailResponse,
     BatchResponse,
@@ -13,6 +17,7 @@ from vocab_qc.api.schemas.batch import (
     ProduceResponse,
 )
 from vocab_qc.api.schemas.batch_info import BatchInfoResponse
+from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.package_layer import Package
 from vocab_qc.core.models.user import User
 import logging
@@ -23,6 +28,9 @@ from vocab_qc.core.services.production_service import run_production
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/batches", tags=["批次"])
+
+# 线程池用于在后台执行同步生产任务，避免阻塞事件循环
+_production_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="production")
 
 
 def _package_to_info(pkg: Package) -> BatchInfoResponse:
@@ -70,6 +78,7 @@ def assign_batch(
     batch = batch_service.assign_batch(db, user_id=current_user.id, batch_size=batch_size)
     if batch is None:
         return None
+    db.commit()
     return BatchResponse.model_validate(batch)
 
 
@@ -89,9 +98,15 @@ def get_current_batch(
 def get_batch_words(
     batch_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """获取批次中的单词和审核项。"""
+    # 权限校验：reviewer 只能查看自己的批次，admin 可查看所有
+    if current_user.role != "admin":
+        review_batch = db.query(ReviewBatch).filter_by(id=batch_id).first()
+        if review_batch and review_batch.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="无权查看此批次")
+
     try:
         data = batch_service.get_batch_words(db, batch_id)
     except Exception:
@@ -119,6 +134,15 @@ def get_batch_words(
     return BatchDetailResponse(batch=batch_resp, words=words_resp)
 
 
+@router.get("/stats", response_model=BatchStatsResponse)
+def get_stats(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """审核进度统计。"""
+    return batch_service.get_stats(db)
+
+
 @router.post("/{batch_id}/words/{word_id}/skip")
 def skip_word(
     batch_id: int,
@@ -131,6 +155,7 @@ def skip_word(
         batch_service.skip_word(db, batch_id, word_id, user_id=current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
     return {"message": "已跳过"}
 
 
@@ -156,8 +181,16 @@ def _run_production_bg(batch_id: int) -> None:
         session.close()
 
 
+async def _run_production_bg_async(batch_id: int) -> None:
+    """将同步生产任务包装到线程池执行，避免阻塞事件循环。"""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_production_executor, _run_production_bg, batch_id)
+
+
 @router.post("/{batch_id}/produce", response_model=ProduceResponse)
+@limiter.limit("5/minute")
 def produce_batch(
+    request: Request,
     batch_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -170,14 +203,6 @@ def produce_batch(
     if pkg.status == "processing":
         raise HTTPException(status_code=409, detail="该批次正在生产中")
     pkg.status = "processing"
-    background_tasks.add_task(_run_production_bg, batch_id)
+    db.commit()
+    background_tasks.add_task(_run_production_bg_async, batch_id)
     return ProduceResponse(batch_id=batch_id, status="processing")
-
-
-@router.get("/stats", response_model=BatchStatsResponse)
-def get_stats(
-    db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
-):
-    """审核进度统计。"""
-    return batch_service.get_stats(db)

@@ -3,11 +3,12 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db, get_review_service, require_role
+from vocab_qc.api.routers.auth import limiter
 from vocab_qc.api.schemas.review import (
     ApproveRequest,
     EmbeddedContentItem,
@@ -102,7 +103,7 @@ def _enrich_review(db: Session, review) -> ReviewItemResponse:
 @router.get("", response_model=ReviewListResponse)
 def list_reviews(
     dimension: Optional[str] = Query(default=None),
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     service: ReviewService = Depends(get_review_service),
@@ -130,6 +131,7 @@ def approve_review(
     note = request.note if request else None
     try:
         result = service.approve(db, review_id, reviewer=current_user.name, note=note, user_id=current_user.id)
+        db.commit()
         return _enrich_review(db, result)
     except NoResultFound:
         raise HTTPException(status_code=404, detail="审核项不存在")
@@ -141,7 +143,9 @@ def approve_review(
 
 
 @router.post("/{review_id}/regenerate", response_model=RegenerateResponse)
+@limiter.limit("20/minute")
 def regenerate(
+    request: Request,
     review_id: int,
     db: Session = Depends(get_db),
     service: ReviewService = Depends(get_review_service),
@@ -150,6 +154,7 @@ def regenerate(
     """触发重新生成（≤3次）."""
     try:
         result = service.regenerate(db, review_id, reviewer=current_user.name, user_id=current_user.id)
+        db.commit()
         return RegenerateResponse(**result)
     except NoResultFound:
         raise HTTPException(status_code=404, detail="审核项不存在")
@@ -178,6 +183,7 @@ def manual_edit(
             new_content_cn=request.content_cn,
             user_id=current_user.id,
         )
+        db.commit()
         return _enrich_review(db, result)
     except NoResultFound:
         raise HTTPException(status_code=404, detail="审核项不存在")

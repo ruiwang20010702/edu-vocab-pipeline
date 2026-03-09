@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -25,6 +26,7 @@ class QcRun(Base):
 
     __tablename__ = "qc_runs"
 
+    # TODO: 考虑迁移到 PostgreSQL 原生 UUID 类型（16字节 vs String(36) 的36字节）
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     layer: Mapped[int] = mapped_column(Integer, nullable=False)
     scope: Mapped[str] = mapped_column(String(100), nullable=False, default="all")
@@ -33,8 +35,8 @@ class QcRun(Base):
     total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     passed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
 
     rule_results: Mapped[list["QcRuleResult"]] = relationship(back_populates="run_rel")
@@ -52,7 +54,7 @@ class QcRuleResult(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id"), nullable=False, index=True)
     word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
-    meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id"), nullable=True)
+    meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id"), nullable=True, index=True)
     dimension: Mapped[str] = mapped_column(String(20), nullable=False)
     rule_id: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     layer: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -62,7 +64,7 @@ class QcRuleResult(Base):
     ai_strategy: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     prompt_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     run_id: Mapped[str] = mapped_column(ForeignKey("qc_runs.id"), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     content_item_rel: Mapped["ContentItem"] = relationship("ContentItem", back_populates="rule_results")
     run_rel: Mapped["QcRun"] = relationship(back_populates="rule_results")
@@ -96,12 +98,12 @@ class RetryCounter(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
-    meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id"), nullable=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("words.id", ondelete="CASCADE"), nullable=False, index=True)
+    meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id", ondelete="CASCADE"), nullable=True)
     dimension: Mapped[str] = mapped_column(String(20), nullable=False)
     count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
-    last_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return f"<RetryCounter word={self.word_id} dim={self.dimension} count={self.count}>"
@@ -113,6 +115,7 @@ class ReviewItem(Base):
     __tablename__ = "review_items"
     __table_args__ = (
         Index("ix_review_items_status_assigned", "status", "assigned_to_id"),
+        CheckConstraint("status IN ('pending', 'in_progress', 'resolved')", name="ck_review_items_status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -126,8 +129,8 @@ class ReviewItem(Base):
     resolution: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     reviewer: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Phase 3: 批次派发字段（nullable，向后兼容）
     batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("review_batches.id"), nullable=True, index=True)
@@ -143,16 +146,17 @@ class AuditLogV2(Base):
     """增强版审计日志."""
 
     __tablename__ = "audit_logs_v2"
+    __table_args__ = (Index("ix_audit_entity", "entity_type", "entity_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     actor: Mapped[str] = mapped_column(String(100), nullable=False)
     old_value: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     new_value: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     metadata_: Mapped[Optional[dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:
         return f"<AuditLogV2 {self.entity_type}#{self.entity_id} {self.action}>"

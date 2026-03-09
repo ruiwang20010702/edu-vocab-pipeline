@@ -1,9 +1,15 @@
 """Prompt API 响应模型."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
+
+_DIMENSION_LITERAL = Literal[
+    "meaning", "phonetic", "syllable", "chunk", "sentence",
+    "mnemonic_root_affix", "mnemonic_word_in_word",
+    "mnemonic_sound_meaning", "mnemonic_exam_app",
+]
 
 
 class PromptResponse(BaseModel):
@@ -23,8 +29,8 @@ class PromptResponse(BaseModel):
 
 class PromptCreateRequest(BaseModel):
     name: str
-    category: str  # generation / qa
-    dimension: str  # chunk / sentence / mnemonic
+    category: Literal["generation", "quality"]
+    dimension: _DIMENSION_LITERAL
     model: str = "gpt-4o-mini"
     content: str = ""
 

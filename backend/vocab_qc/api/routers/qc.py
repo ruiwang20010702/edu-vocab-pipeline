@@ -13,7 +13,7 @@ from vocab_qc.core.services.qc_service import QcService
 router = APIRouter(prefix="/api/qc", tags=["质检"])
 
 
-@router.post("/run", response_model=QcRunResponse)
+@router.post("/run")
 def run_qc(
     request: QcRunRequest,
     db: Session = Depends(get_db),
@@ -21,8 +21,13 @@ def run_qc(
     _current_user: User = Depends(require_role("admin")),
 ):
     """触发质检运行."""
-    result = qc_service.run_layer1(db, scope=request.scope, dimension=request.dimension)
-    return QcRunResponse(**result)
+    results: dict = {}
+    if 1 in request.layers:
+        results["layer1"] = qc_service.run_layer1(db, scope=request.scope, dimension=request.dimension)
+    if 2 in request.layers:
+        results["layer2"] = qc_service.run_layer2(db, scope=request.scope, dimension=request.dimension)
+    db.commit()
+    return results
 
 
 @router.get("/runs/{run_id}", response_model=QcRunDetail)
@@ -35,7 +40,7 @@ def get_run_detail(
     """查看运行详情."""
     qc_run = qc_service.get_run(db, run_id)
     if not qc_run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail="质检运行记录不存在")
     return QcRunDetail.model_validate(qc_run)
 
 

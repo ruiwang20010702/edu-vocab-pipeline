@@ -2,11 +2,13 @@
 
 import json
 import logging
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_db, require_role
+from vocab_qc.api.routers.auth import limiter
 from vocab_qc.api.schemas.import_ import ImportResponse
 from vocab_qc.core.config import settings
 from vocab_qc.core.models.user import User
@@ -18,7 +20,9 @@ router = APIRouter(prefix="/api", tags=["导入"])
 
 
 @router.post("/import", response_model=ImportResponse)
+@limiter.limit("10/minute")
 def import_file(
+    request: Request,
     file: UploadFile,
     batch_name: str = "",
     model: str = "gpt-4o-mini",
@@ -36,8 +40,11 @@ def import_file(
     if not content:
         raise HTTPException(status_code=400, detail="文件为空")
 
+    # 文件名净化：去除路径遍历字符
+    safe_filename = Path(file.filename).name
+
     # 内容嗅探：验证文件内容与扩展名匹配
-    filename_lower = file.filename.lower()
+    filename_lower = safe_filename.lower()
     if filename_lower.endswith(".json"):
         try:
             json.loads(content)
@@ -50,17 +57,19 @@ def import_file(
             raise HTTPException(status_code=400, detail="文件内容不是有效的 CSV（非 UTF-8 编码）")
 
     if not batch_name.strip():
-        batch_name = file.filename.rsplit(".", 1)[0]
+        batch_name = (safe_filename.rsplit(".", 1)[0])[:100] or "未命名批次"
 
     try:
-        data = import_service.parse_upload(content, file.filename)
+        data = import_service.parse_upload(content, safe_filename)
         result = import_service.import_from_json(db, data, batch_name.strip())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        status = 409 if "不可重复导入" in str(e) else 400
+        raise HTTPException(status_code=status, detail=str(e))
     except Exception:
         logger.exception("导入失败")
         raise HTTPException(status_code=500, detail="导入失败，请稍后重试")
 
+    db.commit()
     return ImportResponse(
         batch_id=result["batch_id"],
         word_count=result["word_count"],

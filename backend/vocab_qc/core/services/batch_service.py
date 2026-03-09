@@ -26,54 +26,47 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
     if existing is not None:
         return existing
 
-    # 找出所有 pending 且未分配的 word_id
-    query = (
+    # Step 1: 查 word_ids（不加锁，DISTINCT 不兼容 FOR UPDATE）
+    word_ids = [
+        row[0] for row in
         session.query(distinct(ReviewItem.word_id))
         .filter_by(status=ReviewStatus.PENDING.value)
         .filter(ReviewItem.assigned_to_id.is_(None))
         .limit(batch_size)
-    )
-    # PostgreSQL: FOR UPDATE SKIP LOCKED 防并发碰撞
-    dialect = session.bind.dialect.name if session.bind else ""
-    if dialect == "postgresql":
-        query = query.with_for_update(skip_locked=True)
-    available_word_ids = query.all()
-    word_ids = [row[0] for row in available_word_ids]
-
+        .all()
+    ]
     if not word_ids:
         return None
 
+    # Step 2: 锁定具体的 ReviewItem 行
+    query = (
+        session.query(ReviewItem)
+        .filter(ReviewItem.word_id.in_(word_ids))
+        .filter_by(status=ReviewStatus.PENDING.value)
+        .filter(ReviewItem.assigned_to_id.is_(None))
+    )
+    dialect = session.bind.dialect.name if session.bind else ""
+    if dialect == "postgresql":
+        query = query.with_for_update(skip_locked=True)
+    items = query.all()
+    if not items:
+        # 并发场景下所有词已被他人领走
+        return None
+
     # 创建批次
+    actual_word_ids = {item.word_id for item in items}
     batch = ReviewBatch(
         user_id=user_id,
         status=BatchStatus.IN_PROGRESS.value,
-        word_count=len(word_ids),
+        word_count=len(actual_word_ids),
         reviewed_count=0,
     )
     session.add(batch)
     session.flush()
 
-    # 分配这些词的所有 ReviewItems（二次检查 assigned_to_id 防并发）
-    items = (
-        session.query(ReviewItem)
-        .filter(ReviewItem.word_id.in_(word_ids))
-        .filter_by(status=ReviewStatus.PENDING.value)
-        .filter(ReviewItem.assigned_to_id.is_(None))
-        .all()
-    )
-    if not items:
-        # 并发场景下所有词已被他人领走
-        session.delete(batch)
-        session.flush()
-        return None
-
     for item in items:
         item.batch_id = batch.id
         item.assigned_to_id = user_id
-
-    # 更新实际分配到的词数（可能比查询时少）
-    actual_word_ids = {item.word_id for item in items}
-    batch.word_count = len(actual_word_ids)
 
     session.flush()
     return batch
@@ -154,17 +147,14 @@ def update_batch_progress(session: Session, batch_id: int) -> None:
     )
     all_word_ids = {row[0] for row in total_word_ids}
 
-    # 统计每个 word_id 是否全部审完（不是 pending）
-    reviewed_count = 0
-    for word_id in all_word_ids:
-        pending_count = (
-            session.query(func.count())
-            .select_from(ReviewItem)
-            .filter_by(batch_id=batch_id, word_id=word_id, status=ReviewStatus.PENDING.value)
-            .scalar()
-        )
-        if pending_count == 0:
-            reviewed_count += 1
+    # 单条聚合查询：一次查出每个 word_id 的 pending 数量
+    pending_counts = dict(
+        session.query(ReviewItem.word_id, func.count())
+        .filter_by(batch_id=batch_id, status=ReviewStatus.PENDING.value)
+        .group_by(ReviewItem.word_id)
+        .all()
+    )
+    reviewed_count = sum(1 for wid in all_word_ids if wid not in pending_counts)
 
     batch.reviewed_count = reviewed_count
 

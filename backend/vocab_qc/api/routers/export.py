@@ -21,7 +21,7 @@ def export_word(
     service = ExportService()
     data = service.export_word(db, word_id)
     if not data:
-        raise HTTPException(status_code=404, detail="Word not found")
+        raise HTTPException(status_code=404, detail="单词不存在")
     return data
 
 

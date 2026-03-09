@@ -1,7 +1,7 @@
 """用户相关 Pydantic 模型."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr
 class CreateUserRequest(BaseModel):
     email: EmailStr
     name: str
-    role: str = "reviewer"
+    role: Literal["admin", "reviewer", "viewer"] = "reviewer"
 
 
 class UserResponse(BaseModel):

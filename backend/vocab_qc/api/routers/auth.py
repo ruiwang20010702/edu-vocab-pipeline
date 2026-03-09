@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -24,7 +26,12 @@ def send_code(request: Request, body: SendCodeRequest, db: Session = Depends(get
         raise HTTPException(status_code=400, detail="邮箱域名不在白名单中")
 
     code = auth_service.generate_code(db, body.email)
-    auth_service.send_email(body.email, code)
+    try:
+        auth_service.send_email(body.email, code)
+    except Exception:
+        logging.getLogger(__name__).warning("验证码发送失败", exc_info=True)
+        raise HTTPException(status_code=503, detail="验证码发送失败，请稍后重试")
+    db.commit()
     return {"message": "验证码已发送"}
 
 
@@ -45,6 +52,7 @@ def verify(request: Request, body: VerifyRequest, db: Session = Depends(get_db))
     db.flush()
 
     token = auth_service.create_jwt(user)
+    db.commit()
     return TokenResponse(
         access_token=token,
         user_name=user.name,

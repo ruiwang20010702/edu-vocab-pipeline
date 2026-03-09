@@ -10,6 +10,7 @@ from typing import Any
 
 import jwt
 from jwt.exceptions import InvalidTokenError as JWTError  # noqa: F401
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.config import settings
@@ -31,6 +32,13 @@ def validate_email_domain(email: str) -> bool:
 
 def generate_code(session: Session, email: str) -> str:
     """生成 6 位验证码，hash 后存入数据库，返回明文用于发送。"""
+    # 清理该邮箱的过期验证码
+    now = datetime.now(UTC)
+    session.query(VerificationCode).filter(
+        VerificationCode.email == email,
+        VerificationCode.expires_at < now,
+    ).delete(synchronize_session=False)
+
     code = "".join(secrets.choice(string.digits) for _ in range(6))
     expires_at = datetime.now(UTC) + timedelta(minutes=settings.verification_code_expire_minutes)
     record = VerificationCode(
@@ -61,16 +69,18 @@ def verify_code(session: Session, email: str, code: str) -> bool:
     if record is None:
         return False
 
-    # 尝试次数限制
-    attempts = getattr(record, "attempts", 0) or 0
-    if attempts >= _MAX_VERIFY_ATTEMPTS:
+    # 原子递增尝试次数 + 上限检查
+    result = session.execute(
+        update(VerificationCode)
+        .where(VerificationCode.id == record.id, VerificationCode.attempts < _MAX_VERIFY_ATTEMPTS)
+        .values(attempts=VerificationCode.attempts + 1)
+    )
+    if result.rowcount == 0:
         return False
-
-    record.attempts = attempts + 1
+    session.flush()
 
     code_hash = _hash_code(code)
     if record.code != code_hash:
-        session.flush()
         return False
 
     record.used = True
@@ -98,7 +108,7 @@ def decode_jwt(token: str) -> dict[str, Any]:
 def send_email(to: str, code: str) -> None:
     """通过 SMTP 发送验证码邮件。"""
     if not settings.smtp_host:
-        return
+        raise RuntimeError("SMTP 未配置，无法发送验证码")
 
     subject = "词汇质检系统 - 登录验证码"
     body = f"您的验证码是：{code}\n\n有效期 {settings.verification_code_expire_minutes} 分钟。"

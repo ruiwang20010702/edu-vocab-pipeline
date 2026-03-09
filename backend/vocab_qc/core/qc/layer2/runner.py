@@ -75,9 +75,9 @@ class Layer2Runner:
         strategy: AiStrategy,
         extra_kwargs: dict[int, dict],
     ) -> dict[int, list[RuleResult]]:
-        """纯 AI 调用，不涉及 session 操作。"""
-        results_map: dict[int, list[RuleResult]] = {}
-        for item in items:
+        """纯 AI 调用，不涉及 session 操作。并发执行所有 item 检查。"""
+
+        async def _check_one(item: ContentItem) -> tuple[int, list[RuleResult]]:
             word_text = word_texts.get(item.word_id, "")
             meaning_text = meaning_texts.get(item.meaning_id, "") if item.meaning_id else None
             extra = extra_kwargs.get(item.id, {})
@@ -86,7 +86,17 @@ class Layer2Runner:
                 results = await self.check_item_per_rule(item, word_text, meaning_text, **extra)
             else:
                 results = await self.check_item_unified(item, word_text, meaning_text, **extra)
-            results_map[item.id] = results
+            return item.id, results
+
+        tasks = [_check_one(item) for item in items]
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+
+        results_map: dict[int, list[RuleResult]] = {}
+        for r in gathered:
+            if isinstance(r, Exception):
+                continue  # 跳过失败的，AiClient 已有 semaphore 控制并发度
+            item_id, item_results = r
+            results_map[item_id] = item_results
         return results_map
 
     def _save_results(

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class EmbeddedWord(BaseModel):
@@ -78,5 +78,5 @@ class ReviewListResponse(BaseModel):
 
 
 class ManualEditRequest(BaseModel):
-    content: str
-    content_cn: Optional[str] = None
+    content: str = Field(min_length=1, max_length=5000)
+    content_cn: Optional[str] = Field(default=None, max_length=5000)

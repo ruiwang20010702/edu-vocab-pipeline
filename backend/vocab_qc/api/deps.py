@@ -20,7 +20,6 @@ def get_db() -> Generator[Session, None, None]:
     session = SyncSessionLocal()
     try:
         yield session
-        session.commit()
     except Exception:
         session.rollback()
         raise

@@ -41,7 +41,9 @@ def create_prompt(
     current_user: User = Depends(require_role("admin")),
 ):
     """创建 Prompt."""
-    return prompt_service.create_prompt(db, req.model_dump(), user_id=current_user.id)
+    result = prompt_service.create_prompt(db, req.model_dump(), user_id=current_user.id)
+    db.commit()
+    return result
 
 
 @router.put("/{prompt_id}", response_model=PromptResponse)
@@ -55,6 +57,7 @@ def update_prompt(
     prompt = prompt_service.update_prompt(db, prompt_id, req.model_dump(exclude_unset=True))
     if prompt is None:
         raise HTTPException(status_code=404, detail="Prompt 不存在")
+    db.commit()
     return prompt
 
 
@@ -67,6 +70,7 @@ def delete_prompt(
     """删除 Prompt."""
     if not prompt_service.delete_prompt(db, prompt_id):
         raise HTTPException(status_code=404, detail="Prompt 不存在")
+    db.commit()
     return {"message": "已删除"}
 
 
@@ -77,4 +81,5 @@ def seed_prompts(
 ):
     """初始化默认 Prompt."""
     count = prompt_service.seed_defaults(db)
+    db.commit()
     return {"seeded": count}

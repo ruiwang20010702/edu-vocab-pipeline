@@ -10,8 +10,24 @@ class Base(DeclarativeBase):
     pass
 
 
+def _create_engine():
+    url = settings.database_url_sync
+    common = {"echo": settings.db_echo}
+    if url.startswith("sqlite"):
+        from sqlalchemy.pool import StaticPool
+
+        common["connect_args"] = {"check_same_thread": False}
+        common["poolclass"] = StaticPool
+    else:
+        common["pool_size"] = 20
+        common["max_overflow"] = 10
+        common["pool_pre_ping"] = True
+        common["pool_recycle"] = 1800
+    return create_engine(url, **common)
+
+
 # 同步引擎（Alembic + CLI + API 使用）
-sync_engine = create_engine(settings.database_url_sync, echo=settings.db_echo)
+sync_engine = _create_engine()
 SyncSessionLocal = sessionmaker(bind=sync_engine)
 
 

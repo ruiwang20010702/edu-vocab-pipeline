@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     ai_model: str = "gpt-4o-mini"
     ai_max_concurrency: int = 5
     ai_max_retries: int = 3
+    allow_private_ai_url: bool = False
 
     max_regenerate_retries: int = 3
     max_upload_size_mb: int = 10

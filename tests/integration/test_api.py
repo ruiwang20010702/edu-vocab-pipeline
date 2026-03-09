@@ -80,15 +80,15 @@ def test_run_qc(test_app):
     response = test_app.post("/api/qc/run", json={"layers": [1], "dimension": "chunk"})
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 1
-    assert data["run_id"] is not None
+    assert data["layer1"]["total"] == 1
+    assert data["layer1"]["run_id"] is not None
 
 
 def test_run_qc_no_items(test_app):
     response = test_app.post("/api/qc/run", json={"layers": [1], "dimension": "nonexistent"})
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 0
+    assert data["layer1"]["total"] == 0
 
 
 def test_get_reviews_empty(test_app):
@@ -105,4 +105,4 @@ def test_full_qc_and_review_flow(test_app):
     run_response = test_app.post("/api/qc/run", json={"layers": [1]})
     assert run_response.status_code == 200
     run_data = run_response.json()
-    assert run_data["total"] > 0
+    assert run_data["layer1"]["total"] > 0

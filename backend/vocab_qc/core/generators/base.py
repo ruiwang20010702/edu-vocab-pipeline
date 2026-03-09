@@ -14,6 +14,16 @@ from vocab_qc.core.config import settings
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _PROMPT_DIR = _PROJECT_ROOT / "docs" / "prompts" / "generation"
 
+# 模块级复用的 HTTP 客户端，避免每次请求创建新连接
+_http_client: httpx.Client | None = None
+
+
+def _get_http_client() -> httpx.Client:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.Client(timeout=60.0)
+    return _http_client
+
 
 def load_prompt_file(filename: str) -> Optional[str]:
     """从 docs/prompts/generation/ 加载 Prompt 文件内容."""
@@ -93,41 +103,30 @@ class ContentGenerator:
 
     @staticmethod
     def _validate_url(base_url: str) -> None:
-        """校验 AI API URL 防止 SSRF。"""
-        from urllib.parse import urlparse
+        """校验 AI API URL 防止 SSRF（委托给统一安全模块）。"""
+        from vocab_qc.core.security import validate_ai_url
 
-        parsed = urlparse(base_url)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(f"AI API base_url scheme 不合法: {parsed.scheme}")
-        hostname = parsed.hostname or ""
-        _BLOCKED_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254")
-        _BLOCKED_PREFIXES = ("10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
-                             "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
-                             "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")
-        if hostname in _BLOCKED_HOSTS or any(hostname.startswith(p) for p in _BLOCKED_PREFIXES):
-            from vocab_qc.core.config import settings as _s
-            if _s.env == "production":
-                raise ValueError("生产环境禁止使用内网 AI API 地址")
+        validate_ai_url(base_url)
 
     def _do_request(
         self, base_url: str, api_key: str, model: str, system_prompt: str, user_prompt: str
     ) -> dict[str, Any]:
         self._validate_url(base_url)
-        with httpx.Client(timeout=60.0) as client:
-            response = client.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.7,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            return json.loads(content)
+        client = _get_http_client()
+        response = client.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.7,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        return json.loads(content)
