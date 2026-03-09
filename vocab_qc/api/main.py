@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from vocab_qc.core.config import settings
-from vocab_qc.api.routers import admin, auth, batch, export, import_, qc, review, stats, words
+from vocab_qc.api.routers import admin, auth, batch, export, import_, prompt, qc, review, stats, words
 
 app = FastAPI(title="词汇质检系统 V2.0", version="0.1.0")
 
@@ -25,6 +25,7 @@ app.include_router(qc.router)
 app.include_router(review.router)
 app.include_router(batch.router)
 app.include_router(export.router)
+app.include_router(prompt.router)
 
 
 @app.get("/health")

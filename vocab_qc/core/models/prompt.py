@@ -1,0 +1,27 @@
+"""Prompt 模型."""
+
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from vocab_qc.core.db import Base
+
+
+class Prompt(Base):
+    __tablename__ = "prompts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(20), nullable=False)  # generation / qa
+    dimension: Mapped[str] = mapped_column(String(20), nullable=False)  # chunk / sentence / mnemonic
+    model: Mapped[str] = mapped_column(String(50), nullable=False, default="gpt-4o-mini")
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="1")
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=func.now(), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<Prompt id={self.id} name={self.name!r} dim={self.dimension}>"

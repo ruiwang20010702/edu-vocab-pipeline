@@ -28,10 +28,11 @@ def run_production(
 ) -> dict:
     """为指定 Package 执行完整生产流水线。
 
-    流程: 生成内容 → Layer 1 质检 → 失败项入队审核
+    流程: 生成内容 → Layer 1 质检 → Layer 2 AI 质检 → 失败项入队审核
 
     Returns:
-        {"generated": int, "qc_passed": int, "qc_failed": int, "enqueued": int}
+        {"generated": int, "qc_passed": int, "qc_failed": int,
+         "l2_passed": int, "l2_failed": int, "enqueued": int}
     """
     qc = qc_service or QcService()
 
@@ -86,16 +87,29 @@ def run_production(
         if result.get("run_id"):
             qc.enqueue_failed_for_review(session, result["run_id"])
 
+    # Step 4: 运行 Layer 2 AI 质检（仅针对 Layer 1 通过项）
+    l2_result = {"passed": 0, "failed": 0}
+    for word_id in word_ids_from_meanings:
+        result = qc.run_layer2(session, scope=f"word_id:{word_id}")
+        l2_result["passed"] += result.get("passed", 0)
+        l2_result["failed"] += result.get("failed", 0)
+
+        # Step 5: Layer 2 失败项入队审核
+        if result.get("run_id"):
+            qc.enqueue_layer2_failed_for_review(session, result["run_id"])
+
     # 更新 Package 状态
     pkg.processed_words = len(word_ids_from_meanings)
     pkg.status = "completed"
     session.flush()
 
-    enqueued = qc_result["failed"]
+    enqueued = qc_result["failed"] + l2_result["failed"]
     return {
         "generated": generated,
         "qc_passed": qc_result["passed"],
         "qc_failed": qc_result["failed"],
+        "l2_passed": l2_result["passed"],
+        "l2_failed": l2_result["failed"],
         "enqueued": enqueued,
     }
 

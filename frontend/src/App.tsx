@@ -6,6 +6,7 @@ import {
   ShieldCheck,
   Database,
   Settings,
+  Users,
   Menu,
   X,
   LogOut,
@@ -20,8 +21,9 @@ import MonitoringPage from './pages/MonitoringPage'
 import ReviewPage from './pages/ReviewPage'
 import MasterTablePage from './pages/MasterTablePage'
 import PromptPage from './pages/PromptPage'
+import AdminPage from './pages/AdminPage'
 
-type Page = 'dashboard' | 'import' | 'monitoring' | 'review' | 'master' | 'prompt'
+type Page = 'dashboard' | 'import' | 'monitoring' | 'review' | 'master' | 'prompt' | 'admin'
 
 export default function App() {
   const [authed, setAuthed] = useState(isAuthenticated())
@@ -35,13 +37,16 @@ export default function App() {
 
   const auth = getAuth()
 
-  const navItems = [
-    { id: 'dashboard' as const, label: '数据看板', icon: LayoutDashboard },
-    { id: 'import' as const, label: '词表导入', icon: FileUp },
-    { id: 'monitoring' as const, label: '生产监控', icon: Activity },
-    { id: 'review' as const, label: '质检审核', icon: ShieldCheck },
-    { id: 'master' as const, label: '总表管理', icon: Database },
-    { id: 'prompt' as const, label: 'Prompt管理', icon: Settings },
+  const isAdmin = auth?.user_role === 'admin'
+
+  const navItems: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
+    { id: 'dashboard', label: '数据看板', icon: LayoutDashboard },
+    { id: 'import', label: '词表导入', icon: FileUp },
+    { id: 'monitoring', label: '生产监控', icon: Activity },
+    { id: 'review', label: '质检审核', icon: ShieldCheck },
+    { id: 'master', label: '总表管理', icon: Database },
+    { id: 'prompt', label: 'Prompt管理', icon: Settings },
+    ...(isAdmin ? [{ id: 'admin' as const, label: '用户管理', icon: Users }] : []),
   ]
 
   const handleLogout = () => {
@@ -63,6 +68,8 @@ export default function App() {
         return <MasterTablePage />
       case 'prompt':
         return <PromptPage />
+      case 'admin':
+        return <AdminPage />
     }
   }
 

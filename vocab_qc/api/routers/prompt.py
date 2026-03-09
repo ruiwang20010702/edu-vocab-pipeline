@@ -1,0 +1,80 @@
+"""Prompt 管理 API 路由."""
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from vocab_qc.api.deps import get_current_user, get_db, require_role
+from vocab_qc.api.schemas.prompt import PromptCreateRequest, PromptResponse, PromptUpdateRequest
+from vocab_qc.core.models.user import User
+from vocab_qc.core.services import prompt_service
+
+router = APIRouter(prefix="/api/prompts", tags=["Prompt"])
+
+
+@router.get("", response_model=list[PromptResponse])
+def list_prompts(
+    category: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """获取 Prompt 列表."""
+    return prompt_service.list_prompts(db, category=category)
+
+
+@router.get("/{prompt_id}", response_model=PromptResponse)
+def get_prompt(
+    prompt_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """获取单个 Prompt."""
+    prompt = prompt_service.get_prompt(db, prompt_id)
+    if prompt is None:
+        raise HTTPException(status_code=404, detail="Prompt 不存在")
+    return prompt
+
+
+@router.post("", response_model=PromptResponse, status_code=201)
+def create_prompt(
+    req: PromptCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    """创建 Prompt."""
+    return prompt_service.create_prompt(db, req.model_dump(), user_id=current_user.id)
+
+
+@router.put("/{prompt_id}", response_model=PromptResponse)
+def update_prompt(
+    prompt_id: int,
+    req: PromptUpdateRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """更新 Prompt."""
+    prompt = prompt_service.update_prompt(db, prompt_id, req.model_dump(exclude_unset=True))
+    if prompt is None:
+        raise HTTPException(status_code=404, detail="Prompt 不存在")
+    return prompt
+
+
+@router.delete("/{prompt_id}")
+def delete_prompt(
+    prompt_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """删除 Prompt."""
+    if not prompt_service.delete_prompt(db, prompt_id):
+        raise HTTPException(status_code=404, detail="Prompt 不存在")
+    return {"message": "已删除"}
+
+
+@router.post("/seed")
+def seed_prompts(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """初始化默认 Prompt."""
+    count = prompt_service.seed_defaults(db)
+    return {"seeded": count}

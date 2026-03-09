@@ -75,6 +75,21 @@ export default function MasterTablePage() {
     }
   }
 
+  const handleDownload = async () => {
+    try {
+      const data = await api.get<unknown[]>('/export/download')
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'vocab_export.json'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      // ignore
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* 搜索 + 导出 */}
@@ -125,12 +140,22 @@ export default function MasterTablePage() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => setExportInfo(null)}
-                className="text-white/40 hover:text-white/70"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                {exportInfo.ready && (
+                  <button
+                    onClick={handleDownload}
+                    className="flex items-center gap-1 px-4 py-1.5 bg-green-400/20 hover:bg-green-400/30 text-green-200 rounded-xl text-sm transition-all"
+                  >
+                    <Download size={14} /> 下载 JSON
+                  </button>
+                )}
+                <button
+                  onClick={() => setExportInfo(null)}
+                  className="text-white/40 hover:text-white/70"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
           </motion.div>
         )}

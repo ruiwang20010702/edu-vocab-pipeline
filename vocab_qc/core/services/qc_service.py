@@ -12,6 +12,7 @@ from vocab_qc.core.models import (
     ReviewReason,
     Word,
 )
+from vocab_qc.core.qc.layer2.runner import Layer2Runner
 from vocab_qc.core.qc.runner import Layer1Runner
 from vocab_qc.core.services.review_service import ReviewService
 
@@ -21,6 +22,7 @@ class QcService:
 
     def __init__(self, review_service: Optional[ReviewService] = None):
         self.layer1_runner = Layer1Runner()
+        self.layer2_runner = Layer2Runner()
         self.review_service = review_service or ReviewService()
 
     def run_layer1(
@@ -67,6 +69,57 @@ class QcService:
         failed = sum(1 for item in items if item.qc_status == QcStatus.LAYER1_FAILED.value)
 
         return {"run_id": run_id, "total": len(items), "passed": passed, "failed": failed}
+
+    def run_layer2(
+        self,
+        session: Session,
+        scope: Optional[str] = None,
+        dimension: Optional[str] = None,
+    ) -> dict:
+        """执行 Layer 2 AI 语义校验（仅针对 Layer 1 通过项）.
+
+        Returns:
+            {"run_id": str, "total": int, "passed": int, "failed": int}
+        """
+        query = session.query(ContentItem).filter_by(qc_status=QcStatus.LAYER1_PASSED.value)
+        if dimension:
+            query = query.filter_by(dimension=dimension)
+        if scope and scope.startswith("word_id:"):
+            word_id = int(scope.split(":")[1])
+            query = query.filter_by(word_id=word_id)
+
+        items = query.all()
+        if not items:
+            return {"run_id": None, "total": 0, "passed": 0, "failed": 0}
+
+        word_ids = {item.word_id for item in items}
+        meaning_ids = {item.meaning_id for item in items if item.meaning_id}
+
+        word_texts = {w.id: w.word for w in session.query(Word).filter(Word.id.in_(word_ids)).all()}
+        meaning_texts = {m.id: m.definition for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all()}
+
+        extra_kwargs = self._build_extra_kwargs(session, items)
+
+        run_id = self.layer2_runner.run(session, items, word_texts, meaning_texts, extra_kwargs=extra_kwargs)
+
+        passed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_PASSED.value)
+        failed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_FAILED.value)
+
+        return {"run_id": run_id, "total": len(items), "passed": passed, "failed": failed}
+
+    def enqueue_layer2_failed_for_review(self, session: Session, run_id: str) -> int:
+        """将 Layer 2 失败项加入审核队列."""
+        failed_items = (
+            session.query(ContentItem)
+            .filter_by(qc_status=QcStatus.LAYER2_FAILED.value, last_qc_run_id=run_id)
+            .all()
+        )
+        count = 0
+        for item in failed_items:
+            self.review_service.create_review_item(session, item, ReviewReason.LAYER2_FAILED, priority=5)
+            count += 1
+        session.flush()
+        return count
 
     def enqueue_failed_for_review(self, session: Session, run_id: str) -> int:
         """将 Layer 1 失败项加入审核队列.

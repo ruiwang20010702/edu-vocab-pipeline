@@ -1,92 +1,113 @@
-import { useState } from 'react'
-import { Plus, Copy, Trash2, Save, X } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Copy, Trash2, Save, X, Loader2 } from 'lucide-react'
+import { api } from '../lib/api'
 
 interface Prompt {
-  id: string
+  id: number
   name: string
   category: 'generation' | 'qa'
+  dimension: string
   model: string
   content: string
-}
-
-const STORAGE_KEY = 'vocab_prompts'
-
-function loadPrompts(): Prompt[] {
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (raw) {
-    try { return JSON.parse(raw) } catch { /* fallthrough */ }
-  }
-  return defaultPrompts()
-}
-
-function savePrompts(prompts: Prompt[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(prompts))
-}
-
-function defaultPrompts(): Prompt[] {
-  return [
-    { id: '1', name: '语块生成', category: 'generation', model: 'gpt-4o-mini', content: '请为单词 {word} 的义项「{pos} {definition}」生成一个常用语块...' },
-    { id: '2', name: '例句生成', category: 'generation', model: 'gpt-4o-mini', content: '请为单词 {word} 的义项「{pos} {definition}」生成一个例句...' },
-    { id: '3', name: '助记生成', category: 'generation', model: 'gpt-4o-mini', content: '请为单词 {word} 生成助记法...' },
-    { id: '4', name: '语块质检', category: 'qa', model: 'gpt-4o-mini', content: '请检查以下语块是否符合标准...' },
-    { id: '5', name: '例句质检', category: 'qa', model: 'gpt-4o-mini', content: '请检查以下例句是否符合标准...' },
-  ]
+  is_active: boolean
 }
 
 export default function PromptPage() {
-  const [prompts, setPrompts] = useState<Prompt[]>(loadPrompts)
-  const [selectedId, setSelectedId] = useState<string | null>(prompts[0]?.id ?? null)
+  const [prompts, setPrompts] = useState<Prompt[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedId, setSelectedId] = useState<number | null>(null)
   const [categoryTab, setCategoryTab] = useState<'generation' | 'qa'>('generation')
   const [editDraft, setEditDraft] = useState<Prompt | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const loadPrompts = async () => {
+    setLoading(true)
+    try {
+      const data = await api.get<Prompt[]>('/prompts')
+      setPrompts(data)
+      if (selectedId === null && data.length > 0) {
+        setSelectedId(data[0].id)
+      }
+    } catch {
+      setPrompts([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { loadPrompts() }, [])
 
   const selected = editDraft ?? prompts.find(p => p.id === selectedId) ?? null
-
   const filteredPrompts = prompts.filter(p => p.category === categoryTab)
 
-  const handleSelect = (id: string) => {
+  const handleSelect = (id: number) => {
     setSelectedId(id)
     setEditDraft(null)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editDraft) return
-    const updated = prompts.map(p => p.id === editDraft.id ? editDraft : p)
-    setPrompts(updated)
-    savePrompts(updated)
-    setEditDraft(null)
-  }
-
-  const handleCreate = () => {
-    const newPrompt: Prompt = {
-      id: Date.now().toString(),
-      name: '新 Prompt',
-      category: categoryTab,
-      model: 'gpt-4o-mini',
-      content: '',
-    }
-    const updated = [...prompts, newPrompt]
-    setPrompts(updated)
-    savePrompts(updated)
-    setSelectedId(newPrompt.id)
-    setEditDraft(newPrompt)
-  }
-
-  const handleDelete = (id: string) => {
-    const updated = prompts.filter(p => p.id !== id)
-    setPrompts(updated)
-    savePrompts(updated)
-    if (selectedId === id) {
-      setSelectedId(updated[0]?.id ?? null)
+    setSaving(true)
+    try {
+      const updated = await api.put<Prompt>(`/prompts/${editDraft.id}`, {
+        name: editDraft.name,
+        model: editDraft.model,
+        content: editDraft.content,
+        is_active: editDraft.is_active,
+      })
+      setPrompts(prev => prev.map(p => p.id === updated.id ? updated : p))
       setEditDraft(null)
+    } catch { /* ignore */ } finally {
+      setSaving(false)
     }
   }
 
-  const handleDuplicate = (p: Prompt) => {
-    const dup: Prompt = { ...p, id: Date.now().toString(), name: `${p.name} (副本)` }
-    const updated = [...prompts, dup]
-    setPrompts(updated)
-    savePrompts(updated)
-    setSelectedId(dup.id)
+  const handleCreate = async () => {
+    try {
+      const created = await api.post<Prompt>('/prompts', {
+        name: '新 Prompt',
+        category: categoryTab,
+        dimension: categoryTab === 'generation' ? 'chunk' : 'chunk',
+        model: 'gpt-4o-mini',
+        content: '',
+      })
+      setPrompts(prev => [...prev, created])
+      setSelectedId(created.id)
+      setEditDraft(created)
+    } catch { /* ignore */ }
+  }
+
+  const handleDelete = async (id: number) => {
+    try {
+      await api.delete(`/prompts/${id}`)
+      setPrompts(prev => prev.filter(p => p.id !== id))
+      if (selectedId === id) {
+        setSelectedId(prompts.find(p => p.id !== id)?.id ?? null)
+        setEditDraft(null)
+      }
+    } catch { /* ignore */ }
+  }
+
+  const handleDuplicate = async (p: Prompt) => {
+    try {
+      const created = await api.post<Prompt>('/prompts', {
+        name: `${p.name} (副本)`,
+        category: p.category,
+        dimension: p.dimension,
+        model: p.model,
+        content: p.content,
+      })
+      setPrompts(prev => [...prev, created])
+      setSelectedId(created.id)
+    } catch { /* ignore */ }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-140px)]">
+        <Loader2 size={24} className="animate-spin text-white/50" />
+      </div>
+    )
   }
 
   return (
@@ -129,7 +150,7 @@ export default function PromptPage() {
                   </button>
                 </div>
               </div>
-              <p className="text-xs text-white/40 mt-1">{p.model}</p>
+              <p className="text-xs text-white/40 mt-1">{p.model} · {p.dimension}</p>
             </div>
           ))}
         </div>
@@ -155,8 +176,12 @@ export default function PromptPage() {
               {editDraft && (
                 <div className="flex gap-2">
                   <button onClick={() => setEditDraft(null)} className="p-2 text-white/40 hover:text-white/80"><X size={18} /></button>
-                  <button onClick={handleSave} className="flex items-center gap-1 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-white text-sm">
-                    <Save size={14} /> 保存
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="flex items-center gap-1 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-white text-sm disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 保存
                   </button>
                 </div>
               )}
