@@ -31,12 +31,94 @@ _GENERATORS = {
 }
 
 
-# TODO(perf): 当前 run_production 在单个 session 事务中执行所有操作（包括 AI 调用），
-# 会导致长事务占用数据库连接。应拆分为多个独立 session：
-# 1. session1: 生成内容 → commit
-# 2. session2: Layer 1 质检 → commit
-# 3. session3: Layer 2 AI 质检 → commit
-# 每步失败后需将 Package.status 标记为 failed。
+def _get_word_ids_for_package(session: Session, package_id: int) -> set[int]:
+    """获取 Package 关联的所有 word_id。"""
+    meaning_ids = {
+        row[0]
+        for row in session.query(PackageMeaning.meaning_id)
+        .filter_by(package_id=package_id)
+        .all()
+    }
+    if not meaning_ids:
+        return set()
+    return {
+        row[0]
+        for row in session.query(Meaning.word_id)
+        .filter(Meaning.id.in_(meaning_ids))
+        .all()
+    }
+
+
+def step_generate(session: Session, package_id: int) -> int:
+    """Step 1: 为 Package 生成内容（独立事务）。"""
+    pkg = session.query(Package).filter_by(id=package_id).first()
+    if pkg is None:
+        raise ValueError(f"Package {package_id} 不存在")
+
+    pkg.status = "processing"
+    session.flush()
+
+    word_ids = _get_word_ids_for_package(session, package_id)
+    if not word_ids:
+        return 0
+
+    items = (
+        session.query(ContentItem)
+        .filter(ContentItem.word_id.in_(word_ids))
+        .filter_by(qc_status=QcStatus.PENDING.value)
+        .all()
+    )
+    generated = _generate_content(session, items)
+    session.flush()
+    return generated
+
+
+def step_qc_layer1(session: Session, package_id: int, qc_service: Optional[QcService] = None) -> dict:
+    """Step 2: Layer 1 质检 + 失败项入队审核（独立事务）。"""
+    qc = qc_service or QcService()
+    word_ids = _get_word_ids_for_package(session, package_id)
+
+    result = {"passed": 0, "failed": 0}
+    for word_id in word_ids:
+        r = qc.run_layer1(session, scope=f"word_id:{word_id}")
+        result["passed"] += r.get("passed", 0)
+        result["failed"] += r.get("failed", 0)
+        if r.get("run_id"):
+            qc.enqueue_failed_for_review(session, r["run_id"])
+
+    session.flush()
+    return result
+
+
+def step_qc_layer2(session: Session, package_id: int, qc_service: Optional[QcService] = None) -> dict:
+    """Step 3: Layer 2 AI 质检 + 失败项入队审核（独立事务）。"""
+    qc = qc_service or QcService()
+    word_ids = _get_word_ids_for_package(session, package_id)
+
+    result = {"passed": 0, "failed": 0}
+    for word_id in word_ids:
+        r = qc.run_layer2(session, scope=f"word_id:{word_id}")
+        result["passed"] += r.get("passed", 0)
+        result["failed"] += r.get("failed", 0)
+        if r.get("run_id"):
+            qc.enqueue_layer2_failed_for_review(session, r["run_id"])
+
+    session.flush()
+    return result
+
+
+def step_finalize(session: Session, package_id: int) -> None:
+    """标记 Package 为 completed，更新 processed_words。"""
+    pkg = session.query(Package).filter_by(id=package_id).first()
+    if pkg is None:
+        return
+
+    word_ids = _get_word_ids_for_package(session, package_id)
+    pkg.processed_words = len(word_ids)
+    pkg.status = "completed"
+    session.flush()
+
+
 def run_production(
     session: Session,
     package_id: int,

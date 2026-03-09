@@ -23,7 +23,6 @@ from vocab_qc.core.models.user import User
 import logging
 
 from vocab_qc.core.services import batch_service
-from vocab_qc.core.services.production_service import run_production
 
 logger = logging.getLogger(__name__)
 
@@ -160,23 +159,59 @@ def skip_word(
 
 
 def _run_production_bg(batch_id: int) -> None:
-    """后台执行生产流水线，使用独立 session。"""
-    from vocab_qc.core.db import SyncSessionLocal
+    """后台执行生产流水线，每步使用独立 session 避免长事务占用连接。
 
+    流程拆分为 3 步，每步独立事务：
+    1. 生成内容 → commit
+    2. Layer 1 质检 + 失败项入队 → commit
+    3. Layer 2 AI 质检 + 失败项入队 → commit
+    """
+    from vocab_qc.core.db import SyncSessionLocal
+    from vocab_qc.core.services.production_service import (
+        step_generate,
+        step_qc_layer1,
+        step_qc_layer2,
+        step_finalize,
+    )
+
+    steps = [
+        ("generate", step_generate),
+        ("qc_layer1", step_qc_layer1),
+        ("qc_layer2", step_qc_layer2),
+    ]
+
+    for step_name, step_fn in steps:
+        session = SyncSessionLocal()
+        try:
+            step_fn(session, batch_id)
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception(
+                "后台生产流水线失败 batch_id=%s step=%s", batch_id, step_name
+            )
+            # 标记 Package 为 failed
+            try:
+                pkg = session.query(Package).filter_by(id=batch_id).first()
+                if pkg:
+                    pkg.status = "failed"
+                    session.commit()
+            except Exception:
+                session.rollback()
+            finally:
+                session.close()
+            return
+        finally:
+            session.close()
+
+    # 所有步骤成功 → 标记完成
     session = SyncSessionLocal()
     try:
-        run_production(session, batch_id)
+        step_finalize(session, batch_id)
         session.commit()
     except Exception:
         session.rollback()
-        try:
-            pkg = session.query(Package).filter_by(id=batch_id).first()
-            if pkg:
-                pkg.status = "failed"
-                session.commit()
-        except Exception:
-            session.rollback()
-        logger.exception("后台生产流水线失败 batch_id=%s", batch_id)
+        logger.exception("后台生产流水线 finalize 失败 batch_id=%s", batch_id)
     finally:
         session.close()
 
