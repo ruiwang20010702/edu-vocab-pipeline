@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-质检后端已实现，159 个测试全部通过。下一步：接入真实数据 + 数据导入功能。
+前后端均已实现，252 个测试全部通过。前端 6 页面 + 后端完整 API。
 
 ```
 VocabularyDataCleaning1.0/
@@ -21,7 +21,7 @@ VocabularyDataCleaning1.0/
 │
 ├── vocab_qc/
 │   ├── core/
-│   │   ├── config.py            ← Pydantic Settings，环境变量前缀 VOCAB_QC_
+│   │   ├── config.py            ← Pydantic Settings，环境变量前缀 VOCAB_QC_，含 CORS 配置
 │   │   ├── db.py                ← 数据库连接（sync + async）
 │   │   ├── models/              ← ORM 模型（14 张表）
 │   │   │   ├── data_layer.py    ← Word, Phonetic, Meaning, Source
@@ -36,19 +36,34 @@ VocabularyDataCleaning1.0/
 │   │   │   ├── layer1/          ← 22 条算法规则（M3-M6, P1-P2, S1-S4, C1-C2 + C4-C5, E6-E8, N1-N5）
 │   │   │   └── layer2/          ← AI 语义校验（13 per-rule + 3 unified 检查器）
 │   │   ├── services/
+│   │   │   ├── stats_service.py ← 仪表板聚合统计
+│   │   │   ├── word_service.py  ← 词汇分页查询 + 详情聚合
+│   │   │   ├── import_service.py← 文件导入（JSON/CSV → Word/Meaning）
 │   │   │   ├── qc_service.py    ← 质检编排
 │   │   │   ├── review_service.py← 审核流程（approve/regenerate/manual_edit + 3 次重试）
 │   │   │   ├── export_service.py← 导出门禁（仅 approved 放行）
 │   │   │   ├── generation_service.py
 │   │   │   └── audit_service.py
 │   │   └── generators/          ← 内容生成器（chunk/sentence/mnemonic）
-│   ├── api/                     ← FastAPI 路由
+│   ├── api/
+│   │   ├── main.py              ← FastAPI 入口（CORS + 9 个 router）
+│   │   ├── routers/             ← auth, admin, stats, words, import_, qc, review, batch, export
+│   │   └── schemas/             ← Pydantic 响应模型
 │   └── cli/                     ← Typer CLI 命令
 │
-├── tests/                       ← 159 个测试
+├── frontend/                    ← React 19 + TypeScript + Tailwind CSS v4
+│   ├── src/
+│   │   ├── App.tsx              ← 路由 + 玻璃拟态侧边栏
+│   │   ├── lib/api.ts           ← fetch 封装（JWT 自动注入）
+│   │   ├── lib/auth.ts          ← 认证状态管理
+│   │   ├── types.ts             ← TypeScript 类型（对齐后端 ORM）
+│   │   └── pages/               ← 6 个页面（Dashboard/Import/Monitoring/Review/MasterTable/Prompt）
+│   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
+│
+├── tests/                       ← 252 个测试
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
-│   ├── unit/                    ← 模型 + 规则 + AI 基础
-│   └── integration/             ← 质检流水线 + 审核流程 + API + E2E
+│   ├── unit/                    ← 模型 + 规则 + AI + stats/word/import service
+│   └── integration/             ← 质检流水线 + 审核流程 + API + 新端点
 │
 └── docs/
     └── 单词2.0--内容生产与质检工作流程.md
@@ -60,8 +75,11 @@ VocabularyDataCleaning1.0/
 # 测试
 .venv/bin/pytest tests/ -v --tb=short
 
-# 启动 API
+# 启动后端 API
 uvicorn vocab_qc.api.main:app --reload
+
+# 启动前端开发服务器
+cd frontend && npm run dev
 
 # CLI
 vocab qc run --layer 1

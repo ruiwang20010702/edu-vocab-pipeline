@@ -37,5 +37,17 @@ class RegenerateResponse(BaseModel):
 
 class ManualEditRequest(BaseModel):
     reviewer: Optional[str] = None
-    new_content: str
+    new_content: Optional[str] = None
     new_content_cn: Optional[str] = None
+    # 兼容前端字段名
+    content: Optional[str] = None
+    content_cn: Optional[str] = None
+
+    @property
+    def resolved_content(self) -> str:
+        """优先使用 content，其次 new_content。"""
+        return self.content or self.new_content or ""
+
+    @property
+    def resolved_content_cn(self) -> Optional[str]:
+        return self.content_cn or self.new_content_cn

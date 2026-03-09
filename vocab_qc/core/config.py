@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     allowed_email_domains: list[str] = []
     verification_code_expire_minutes: int = 10
 
+    # CORS
+    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+
     model_config = {"env_prefix": "VOCAB_QC_", "env_file": ".env"}
 
 

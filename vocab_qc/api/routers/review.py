@@ -76,8 +76,8 @@ def manual_edit(
             db,
             review_id,
             reviewer=reviewer,
-            new_content=request.new_content,
-            new_content_cn=request.new_content_cn,
+            new_content=request.resolved_content,
+            new_content_cn=request.resolved_content_cn,
         )
         return ReviewItemResponse.model_validate(result)
     except Exception as e:
