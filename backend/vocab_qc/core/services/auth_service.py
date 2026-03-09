@@ -1,0 +1,112 @@
+"""认证服务: 验证码生成/校验、JWT 签发/解析、邮件发送."""
+
+import hashlib
+import secrets
+import smtplib
+import string
+from datetime import UTC, datetime, timedelta
+from email.mime.text import MIMEText
+from typing import Any
+
+import jwt
+from jwt.exceptions import InvalidTokenError as JWTError  # noqa: F401
+from sqlalchemy.orm import Session
+
+from vocab_qc.core.config import settings
+from vocab_qc.core.models.user import User, VerificationCode
+
+
+def _hash_code(code: str) -> str:
+    """SHA-256 哈希验证码。"""
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
+def validate_email_domain(email: str) -> bool:
+    """检查邮箱是否在白名单域名中。白名单为空时允许所有域名。"""
+    if not settings.allowed_email_domains:
+        return True
+    domain = email.split("@")[-1]
+    return domain in settings.allowed_email_domains
+
+
+def generate_code(session: Session, email: str) -> str:
+    """生成 6 位验证码，hash 后存入数据库，返回明文用于发送。"""
+    code = "".join(secrets.choice(string.digits) for _ in range(6))
+    expires_at = datetime.now(UTC) + timedelta(minutes=settings.verification_code_expire_minutes)
+    record = VerificationCode(
+        email=email,
+        code=_hash_code(code),
+        expires_at=expires_at,
+    )
+    session.add(record)
+    session.flush()
+    return code
+
+
+_MAX_VERIFY_ATTEMPTS = 5
+
+
+def verify_code(session: Session, email: str, code: str) -> bool:
+    """校验验证码（hash 比对 + 未过期 + 未使用 + 尝试次数限制）。成功则标记 used=True。"""
+    now = datetime.now(UTC)
+
+    # 获取最近一条未使用、未过期的验证码
+    record = (
+        session.query(VerificationCode)
+        .filter_by(email=email, used=False)
+        .filter(VerificationCode.expires_at > now)
+        .order_by(VerificationCode.created_at.desc())
+        .first()
+    )
+    if record is None:
+        return False
+
+    # 尝试次数限制
+    attempts = getattr(record, "attempts", 0) or 0
+    if attempts >= _MAX_VERIFY_ATTEMPTS:
+        return False
+
+    record.attempts = attempts + 1
+
+    code_hash = _hash_code(code)
+    if record.code != code_hash:
+        session.flush()
+        return False
+
+    record.used = True
+    session.flush()
+    return True
+
+
+def create_jwt(user: User) -> str:
+    """签发 JWT。"""
+    expire = datetime.now(UTC) + timedelta(hours=settings.jwt_expire_hours)
+    payload: dict[str, Any] = {
+        "sub": user.email,
+        "user_id": user.id,
+        "role": user.role,
+        "exp": expire,
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_jwt(token: str) -> dict[str, Any]:
+    """解析并验证 JWT。无效时抛出 JWTError。"""
+    return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+
+
+def send_email(to: str, code: str) -> None:
+    """通过 SMTP 发送验证码邮件。"""
+    if not settings.smtp_host:
+        return
+
+    subject = "词汇质检系统 - 登录验证码"
+    body = f"您的验证码是：{code}\n\n有效期 {settings.verification_code_expire_minutes} 分钟。"
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = settings.smtp_from_email
+    msg["To"] = to
+
+    with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port) as server:
+        server.login(settings.smtp_user, settings.smtp_password)
+        server.sendmail(settings.smtp_from_email, [to], msg.as_string())

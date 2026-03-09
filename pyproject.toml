@@ -16,7 +16,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "httpx>=0.28.0",
     "rich>=13.9.0",
-    "python-jose[cryptography]>=3.3.0",
+    "PyJWT>=2.8.0",
     "email-validator>=2.0.0",
     "python-multipart>=0.0.20",
     "slowapi>=0.1.9",
@@ -46,7 +46,8 @@ select = ["E", "F", "I", "N", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["backend"]
 asyncio_mode = "auto"
 
 [tool.hatch.build.targets.wheel]
-packages = ["vocab_qc"]
+packages = ["backend/vocab_qc"]

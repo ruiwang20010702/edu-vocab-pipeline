@@ -112,12 +112,15 @@ def test_get_pending_reviews(db_session, sample_word, review_service):
     db_session.flush()
 
     # 获取全部
-    all_pending = review_service.get_pending_reviews(db_session)
+    all_pending, total = review_service.get_pending_reviews(db_session)
     assert len(all_pending) == 4
+    assert total == 4
 
     # 按维度筛选
-    chunk_reviews = review_service.get_pending_reviews(db_session, dimension="chunk")
+    chunk_reviews, chunk_total = review_service.get_pending_reviews(db_session, dimension="chunk")
     assert len(chunk_reviews) == 2
+    assert chunk_total == 2
 
-    sentence_reviews = review_service.get_pending_reviews(db_session, dimension="sentence")
+    sentence_reviews, sentence_total = review_service.get_pending_reviews(db_session, dimension="sentence")
     assert len(sentence_reviews) == 2
+    assert sentence_total == 2

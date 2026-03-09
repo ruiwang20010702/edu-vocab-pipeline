@@ -16,11 +16,14 @@ class TestGenerateCode:
         assert len(code) == 6
         assert code.isdigit()
 
-    def test_stores_code_in_db(self, db_session: Session):
-        auth_service.generate_code(db_session, "test@example.com")
+    def test_stores_hashed_code_in_db(self, db_session: Session):
+        code = auth_service.generate_code(db_session, "test@example.com")
         record = db_session.query(VerificationCode).filter_by(email="test@example.com").first()
         assert record is not None
         assert record.used is False
+        # DB stores hash, not plaintext
+        assert record.code != code
+        assert record.code == auth_service._hash_code(code)
 
 
 class TestVerifyCode:
@@ -32,7 +35,8 @@ class TestVerifyCode:
     def test_marks_code_as_used(self, db_session: Session):
         code = auth_service.generate_code(db_session, "test@example.com")
         auth_service.verify_code(db_session, "test@example.com", code)
-        record = db_session.query(VerificationCode).filter_by(email="test@example.com", code=code).first()
+        code_hash = auth_service._hash_code(code)
+        record = db_session.query(VerificationCode).filter_by(email="test@example.com", code=code_hash).first()
         assert record.used is True
 
     def test_replay_rejected(self, db_session: Session):
@@ -50,7 +54,8 @@ class TestVerifyCode:
     def test_expired_code(self, db_session: Session):
         code = auth_service.generate_code(db_session, "test@example.com")
         # 手动将过期时间设为过去
-        record = db_session.query(VerificationCode).filter_by(email="test@example.com", code=code).first()
+        code_hash = auth_service._hash_code(code)
+        record = db_session.query(VerificationCode).filter_by(email="test@example.com", code=code_hash).first()
         record.expires_at = datetime.now(UTC) - timedelta(minutes=1)
         db_session.flush()
 
@@ -68,9 +73,9 @@ class TestJwt:
         assert payload["role"] == "admin"
 
     def test_invalid_token_raises(self):
-        from jose import JWTError
+        from jwt.exceptions import InvalidTokenError
 
-        with pytest.raises(JWTError):
+        with pytest.raises(InvalidTokenError):
             auth_service.decode_jwt("invalid.token.here")
 
 

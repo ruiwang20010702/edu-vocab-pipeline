@@ -94,7 +94,9 @@ def test_run_qc_no_items(test_app):
 def test_get_reviews_empty(test_app):
     response = test_app.get("/api/reviews")
     assert response.status_code == 200
-    assert response.json() == []
+    data = response.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 def test_full_qc_and_review_flow(test_app):

@@ -10,46 +10,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-前后端均已实现，252 个测试全部通过。前端 6 页面 + 后端完整 API。
+前后端均已实现，506 个测试全部通过。前端 6 页面 + 后端完整 API。
 
 ```
 VocabularyDataCleaning1.0/
-├── CLAUDE.md / README.md / roadmap.md
+├── CLAUDE.md / README.md
 ├── pyproject.toml               ← 项目配置，入口 vocab = vocab_qc.cli.main:app
-├── alembic.ini + alembic/       ← 数据库迁移
-├── standards/standards.yaml     ← 质量标准（机器可读）
+├── alembic.ini                  ← 数据库迁移配置（指向 backend/alembic）
 │
-├── vocab_qc/
-│   ├── core/
-│   │   ├── config.py            ← Pydantic Settings，环境变量前缀 VOCAB_QC_，含 CORS 配置
-│   │   ├── db.py                ← 数据库连接（sync + async）
-│   │   ├── models/              ← ORM 模型（14 张表）
-│   │   │   ├── data_layer.py    ← Word, Phonetic, Meaning, Source
-│   │   │   ├── content_layer.py ← ContentItem（含 qc_status/retry_count）
-│   │   │   ├── quality_layer.py ← QcRun, QcRuleResult, RetryCounter, ReviewItem, AuditLogV2
-│   │   │   ├── package_layer.py ← Package, PackageMeaning
-│   │   │   └── enums.py         ← QcStatus, ReviewReason 等枚举
-│   │   ├── qc/
-│   │   │   ├── base.py          ← RuleResult, ItemCheckResult, RuleChecker 协议
-│   │   │   ├── registry.py      ← 装饰器注册中心
-│   │   │   ├── runner.py        ← Layer 1 运行器
-│   │   │   ├── layer1/          ← 22 条算法规则（M3-M6, P1-P2, S1-S4, C1-C2 + C4-C5, E6-E8, N1-N5）
-│   │   │   └── layer2/          ← AI 语义校验（13 per-rule + 3 unified 检查器）
-│   │   ├── services/
-│   │   │   ├── stats_service.py ← 仪表板聚合统计
-│   │   │   ├── word_service.py  ← 词汇分页查询 + 详情聚合
-│   │   │   ├── import_service.py← 文件导入（JSON/CSV → Word/Meaning）
-│   │   │   ├── qc_service.py    ← 质检编排
-│   │   │   ├── review_service.py← 审核流程（approve/regenerate/manual_edit + 3 次重试）
-│   │   │   ├── export_service.py← 导出门禁（仅 approved 放行）
-│   │   │   ├── generation_service.py
-│   │   │   └── audit_service.py
-│   │   └── generators/          ← 内容生成器（chunk/sentence/mnemonic）
-│   ├── api/
-│   │   ├── main.py              ← FastAPI 入口（CORS + 9 个 router）
-│   │   ├── routers/             ← auth, admin, stats, words, import_, qc, review, batch, export
-│   │   └── schemas/             ← Pydantic 响应模型
-│   └── cli/                     ← Typer CLI 命令
+├── backend/                     ← 后端源码
+│   ├── vocab_qc/                ← Python 包（import 路径: from vocab_qc.xxx）
+│   │   ├── core/
+│   │   │   ├── config.py        ← Pydantic Settings，环境变量前缀 VOCAB_QC_
+│   │   │   ├── db.py            ← 数据库连接（sync + async）
+│   │   │   ├── models/          ← ORM 模型（14 张表）
+│   │   │   ├── qc/              ← 质检引擎（Layer 1 算法 + Layer 2 AI）
+│   │   │   ├── services/        ← 业务服务层
+│   │   │   └── generators/      ← 内容生成器（chunk/sentence/mnemonic）
+│   │   ├── api/
+│   │   │   ├── main.py          ← FastAPI 入口（CORS + 10 个 router）
+│   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt
+│   │   │   └── schemas/         ← Pydantic 响应模型
+│   │   └── cli/                 ← Typer CLI 命令
+│   └── alembic/                 ← 数据库迁移脚本
 │
 ├── frontend/                    ← React 19 + TypeScript + Tailwind CSS v4
 │   ├── src/
@@ -57,16 +40,19 @@ VocabularyDataCleaning1.0/
 │   │   ├── lib/api.ts           ← fetch 封装（JWT 自动注入）
 │   │   ├── lib/auth.ts          ← 认证状态管理
 │   │   ├── types.ts             ← TypeScript 类型（对齐后端 ORM）
-│   │   └── pages/               ← 6 个页面（Dashboard/Import/Monitoring/Review/MasterTable/Prompt）
+│   │   └── pages/               ← 6 个页面
 │   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
 │
-├── tests/                       ← 252 个测试
+├── tests/                       ← 506 个测试
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
-│   ├── unit/                    ← 模型 + 规则 + AI + stats/word/import service
-│   └── integration/             ← 质检流水线 + 审核流程 + API + 新端点
+│   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
+│   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
 │
-└── docs/
-    └── 单词2.0--内容生产与质检工作流程.md
+└── docs/                        ← 文档
+    ├── design/                  ← PRD、工作流、输出 schema
+    └── prompts/                 ← AI Prompt 模板
+        ├── generation/          ← 生产 Prompt（语块/例句/助记等）
+        └── quality/             ← 质检 Prompt
 ```
 
 ## 开发命令
@@ -76,14 +62,14 @@ VocabularyDataCleaning1.0/
 .venv/bin/pytest tests/ -v --tb=short
 
 # 启动后端 API
-uvicorn vocab_qc.api.main:app --reload
+PYTHONPATH=backend uvicorn vocab_qc.api.main:app --reload
 
 # 启动前端开发服务器
 cd frontend && npm run dev
 
 # CLI
-vocab qc run --layer 1
-vocab review list
+PYTHONPATH=backend vocab qc run --layer 1
+PYTHONPATH=backend vocab review list
 ```
 
 ## 关键业务规则
