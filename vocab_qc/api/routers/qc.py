@@ -63,13 +63,13 @@ def get_summary(
     _current_user: User = Depends(get_current_user),
 ):
     """按规则维度统计通过率."""
-    from sqlalchemy import func
+    from sqlalchemy import Integer, case, func
 
     query = db.query(
         QcRuleResult.rule_id,
         QcRuleResult.dimension,
         func.count().label("total"),
-        func.sum(func.cast(QcRuleResult.passed, db.bind.dialect.name != "sqlite" and "INTEGER" or "INTEGER")).label("passed_count"),
+        func.count(case((QcRuleResult.passed == True, 1))).label("passed_count"),  # noqa: E712
     ).group_by(QcRuleResult.rule_id, QcRuleResult.dimension)
 
     if run_id:

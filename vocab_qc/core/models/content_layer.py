@@ -3,15 +3,23 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from vocab_qc.core.db import Base
-from vocab_qc.core.models.enums import ContentDimension, QcStatus
+from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS, ContentDimension, QcStatus
+
+_VALID_DIMENSIONS = ("meaning", "phonetic", "syllable", "chunk", "sentence", *MNEMONIC_DIMENSIONS)
 
 
 class ContentItem(Base):
     __tablename__ = "content_items"
+    __table_args__ = (
+        CheckConstraint(
+            f"dimension IN ({', '.join(repr(d) for d in _VALID_DIMENSIONS)})",
+            name="ck_content_items_dimension",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)

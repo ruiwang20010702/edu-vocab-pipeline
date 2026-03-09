@@ -45,7 +45,10 @@ class QcService:
         if dimension:
             query = query.filter_by(dimension=dimension)
         if scope and scope.startswith("word_id:"):
-            word_id = int(scope.split(":")[1])
+            try:
+                word_id = int(scope.split(":")[1])
+            except (ValueError, IndexError):
+                raise ValueError(f"无效的 scope 格式: {scope}，预期格式为 'word_id:<数字>'")
             query = query.filter_by(word_id=word_id)
 
         items = query.all()
@@ -85,7 +88,10 @@ class QcService:
         if dimension:
             query = query.filter_by(dimension=dimension)
         if scope and scope.startswith("word_id:"):
-            word_id = int(scope.split(":")[1])
+            try:
+                word_id = int(scope.split(":")[1])
+            except (ValueError, IndexError):
+                raise ValueError(f"无效的 scope 格式: {scope}，预期格式为 'word_id:<数字>'")
             query = query.filter_by(word_id=word_id)
 
         items = query.all()
