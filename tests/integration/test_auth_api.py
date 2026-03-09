@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from vocab_qc.api.deps import get_db
 from vocab_qc.api.main import app
+from vocab_qc.api.routers.auth import limiter
 from vocab_qc.core.db import Base
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import auth_service
@@ -33,6 +34,7 @@ def auth_app():
             session.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    limiter.enabled = False
 
     # 创建测试用户
     session = TestSession()
@@ -45,6 +47,7 @@ def auth_app():
     yield client, TestSession
 
     app.dependency_overrides.clear()
+    limiter.enabled = True
     engine.dispose()
 
 

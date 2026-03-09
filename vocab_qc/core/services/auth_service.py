@@ -1,6 +1,6 @@
 """认证服务: 验证码生成/校验、JWT 签发/解析、邮件发送."""
 
-import random
+import secrets
 import smtplib
 import string
 from datetime import UTC, datetime, timedelta
@@ -24,7 +24,7 @@ def validate_email_domain(email: str) -> bool:
 
 def generate_code(session: Session, email: str) -> str:
     """生成 6 位验证码并存入数据库。"""
-    code = "".join(random.choices(string.digits, k=6))
+    code = "".join(secrets.choice(string.digits) for _ in range(6))
     expires_at = datetime.now(UTC) + timedelta(minutes=settings.verification_code_expire_minutes)
     record = VerificationCode(
         email=email,

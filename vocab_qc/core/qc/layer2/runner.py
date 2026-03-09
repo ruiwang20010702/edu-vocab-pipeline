@@ -25,10 +25,14 @@ class Layer2Runner:
 
     def __init__(self, client: Optional[AiClient] = None):
         self.client = client or AiClient()
+        _mnemonic_checker = UnifiedMnemonicChecker()
         self._unified_checkers = {
             "sentence": UnifiedSentenceChecker(),
             "chunk": UnifiedChunkChecker(),
-            "mnemonic": UnifiedMnemonicChecker(),
+            "mnemonic_root_affix": _mnemonic_checker,
+            "mnemonic_word_in_word": _mnemonic_checker,
+            "mnemonic_sound_meaning": _mnemonic_checker,
+            "mnemonic_exam_app": _mnemonic_checker,
         }
 
     async def check_item_per_rule(
@@ -135,6 +139,25 @@ class Layer2Runner:
         session.flush()
         return run_id
 
-    def run(self, session: Session, items: list[ContentItem], word_texts: dict[int, str], meaning_texts: dict[int, str], strategy: AiStrategy = AiStrategy.PER_RULE, extra_kwargs: Optional[dict[int, dict]] = None) -> str:
-        """同步桥接，供 CLI 使用."""
-        return asyncio.run(self.run_async(session, items, word_texts, meaning_texts, strategy, extra_kwargs))
+    def run(
+        self,
+        session: Session,
+        items: list[ContentItem],
+        word_texts: dict[int, str],
+        meaning_texts: dict[int, str],
+        strategy: AiStrategy = AiStrategy.PER_RULE,
+        extra_kwargs: Optional[dict[int, dict]] = None,
+    ) -> str:
+        """同步桥接：自动检测是否在事件循环内，选择合适的调用方式."""
+        coro = self.run_async(session, items, word_texts, meaning_texts, strategy, extra_kwargs)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # 无事件循环（CLI 场景），直接 asyncio.run
+            return asyncio.run(coro)
+        else:
+            # 已在事件循环内（FastAPI 场景），使用线程池执行
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, coro).result()

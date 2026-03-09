@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_db, require_role
 from vocab_qc.api.schemas.import_ import ImportResponse
+from vocab_qc.core.config import settings
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import import_service
 
@@ -23,7 +24,10 @@ async def import_file(
     if not file.filename:
         raise HTTPException(status_code=400, detail="未提供文件")
 
-    content = await file.read()
+    max_size = settings.max_upload_size_mb * 1024 * 1024
+    content = await file.read(max_size + 1)
+    if len(content) > max_size:
+        raise HTTPException(status_code=413, detail=f"文件大小超过 {settings.max_upload_size_mb}MB 限制")
     if not content:
         raise HTTPException(status_code=400, detail="文件为空")
 
@@ -35,8 +39,10 @@ async def import_file(
         result = import_service.import_from_json(db, data, batch_name.strip())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"导入失败: {e}")
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("导入失败")
+        raise HTTPException(status_code=500, detail="导入失败，请稍后重试")
 
     return ImportResponse(
         batch_id=result["batch_id"],

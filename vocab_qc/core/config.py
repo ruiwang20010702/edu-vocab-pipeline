@@ -1,9 +1,15 @@
 """应用配置."""
 
+import warnings
+
 from pydantic_settings import BaseSettings
+
+_INSECURE_JWT_SECRETS = frozenset({"dev-secret-change-in-production", "changeme", ""})
 
 
 class Settings(BaseSettings):
+    env: str = "development"
+
     database_url_sync: str = "postgresql://localhost:5432/vocab_qc"
     database_url_async: str = "postgresql+asyncpg://localhost:5432/vocab_qc"
     db_echo: bool = False
@@ -15,6 +21,7 @@ class Settings(BaseSettings):
     ai_max_retries: int = 3
 
     max_regenerate_retries: int = 3
+    max_upload_size_mb: int = 10
 
     # JWT
     jwt_secret_key: str = "dev-secret-change-in-production"
