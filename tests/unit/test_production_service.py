@@ -33,25 +33,26 @@ class TestRunProduction:
             word_id=word.id, meaning_id=meaning.id,
             dimension="sentence", content="", qc_status=QcStatus.PENDING.value,
         )
-        mnemonic = ContentItem(
-            word_id=word.id, meaning_id=None,
-            dimension="mnemonic", content="", qc_status=QcStatus.PENDING.value,
-        )
-        db_session.add_all([chunk, sentence, mnemonic])
+        mnem_items = []
+        for dim in ["mnemonic_root_affix", "mnemonic_word_in_word", "mnemonic_sound_meaning", "mnemonic_exam_app"]:
+            item = ContentItem(
+                word_id=word.id, meaning_id=None,
+                dimension=dim, content="", qc_status=QcStatus.PENDING.value,
+            )
+            mnem_items.append(item)
+        db_session.add_all([chunk, sentence] + mnem_items)
         db_session.flush()
 
         result = run_production(db_session, pkg.id)
 
-        assert result["generated"] == 3
+        assert result["generated"] == 6  # chunk + sentence + 4 mnemonics
         assert result["qc_passed"] + result["qc_failed"] > 0
 
         # 验证内容已填充
         db_session.refresh(chunk)
         db_session.refresh(sentence)
-        db_session.refresh(mnemonic)
         assert chunk.content != ""
         assert sentence.content != ""
-        assert mnemonic.content != ""
 
         # 验证 Package 状态更新
         db_session.refresh(pkg)

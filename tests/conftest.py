@@ -67,13 +67,20 @@ def sample_word(db_session: Session):
         content="There are many kinds of animals in the zoo.",
         content_cn="动物园里有很多种动物。",
     )
-    mnemonic = ContentItem(
+    mnemonic_wiw = ContentItem(
         word_id=word.id,
         meaning_id=None,
-        dimension="mnemonic",
-        content='[词中词]\nkind = k + ind\nkind 和 king 只差一个字母，国王(king)对人友好(kind)\n"记住kind里藏着king，国王待人总是友好的"',
+        dimension="mnemonic_word_in_word",
+        content='[核心公式]\nkind = k + ind\n\n[助记口诀]\nkind里藏着king\n\n[老师话术]\nkind 和 king 只差一个字母，国王(king)对人友好(kind)',
     )
-    db_session.add_all([chunk1, chunk2, sentence1, sentence2, mnemonic])
+    mnemonic_ra = ContentItem(
+        word_id=word.id,
+        meaning_id=None,
+        dimension="mnemonic_root_affix",
+        content='',
+        qc_status="rejected",
+    )
+    db_session.add_all([chunk1, chunk2, sentence1, sentence2, mnemonic_wiw, mnemonic_ra])
     db_session.flush()
 
     return {
@@ -83,5 +90,5 @@ def sample_word(db_session: Session):
         "sources": [source1, source2],
         "chunks": [chunk1, chunk2],
         "sentences": [sentence1, sentence2],
-        "mnemonic": mnemonic,
+        "mnemonics": [mnemonic_wiw, mnemonic_ra],
     }

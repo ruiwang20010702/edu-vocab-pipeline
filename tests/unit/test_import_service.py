@@ -126,21 +126,31 @@ class TestImportFromJson:
         import_service.import_from_json(db_session, data, "mnemonic_test")
 
         word = db_session.query(Word).filter_by(word="bright").first()
-        mnemonics = db_session.query(ContentItem).filter_by(word_id=word.id, dimension="mnemonic").all()
-        assert len(mnemonics) == 1
-        assert mnemonics[0].meaning_id is None
+        from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+
+        mnemonics = db_session.query(ContentItem).filter(
+            ContentItem.word_id == word.id,
+            ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
+        ).all()
+        assert len(mnemonics) == 4
+        assert all(m.meaning_id is None for m in mnemonics)
 
     def test_content_placeholders_not_duplicated(self, db_session):
         """重复导入相同数据不会重复创建 ContentItem。"""
+        from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+
         data = [{"word": "star", "meanings": [{"pos": "n.", "definition": "星星", "sources": []}]}]
         import_service.import_from_json(db_session, data, "dup_batch1")
         import_service.import_from_json(db_session, data, "dup_batch2")
 
         word = db_session.query(Word).filter_by(word="star").first()
         chunks = db_session.query(ContentItem).filter_by(word_id=word.id, dimension="chunk").all()
-        mnemonics = db_session.query(ContentItem).filter_by(word_id=word.id, dimension="mnemonic").all()
+        mnemonics = db_session.query(ContentItem).filter(
+            ContentItem.word_id == word.id,
+            ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
+        ).all()
         assert len(chunks) == 1
-        assert len(mnemonics) == 1
+        assert len(mnemonics) == 4
 
 
 class TestImportFromCsv:

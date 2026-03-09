@@ -24,7 +24,7 @@ def test_sample_word_fixture(sample_word):
     assert len(sample_word["meanings"]) == 2
     assert len(sample_word["chunks"]) == 2
     assert len(sample_word["sentences"]) == 2
-    assert sample_word["mnemonic"] is not None
+    assert len(sample_word["mnemonics"]) > 0
 
 
 def test_content_item_default_qc_status(db_session):

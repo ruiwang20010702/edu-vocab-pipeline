@@ -62,7 +62,10 @@ class ContentDimension(str, enum.Enum):
     SYLLABLE = "syllable"
     CHUNK = "chunk"
     SENTENCE = "sentence"
-    MNEMONIC = "mnemonic"
+    MNEMONIC_ROOT_AFFIX = "mnemonic_root_affix"
+    MNEMONIC_WORD_IN_WORD = "mnemonic_word_in_word"
+    MNEMONIC_SOUND_MEANING = "mnemonic_sound_meaning"
+    MNEMONIC_EXAM_APP = "mnemonic_exam_app"
 
 
 class MnemonicType(str, enum.Enum):
@@ -72,6 +75,15 @@ class MnemonicType(str, enum.Enum):
     WORD_IN_WORD = "词中词"
     SOUND_MEANING = "音义联想"
     EXAM_APPLICATION = "考试应用"
+
+
+# 所有助记维度名集合，方便各处判断
+MNEMONIC_DIMENSIONS = frozenset({
+    ContentDimension.MNEMONIC_ROOT_AFFIX.value,
+    ContentDimension.MNEMONIC_WORD_IN_WORD.value,
+    ContentDimension.MNEMONIC_SOUND_MEANING.value,
+    ContentDimension.MNEMONIC_EXAM_APP.value,
+})
 
 
 class UserRole(str, enum.Enum):

@@ -67,10 +67,12 @@ def _build_word_detail(session: Session, word: Word) -> dict[str, Any]:
             "sentence": sentence,
         })
 
-    mnemonic = (
+    from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+
+    mnemonics = (
         session.query(ContentItem)
-        .filter_by(word_id=word.id, dimension="mnemonic")
-        .first()
+        .filter(ContentItem.word_id == word.id, ContentItem.dimension.in_(MNEMONIC_DIMENSIONS))
+        .all()
     )
 
     # 获取未通过的规则结果作为 issues
@@ -87,7 +89,7 @@ def _build_word_detail(session: Session, word: Word) -> dict[str, Any]:
         "updated_at": word.updated_at,
         "phonetics": phonetics,
         "meanings": meanings_data,
-        "mnemonic": mnemonic,
+        "mnemonics": mnemonics,
         "issues": [
             {
                 "id": iss.id,

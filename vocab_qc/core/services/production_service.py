@@ -5,8 +5,14 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.generators.chunk import ChunkGenerator
-from vocab_qc.core.generators.mnemonic import MnemonicGenerator
+from vocab_qc.core.generators.mnemonic import (
+    ExamAppMnemonicGenerator,
+    RootAffixMnemonicGenerator,
+    SoundMeaningMnemonicGenerator,
+    WordInWordMnemonicGenerator,
+)
 from vocab_qc.core.generators.sentence import SentenceGenerator
+from vocab_qc.core.generators.syllable import SyllableGenerator
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
 from vocab_qc.core.models.enums import QcStatus
@@ -17,7 +23,11 @@ from vocab_qc.core.services.qc_service import QcService
 _GENERATORS = {
     "chunk": ChunkGenerator(),
     "sentence": SentenceGenerator(),
-    "mnemonic": MnemonicGenerator(),
+    "syllable": SyllableGenerator(),
+    "mnemonic_root_affix": RootAffixMnemonicGenerator(),
+    "mnemonic_word_in_word": WordInWordMnemonicGenerator(),
+    "mnemonic_sound_meaning": SoundMeaningMnemonicGenerator(),
+    "mnemonic_exam_app": ExamAppMnemonicGenerator(),
 }
 
 
@@ -142,7 +152,15 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
             word=word.word,
             meaning=meaning_text,
             pos=pos,
+            session=session,
         )
+
+        # 助记类型返回 valid: false → 该类型不适用，跳过
+        if result.get("valid") is False:
+            item.content = ""
+            item.qc_status = QcStatus.REJECTED.value
+            count += 1
+            continue
 
         item.content = result.get("content", "")
         if result.get("content_cn"):

@@ -8,9 +8,9 @@ class TestPromptService:
     def test_seed_defaults(self, db_session):
         """种子数据应成功插入."""
         count = prompt_service.seed_defaults(db_session)
-        assert count == 5
+        assert count == 8
         prompts = prompt_service.list_prompts(db_session)
-        assert len(prompts) == 5
+        assert len(prompts) == 8
 
     def test_seed_idempotent(self, db_session):
         """重复调用 seed 不应创建重复数据."""

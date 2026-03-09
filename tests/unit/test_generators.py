@@ -3,8 +3,14 @@
 from unittest.mock import patch
 
 from vocab_qc.core.generators.chunk import ChunkGenerator
-from vocab_qc.core.generators.mnemonic import MnemonicGenerator
+from vocab_qc.core.generators.mnemonic import (
+    ExamAppMnemonicGenerator,
+    RootAffixMnemonicGenerator,
+    SoundMeaningMnemonicGenerator,
+    WordInWordMnemonicGenerator,
+)
 from vocab_qc.core.generators.sentence import SentenceGenerator
+from vocab_qc.core.generators.syllable import SyllableGenerator
 
 
 class TestChunkGenerator:
@@ -18,7 +24,7 @@ class TestChunkGenerator:
     def test_ai_mode(self):
         """AI 模式应返回 AI 生成的内容."""
         gen = ChunkGenerator()
-        with patch.object(gen, "_call_ai", return_value={"content": "eat an apple"}):
+        with patch.object(gen, "_call_ai", return_value={"content": "eat an apple", "content_cn": "吃苹果"}):
             result = gen.generate("apple", meaning="苹果", pos="n.")
         assert result["content"] == "eat an apple"
 
@@ -46,17 +52,61 @@ class TestSentenceGenerator:
         assert result["content_cn"] == "我每天读一本书。"
 
 
-class TestMnemonicGenerator:
+class TestSyllableGenerator:
     def test_fallback_without_api(self):
-        gen = MnemonicGenerator()
+        gen = SyllableGenerator()
         result = gen.generate("apple")
-        assert "[词中词]" in result["content"]
-        assert result["content_cn"] is None
+        assert result["content"] == "apple"
 
     def test_ai_mode(self):
-        gen = MnemonicGenerator()
-        ai_content = "[词中词] app + le\n[核心公式] apple = app(应用) + le\n[助记口诀] 手机应用画苹果\n[老师话术] 把apple拆成app和le"
-        with patch.object(gen, "_call_ai", return_value={"content": ai_content}):
+        gen = SyllableGenerator()
+        with patch.object(gen, "_call_ai", return_value={"content": "ap·ple"}):
             result = gen.generate("apple")
-        assert "[词中词]" in result["content"]
-        assert "app" in result["content"]
+        assert result["content"] == "ap·ple"
+
+
+class TestRootAffixMnemonicGenerator:
+    def test_fallback_without_api(self):
+        gen = RootAffixMnemonicGenerator()
+        result = gen.generate("invisible", meaning="看不见的", pos="adj.")
+        assert result["valid"] is False
+        assert result["content"] is None
+
+    def test_ai_valid(self):
+        gen = RootAffixMnemonicGenerator()
+        ai_resp = {
+            "valid": True,
+            "formula": "in(不) + vis(看) + ible(能…的)",
+            "chant": "不能被看见",
+            "script": "XX同学，来看这个词...",
+        }
+        with patch.object(gen, "_call_ai", return_value=ai_resp):
+            result = gen.generate("invisible", meaning="看不见的", pos="adj.")
+        assert result["valid"] is True
+        assert "[核心公式]" in result["content"]
+        assert result["formula"] == ai_resp["formula"]
+
+    def test_ai_invalid(self):
+        gen = RootAffixMnemonicGenerator()
+        with patch.object(gen, "_call_ai", return_value={"valid": False}):
+            result = gen.generate("dog", meaning="狗", pos="n.")
+        assert result["valid"] is False
+        assert result["content"] is None
+
+
+class TestWordInWordMnemonicGenerator:
+    def test_dimension(self):
+        gen = WordInWordMnemonicGenerator()
+        assert gen.dimension == "mnemonic_word_in_word"
+
+
+class TestSoundMeaningMnemonicGenerator:
+    def test_dimension(self):
+        gen = SoundMeaningMnemonicGenerator()
+        assert gen.dimension == "mnemonic_sound_meaning"
+
+
+class TestExamAppMnemonicGenerator:
+    def test_dimension(self):
+        gen = ExamAppMnemonicGenerator()
+        assert gen.dimension == "mnemonic_exam_app"

@@ -184,27 +184,30 @@ def _create_content_placeholders(
                     )
                 )
 
-    # mnemonic — 每个单词一条（与义项无关）
+    # mnemonic — 每个单词 4 条（4 种助记类型，与义项无关）
+    from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+
     seen_word_ids: set[int] = set()
     for word in words:
         if word.id in seen_word_ids:
             continue
         seen_word_ids.add(word.id)
-        exists = (
-            session.query(ContentItem)
-            .filter_by(word_id=word.id, dimension="mnemonic")
-            .first()
-        )
-        if exists is None:
-            session.add(
-                ContentItem(
-                    word_id=word.id,
-                    meaning_id=None,
-                    dimension="mnemonic",
-                    content="",
-                    qc_status=QcStatus.PENDING.value,
-                )
+        for mnem_dim in MNEMONIC_DIMENSIONS:
+            exists = (
+                session.query(ContentItem)
+                .filter_by(word_id=word.id, dimension=mnem_dim)
+                .first()
             )
+            if exists is None:
+                session.add(
+                    ContentItem(
+                        word_id=word.id,
+                        meaning_id=None,
+                        dimension=mnem_dim,
+                        content="",
+                        qc_status=QcStatus.PENDING.value,
+                    )
+                )
 
 
 def _find_or_create_meaning(session: Session, word: Word, pos: str, definition: str) -> Meaning:

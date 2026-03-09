@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
+from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
 
 
 class ExportService:
@@ -26,7 +27,7 @@ class ExportService:
             "syllables": phonetic.syllables if phonetic else "",
             "ipa": phonetic.ipa if phonetic else "",
             "meanings": [],
-            "mnemonic": None,
+            "mnemonics": [],
         }
 
         for meaning in meanings:
@@ -56,13 +57,20 @@ class ExportService:
             }
             result["meanings"].append(meaning_data)
 
-        # 获取 approved 的助记
-        mnemonic = (
+        # 获取 approved 的助记（4 种类型）
+        mnemonics = (
             session.query(ContentItem)
-            .filter_by(word_id=word.id, dimension="mnemonic", qc_status=QcStatus.APPROVED.value)
-            .first()
+            .filter(
+                ContentItem.word_id == word.id,
+                ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
+                ContentItem.qc_status == QcStatus.APPROVED.value,
+            )
+            .all()
         )
-        result["mnemonic"] = mnemonic.content if mnemonic else None
+        result["mnemonics"] = [
+            {"type": m.dimension, "content": m.content}
+            for m in mnemonics
+        ]
 
         return result
 

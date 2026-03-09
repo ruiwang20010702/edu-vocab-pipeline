@@ -42,7 +42,7 @@ class TestListWords:
     def test_word_detail_has_mnemonic(self, db_session, sample_word):
         result = word_service.list_words(db_session)
         word_data = result["items"][0]
-        assert word_data["mnemonic"] is not None
+        assert len(word_data["mnemonics"]) > 0
 
 
 class TestGetWordDetail:
