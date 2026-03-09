@@ -19,10 +19,13 @@ class ChunkGenerator(ContentGenerator):
 
     def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
         session = kwargs.get("session")
-        system_prompt = self.get_system_prompt(session)
+        ai_config = self.get_ai_config(session)
         user_prompt = f"Word: {word} | POS: {pos or '未知'} | Meaning: {meaning or '未知'}"
 
-        result = self._call_ai(system_prompt, user_prompt)
+        result = self._call_ai(
+            ai_config.system_prompt, user_prompt,
+            model=ai_config.model, api_key=ai_config.api_key, base_url=ai_config.base_url,
+        )
 
         if result and result.get("content"):
             return {"content": result["content"], "content_cn": result.get("content_cn")}

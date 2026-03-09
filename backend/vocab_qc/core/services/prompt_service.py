@@ -12,56 +12,56 @@ DEFAULT_PROMPTS = [
         "name": "语块生成",
         "category": "generation",
         "dimension": "chunk",
-        "model": "gpt-4o-mini",
+        "model": "gemini-3-flash-preview",
         "content": "请为单词 {word} 的义项「{pos} {definition}」生成一个常用语块...",
     },
     {
         "name": "例句生成",
         "category": "generation",
         "dimension": "sentence",
-        "model": "gpt-4o-mini",
+        "model": "gemini-3-flash-preview",
         "content": "请为单词 {word} 的义项「{pos} {definition}」生成一个例句...",
     },
     {
         "name": "助记-词根词缀生成",
         "category": "generation",
         "dimension": "mnemonic_root_affix",
-        "model": "gpt-4o-mini",
+        "model": "gemini-3-flash-preview",
         "content": "请为单词 {word} 生成词根词缀助记法...",
     },
     {
         "name": "助记-词中词生成",
         "category": "generation",
         "dimension": "mnemonic_word_in_word",
-        "model": "gpt-4o-mini",
+        "model": "gemini-3-flash-preview",
         "content": "请为单词 {word} 生成词中词助记法...",
     },
     {
         "name": "助记-音义联想生成",
         "category": "generation",
         "dimension": "mnemonic_sound_meaning",
-        "model": "gpt-4o-mini",
+        "model": "gemini-3-flash-preview",
         "content": "请为单词 {word} 生成音义联想助记法...",
     },
     {
         "name": "助记-考试应用生成",
         "category": "generation",
         "dimension": "mnemonic_exam_app",
-        "model": "gpt-4o-mini",
+        "model": "gemini-3-flash-preview",
         "content": "请为单词 {word} 生成考试应用助记法...",
     },
     {
         "name": "语块质检",
         "category": "qa",
         "dimension": "chunk",
-        "model": "gpt-4o-mini",
+        "model": "gemini-3-flash-preview",
         "content": "请检查以下语块是否符合标准...",
     },
     {
         "name": "例句质检",
         "category": "qa",
         "dimension": "sentence",
-        "model": "gpt-4o-mini",
+        "model": "gemini-3-flash-preview",
         "content": "请检查以下例句是否符合标准...",
     },
 ]
@@ -108,8 +108,10 @@ def create_prompt(session: Session, data: dict, user_id: Optional[int] = None) -
         name=data["name"],
         category=data["category"],
         dimension=data["dimension"],
-        model=data.get("model", "gpt-4o-mini"),
+        model=data.get("model", "gemini-3-flash-preview"),
         content=data.get("content", ""),
+        ai_api_key=data.get("ai_api_key"),
+        ai_api_base_url=data.get("ai_api_base_url"),
         created_by=user_id,
     )
     session.add(prompt)
@@ -121,7 +123,7 @@ def update_prompt(session: Session, prompt_id: int, data: dict) -> Optional[Prom
     prompt = session.query(Prompt).filter_by(id=prompt_id).first()
     if prompt is None:
         return None
-    for field in ("name", "model", "content", "is_active"):
+    for field in ("name", "model", "content", "is_active", "ai_api_key", "ai_api_base_url"):
         if field in data:
             setattr(prompt, field, data[field])
     session.flush()

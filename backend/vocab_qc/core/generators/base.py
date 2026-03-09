@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -33,37 +34,65 @@ def load_prompt_file(filename: str) -> Optional[str]:
     return None
 
 
+@dataclass(frozen=True)
+class AiConfig:
+    """AI 调用配置，支持 per-dimension 覆盖."""
+
+    system_prompt: str
+    model: str
+    api_key: str
+    base_url: str
+
+
 class ContentGenerator:
     """内容生成器基类，支持 AI 调用与占位模式."""
 
     dimension: str = ""
     prompt_filename: str = ""
 
-    def get_custom_prompt(self, session: Any) -> Optional[str]:
-        """从数据库获取自定义 Prompt 模板（如有）."""
-        try:
-            from vocab_qc.core.services.prompt_service import get_active_prompt
+    def get_ai_config(self, session: Any = None) -> AiConfig:
+        """获取完整 AI 配置：Prompt 内容 + 模型/密钥/地址。
 
-            prompt = get_active_prompt(session, "generation", self.dimension)
-            if prompt and prompt.content:
-                return prompt.content
-        except Exception:
-            logging.getLogger(__name__).warning("从数据库获取自定义 Prompt 失败", exc_info=True)
-        return None
+        优先级: DB Prompt 配置 → 全局 settings。
+        """
+        system_prompt = ""
+        model = settings.ai_model
+        api_key = settings.ai_api_key
+        base_url = settings.ai_api_base_url
 
-    def get_system_prompt(self, session: Any = None) -> str:
-        """获取系统 Prompt：DB 优先 → 文件 → 硬编码兜底."""
+        # 1. 尝试从 DB 获取 Prompt 及其 AI 配置
         if session:
-            db_prompt = self.get_custom_prompt(session)
-            if db_prompt:
-                return db_prompt
+            try:
+                from vocab_qc.core.services.prompt_service import get_active_prompt
 
-        if self.prompt_filename:
-            file_prompt = load_prompt_file(self.prompt_filename)
-            if file_prompt:
-                return file_prompt
+                prompt = get_active_prompt(session, "generation", self.dimension)
+                if prompt:
+                    if prompt.content:
+                        system_prompt = prompt.content
+                    if prompt.model:
+                        model = prompt.model
+                    if prompt.ai_api_key:
+                        api_key = prompt.ai_api_key
+                    if prompt.ai_api_base_url:
+                        base_url = prompt.ai_api_base_url
+            except Exception:
+                logging.getLogger(__name__).warning("从数据库获取 Prompt 配置失败", exc_info=True)
 
-        return self._fallback_prompt()
+        # 2. Prompt 文本 fallback: 文件 → 硬编码
+        if not system_prompt:
+            if self.prompt_filename:
+                file_prompt = load_prompt_file(self.prompt_filename)
+                if file_prompt:
+                    system_prompt = file_prompt
+            if not system_prompt:
+                system_prompt = self._fallback_prompt()
+
+        return AiConfig(
+            system_prompt=system_prompt,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+        )
 
     def _fallback_prompt(self) -> str:
         """硬编码兜底 Prompt，子类可覆盖."""
@@ -78,22 +107,24 @@ class ContentGenerator:
         """
         raise NotImplementedError
 
-    def _call_ai(self, system_prompt: str, user_prompt: str, model: Optional[str] = None) -> dict[str, Any]:
+    def _call_ai(self, system_prompt: str, user_prompt: str, model: Optional[str] = None,
+                 api_key: Optional[str] = None, base_url: Optional[str] = None) -> dict[str, Any]:
         """同步调用 AI API，返回 JSON 结果.
 
+        支持 per-call 覆盖 model/api_key/base_url。
         无 API 配置时返回空 dict，由子类降级到占位。
         """
-        api_key = settings.ai_api_key
-        base_url = settings.ai_api_base_url
-        ai_model = model or settings.ai_model
+        actual_key = api_key or settings.ai_api_key
+        actual_url = base_url or settings.ai_api_base_url
+        actual_model = model or settings.ai_model
 
-        if not api_key or not base_url:
+        if not actual_key or not actual_url:
             return {}
 
         last_error = None
         for attempt in range(settings.ai_max_retries):
             try:
-                return self._do_request(base_url, api_key, ai_model, system_prompt, user_prompt)
+                return self._do_request(actual_url, actual_key, actual_model, system_prompt, user_prompt)
             except Exception as e:
                 last_error = e
                 if attempt < settings.ai_max_retries - 1:

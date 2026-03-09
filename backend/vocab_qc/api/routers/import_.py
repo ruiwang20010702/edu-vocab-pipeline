@@ -25,7 +25,7 @@ def import_file(
     request: Request,
     file: UploadFile,
     batch_name: str = "",
-    model: str = "gpt-4o-mini",
+    model: str = "gemini-3-flash-preview",
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin")),
 ):

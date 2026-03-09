@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     ai_api_key: str = ""
     ai_api_base_url: str = ""
-    ai_model: str = "gpt-4o-mini"
+    ai_model: str = "gemini-3-flash-preview"
     ai_max_concurrency: int = 5
     ai_max_retries: int = 3
     allow_private_ai_url: bool = False

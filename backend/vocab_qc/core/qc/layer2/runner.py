@@ -25,6 +25,7 @@ class Layer2Runner:
 
     def __init__(self, client: Optional[AiClient] = None):
         self.client = client or AiClient()
+        self._dimension_clients: dict[str, AiClient] = {}
         _mnemonic_checker = UnifiedMnemonicChecker()
         self._unified_checkers = {
             "sentence": UnifiedSentenceChecker(),
@@ -35,6 +36,25 @@ class Layer2Runner:
             "mnemonic_exam_app": _mnemonic_checker,
         }
 
+    def _get_client_for_dimension(self, dimension: str) -> AiClient:
+        """获取维度对应的 AiClient（有缓存）。"""
+        if dimension in self._dimension_clients:
+            return self._dimension_clients[dimension]
+        return self.client
+
+    def load_dimension_configs(self, session) -> None:
+        """从 DB 加载质检维度的 AI 配置，为不同维度创建独立 AiClient。"""
+        from vocab_qc.core.services.prompt_service import get_active_prompt
+
+        for dim in self._unified_checkers:
+            prompt = get_active_prompt(session, "quality", dim)
+            if prompt and (prompt.ai_api_key or prompt.ai_api_base_url or prompt.model):
+                self._dimension_clients[dim] = AiClient(
+                    api_key=prompt.ai_api_key,
+                    base_url=prompt.ai_api_base_url,
+                    model=prompt.model,
+                )
+
     async def check_item_per_rule(
         self,
         item: ContentItem,
@@ -43,11 +63,12 @@ class Layer2Runner:
         **extra,
     ) -> list[RuleResult]:
         """Per-rule 策略：每条规则独立调用 AI."""
+        client = self._get_client_for_dimension(item.dimension)
         rules = RuleRegistry.get_layer2_rules(dimension=item.dimension)
         tasks = []
         for rule_id, checker in rules.items():
             if isinstance(checker, AiRuleChecker):
-                tasks.append(checker.check(self.client, item.content, word_text, meaning_text, **extra))
+                tasks.append(checker.check(client, item.content, word_text, meaning_text, **extra))
 
         if not tasks:
             return []
@@ -62,10 +83,11 @@ class Layer2Runner:
         **extra,
     ) -> list[RuleResult]:
         """Unified 策略：按维度合并调用 AI."""
+        client = self._get_client_for_dimension(item.dimension)
         checker = self._unified_checkers.get(item.dimension)
         if checker is None:
             return []
-        return await checker.check(self.client, item.content, word_text, meaning_text, **extra)
+        return await checker.check(client, item.content, word_text, meaning_text, **extra)
 
     async def _collect_ai_results(
         self,
@@ -118,6 +140,7 @@ class Layer2Runner:
                 continue
             all_passed = all(r.passed for r in results)
 
+            dim_client = self._get_client_for_dimension(item.dimension)
             for result in results:
                 qc_rule_result = QcRuleResult(
                     content_item_id=item.id,
@@ -128,7 +151,7 @@ class Layer2Runner:
                     layer=2,
                     passed=result.passed,
                     detail=result.detail,
-                    ai_model=self.client.model,
+                    ai_model=dim_client.model,
                     ai_strategy=strategy.value,
                     run_id=run_id,
                 )
@@ -154,6 +177,7 @@ class Layer2Runner:
         extra_kwargs: Optional[dict[int, dict]] = None,
     ) -> str:
         """异步执行 Layer 2 批量校验."""
+        self.load_dimension_configs(session)
         run_id = str(uuid.uuid4())
         extra_kwargs = extra_kwargs or {}
 
@@ -193,6 +217,7 @@ class Layer2Runner:
         extra_kwargs: Optional[dict[int, dict]] = None,
     ) -> str:
         """同步桥接：AI 调用在独立线程/事件循环，DB 操作在主线程."""
+        self.load_dimension_configs(session)
         run_id = str(uuid.uuid4())
         extra_kwargs = extra_kwargs or {}
 
