@@ -186,8 +186,8 @@ class QcService:
         for p in session.query(Phonetic).filter(Phonetic.word_id.in_(word_ids)).all():
             phonetics_by_word[p.word_id] = p
 
-        # 批量预加载 meaning pos（避免 N+1）
-        meaning_ids = {item.meaning_id for item in items if item.meaning_id and item.dimension == "meaning"}
+        # 批量预加载 meaning pos（避免 N+1）— 对所有有 meaning_id 的项
+        meaning_ids = {item.meaning_id for item in items if item.meaning_id}
         meanings_pos = {}
         if meaning_ids:
             for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all():
@@ -200,8 +200,8 @@ class QcService:
                 kwargs["ipa"] = phonetic.ipa
                 kwargs["syllables"] = phonetic.syllables
 
-            # 为 meaning 维度传入 pos
-            if item.dimension == "meaning" and item.meaning_id:
+            # 为所有有 meaning_id 的维度传入 pos（sentence/mnemonic/meaning 等）
+            if item.meaning_id:
                 pos = meanings_pos.get(item.meaning_id)
                 if pos:
                     kwargs["pos"] = pos

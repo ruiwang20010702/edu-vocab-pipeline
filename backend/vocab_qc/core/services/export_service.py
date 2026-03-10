@@ -9,6 +9,20 @@ from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Sourc
 from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
 
 
+def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
+    """助记导出: 解析 JSON content 为结构化数据。"""
+    base = {"type": item.dimension}
+    try:
+        data = json.loads(item.content)
+        if isinstance(data, dict):
+            base.update({k: data.get(k, "") for k in ("formula", "chant", "script")})
+            return base
+    except (json.JSONDecodeError, TypeError):
+        pass
+    base["content"] = item.content
+    return base
+
+
 class ExportService:
     """导出服务: 门禁 + 格式化输出."""
 
@@ -64,7 +78,7 @@ class ExportService:
                 "chunk_cn": chunk.content_cn if chunk else None,
                 "sentence": sentence.content if sentence else None,
                 "sentence_cn": sentence.content_cn if sentence else None,
-                "mnemonics": [{"type": m.dimension, "content": m.content} for m in mnemonics],
+                "mnemonics": [_format_mnemonic_export(m) for m in mnemonics],
             }
             result["meanings"].append(meaning_data)
 

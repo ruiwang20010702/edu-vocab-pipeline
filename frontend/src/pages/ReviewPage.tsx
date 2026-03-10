@@ -687,6 +687,27 @@ function WordReviewModal({
 
 /* ===== 维度审核卡片 ===== */
 
+/* ===== 助记 JSON 解析 ===== */
+
+interface MnemonicData { formula: string; chant: string; script: string }
+
+function parseMnemonicJson(content: string): MnemonicData | null {
+  if (!content) return null
+  try {
+    const data = JSON.parse(content)
+    if (data && typeof data === 'object' && 'formula' in data) return data as MnemonicData
+  } catch { /* not JSON */ }
+  return null
+}
+
+function isMnemonicDim(dim: string): boolean {
+  return dim.startsWith('mnemonic_')
+}
+
+function buildMnemonicJson(formula: string, chant: string, script: string): string {
+  return JSON.stringify({ formula, chant, script })
+}
+
 function ReviewDimensionCard({
   item, isLoading, regenResult, isEditing,
   editContent, editContentCn, editResult, editError, saving,
@@ -716,6 +737,32 @@ function ReviewDimensionCard({
   const atLimit = retryCount >= 3
   const content = item.content_item?.content ?? ''
   const issueMsg = item.issues?.[0]?.message ?? ''
+  const isMnemonic = isMnemonicDim(dim)
+  const mnemonicData = isMnemonic ? parseMnemonicJson(content) : null
+
+  // 助记编辑：拆分三个字段
+  const [editFormula, setEditFormula] = useState('')
+  const [editChant, setEditChant] = useState('')
+  const [editScript, setEditScript] = useState('')
+
+  const handleStartMnemonicEdit = () => {
+    if (mnemonicData) {
+      setEditFormula(mnemonicData.formula)
+      setEditChant(mnemonicData.chant)
+      setEditScript(mnemonicData.script)
+    } else {
+      setEditFormula('')
+      setEditChant('')
+      setEditScript('')
+    }
+    onStartEdit()
+  }
+
+  const handleMnemonicSave = () => {
+    onEditContentChange(buildMnemonicJson(editFormula, editChant, editScript))
+    // 延迟一帧让 state 更新后再保存
+    setTimeout(() => onSaveEdit(), 0)
+  }
 
   return (
     <div className={`bg-white rounded-2xl border p-4 space-y-3 transition-all ${
@@ -748,36 +795,91 @@ function ReviewDimensionCard({
 
       {/* 内容预览 / 编辑 */}
       {isEditing ? (
-        <div className="space-y-2">
-          <textarea
-            value={editContent}
-            onChange={e => onEditContentChange(e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none"
-          />
-          <textarea
-            value={editContentCn}
-            onChange={e => onEditContentCnChange(e.target.value)}
-            rows={2}
-            placeholder="中文翻译（可选）"
-            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400"
-          />
-          {editResult && (
-            <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${
-              editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'
-            }`}>
-              {editResult.message}
+        isMnemonic ? (
+          /* 助记编辑: 三个独立 textarea */
+          <div className="space-y-2">
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase">核心公式</label>
+              <textarea value={editFormula} onChange={e => setEditFormula(e.target.value)} rows={2}
+                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
             </div>
-          )}
-          {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
-          <div className="flex items-center gap-2">
-            <button onClick={onSaveEdit} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
-              {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-              保存
-            </button>
-            <button onClick={onCancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">
-              取消
-            </button>
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase">助记口诀</label>
+              <textarea value={editChant} onChange={e => setEditChant(e.target.value)} rows={2}
+                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
+              <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={4}
+                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+            </div>
+            {editResult && (
+              <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${
+                editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'
+              }`}>
+                {editResult.message}
+              </div>
+            )}
+            {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
+            <div className="flex items-center gap-2">
+              <button onClick={handleMnemonicSave} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                保存
+              </button>
+              <button onClick={onCancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">
+                取消
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* 非助记编辑: 原有双 textarea */
+          <div className="space-y-2">
+            <textarea
+              value={editContent}
+              onChange={e => onEditContentChange(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none"
+            />
+            <textarea
+              value={editContentCn}
+              onChange={e => onEditContentCnChange(e.target.value)}
+              rows={2}
+              placeholder="中文翻译（可选）"
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400"
+            />
+            {editResult && (
+              <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${
+                editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'
+              }`}>
+                {editResult.message}
+              </div>
+            )}
+            {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
+            <div className="flex items-center gap-2">
+              <button onClick={onSaveEdit} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                保存
+              </button>
+              <button onClick={onCancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">
+                取消
+              </button>
+            </div>
+          </div>
+        )
+      ) : isMnemonic && mnemonicData ? (
+        /* 助记预览: 结构化三段 */
+        <div className="space-y-2 text-xs">
+          <div className="flex items-start gap-2">
+            <span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span>
+            <span className="text-slate-700">{mnemonicData.formula}</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span>
+            <span className="text-slate-700">{mnemonicData.chant}</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span>
+            <span className="text-slate-500 line-clamp-2">{mnemonicData.script}</span>
           </div>
         </div>
       ) : (
@@ -809,7 +911,7 @@ function ReviewDimensionCard({
               AI 修复
             </button>
           )}
-          <button onClick={onStartEdit} className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-xl text-[11px] font-bold transition-all">
+          <button onClick={isMnemonic ? handleStartMnemonicEdit : onStartEdit} className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-xl text-[11px] font-bold transition-all">
             <UserCog size={11} className="inline mr-1" />
             手动编辑
           </button>

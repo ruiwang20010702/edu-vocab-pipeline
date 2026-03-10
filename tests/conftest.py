@@ -72,7 +72,7 @@ def sample_word(db_session: Session):
         word_id=word.id,
         meaning_id=meaning1.id,
         dimension="mnemonic_word_in_word",
-        content='[核心公式]\nkind = k + ind\n\n[助记口诀]\nkind里藏着king\n\n[老师话术]\nkind 和 king 只差一个字母，国王(king)对人友好(kind)',
+        content='{"formula": "kind = k + ind", "chant": "kind里藏着king", "script": "kind 和 king 只差一个字母，国王(king)对人友好(kind)"}',
     )
     mnemonic_ra = ContentItem(
         word_id=word.id,

@@ -255,6 +255,15 @@ def _clean_package_data(session: Session, pkg: Package) -> None:
             ContentItem.content == "",
         ).delete(synchronize_session=False)
 
+    # 5. 删除独占词的 pending syllable（词级维度）
+    if exclusive_word_ids:
+        session.query(ContentItem).filter(
+            ContentItem.word_id.in_(exclusive_word_ids),
+            ContentItem.dimension == "syllable",
+            ContentItem.qc_status == QcStatus.PENDING.value,
+            ContentItem.content == "",
+        ).delete(synchronize_session=False)
+
     # 6. 删除 PackageMeaning 映射
     session.query(PackageMeaning).filter_by(package_id=pkg.id).delete(synchronize_session=False)
     session.flush()
@@ -278,6 +287,7 @@ def _create_content_placeholders(
     """为导入的数据创建 ContentItem 占位记录。
 
     chunk / sentence / mnemonic 均按义项生成（防止一词多义混淆）。
+    syllable 按单词生成（词级维度，meaning_id=None）。
     """
     from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
 
@@ -300,6 +310,24 @@ def _create_content_placeholders(
                         qc_status=QcStatus.PENDING.value,
                     )
                 )
+
+    # 词级维度: syllable（每个单词一条，meaning_id=None）
+    for word in words:
+        exists = (
+            session.query(ContentItem)
+            .filter_by(word_id=word.id, dimension="syllable", meaning_id=None)
+            .first()
+        )
+        if exists is None:
+            session.add(
+                ContentItem(
+                    word_id=word.id,
+                    meaning_id=None,
+                    dimension="syllable",
+                    content="",
+                    qc_status=QcStatus.PENDING.value,
+                )
+            )
 
 
 def _upsert_phonetic_ipa(session: Session, word: Word, ipa: str) -> None:

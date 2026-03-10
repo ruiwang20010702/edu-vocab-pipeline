@@ -17,7 +17,8 @@ class UnifiedMnemonicChecker:
     rule_ids = ["N5_AI", "N6"]
 
     async def check(self, client: AiClient, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> list[RuleResult]:
-        user_prompt = f"单词: {word}\n助记内容:\n{content}"
+        pos = kwargs.get("pos", "")
+        user_prompt = f"单词: {word}\n词性: {pos or '未知'}\n义项: {meaning or '无'}\n助记内容:\n{content}"
         try:
             response = await client.check(UNIFIED_MNEMONIC_SYSTEM, user_prompt)
             return [

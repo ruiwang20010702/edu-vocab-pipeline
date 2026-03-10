@@ -1,5 +1,6 @@
 """助记生成器: 4 种类型，每种可返回 valid: false 表示不适用."""
 
+import json
 from typing import Any, Optional
 
 from vocab_qc.core.generators.base import ContentGenerator
@@ -27,12 +28,15 @@ class _MnemonicBase(ContentGenerator):
         if result.get("valid") is False:
             return {"valid": False, "content": None, "content_cn": None}
 
-        # 组装结构化内容
+        # 组装结构化 JSON 内容
         formula = result.get("formula", "")
         chant = result.get("chant", "")
         script = result.get("script", "")
 
-        content = f"[核心公式]\n{formula}\n\n[助记口诀]\n{chant}\n\n[老师话术]\n{script}"
+        content = json.dumps(
+            {"formula": formula, "chant": chant, "script": script},
+            ensure_ascii=False,
+        )
         return {
             "valid": True,
             "content": content,

@@ -23,7 +23,7 @@ class Layer1Runner:
         results = []
 
         # 合并默认参数和额外参数，extra 中的值优先级更高
-        base_kwargs = {"content_cn": item.content_cn or ""}
+        base_kwargs = {"content_cn": item.content_cn or "", "dimension": item.dimension}
         base_kwargs.update(extra)
 
         for rule_id, checker in rules.items():

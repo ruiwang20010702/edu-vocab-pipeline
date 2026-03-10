@@ -1,5 +1,6 @@
 """内容生成器单元测试."""
 
+import json
 from unittest.mock import patch
 
 from vocab_qc.core.generators.chunk import ChunkGenerator
@@ -83,7 +84,11 @@ class TestRootAffixMnemonicGenerator:
         with patch.object(gen, "_call_ai", return_value=ai_resp):
             result = gen.generate("invisible", meaning="看不见的", pos="adj.")
         assert result["valid"] is True
-        assert "[核心公式]" in result["content"]
+        # content 为 JSON 格式
+        parsed = json.loads(result["content"])
+        assert parsed["formula"] == ai_resp["formula"]
+        assert parsed["chant"] == ai_resp["chant"]
+        assert parsed["script"] == ai_resp["script"]
         assert result["formula"] == ai_resp["formula"]
 
     def test_ai_invalid(self):

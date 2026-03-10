@@ -44,8 +44,9 @@ class UnifiedSentenceChecker:
         content_cn: str = "",
         **kwargs: Any,
     ) -> list[RuleResult]:
+        pos = kwargs.get("pos", "")
         user_prompt = (
-            f"单词: {word}\n义项: {meaning or '无'}\n"
+            f"单词: {word}\n词性: {pos or '未知'}\n义项: {meaning or '无'}\n"
             f"英文例句: {content}\n中文翻译: {content_cn}\n\n"
             "请对以上例句执行所有检查项。"
         )
