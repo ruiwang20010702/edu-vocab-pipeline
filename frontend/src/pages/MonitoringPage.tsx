@@ -62,9 +62,9 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
 
   if (!batchId) {
     return (
-      <div className="glass-card rounded-3xl p-10 text-center">
-        <Activity size={48} className="mx-auto text-white/30 mb-4" />
-        <p className="text-white/50">请先在「词表导入」页面创建生产任务</p>
+      <div className="bg-white rounded-[32px] p-10 text-center border border-white shadow-sm">
+        <Activity size={48} className="mx-auto text-slate-300 mb-4" />
+        <p className="text-slate-400">请先在「词表导入」页面创建生产任务</p>
       </div>
     )
   }

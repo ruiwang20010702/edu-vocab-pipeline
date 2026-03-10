@@ -124,9 +124,9 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
   return (
     <div className="space-y-4">
       {/* 批次面板 */}
-      <div className="glass-card rounded-2xl p-4">
+      <div className="bg-white rounded-2xl border border-white shadow-sm p-4">
         {batchLoading ? (
-          <div className="flex items-center gap-2 text-white/50">
+          <div className="flex items-center gap-2 text-blue-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-sm">加载批次信息...</span>
           </div>
@@ -134,15 +134,15 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <PackagePlus size={18} className="text-blue-300" />
-                <span className="text-white font-medium">当前批次 #{batch.id}</span>
+                <PackagePlus size={18} className="text-blue-600" />
+                <span className="text-slate-900 font-medium">当前批次 #{batch.id}</span>
               </div>
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-white/60">
-                  进度: <span className="text-white">{batch.reviewed_count}/{batch.word_count}</span>
+                <span className="text-slate-500">
+                  进度: <span className="text-slate-900">{batch.reviewed_count}/{batch.word_count}</span>
                 </span>
                 <span className={`px-2 py-0.5 rounded-lg text-xs ${
-                  batch.status === 'completed' ? 'bg-green-400/20 text-green-200' : 'bg-blue-400/20 text-blue-200'
+                  batch.status === 'completed' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'
                 }`}>
                   {batch.status === 'completed' ? '已完成' : '进行中'}
                 </span>
@@ -150,18 +150,18 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
             </div>
             <button
               onClick={() => { setBatch(null); loadItems() }}
-              className="text-sm text-white/40 hover:text-white/70 transition-colors"
+              className="text-sm text-slate-300 hover:text-slate-500 transition-colors"
             >
               查看全部待审
             </button>
           </div>
         ) : (
           <div className="flex items-center justify-between">
-            <span className="text-white/50 text-sm">暂无进行中的批次</span>
+            <span className="text-slate-400 text-sm">暂无进行中的批次</span>
             <button
               onClick={handleAssign}
               disabled={assignLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 rounded-xl transition-all text-sm font-medium disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all text-sm font-medium disabled:opacity-50"
             >
               {assignLoading ? <Loader2 size={14} className="animate-spin" /> : <PackagePlus size={14} />}
               领取批次
@@ -173,16 +173,16 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
       {/* 搜索 + 过滤 */}
       <div className="flex items-center gap-3">
         <div className="flex-1 relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" size={18} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
           <input
             type="text"
             placeholder="搜索单词..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-11 pr-4 py-3 glass-module rounded-2xl text-white placeholder-white/40 focus:outline-none focus:border-white/50 transition-all"
+            className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-300 transition-all"
           />
         </div>
-        <button onClick={loadItems} className="p-3 glass-module rounded-2xl text-white/60 hover:text-white transition-colors">
+        <button onClick={loadItems} className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-500 hover:text-slate-900 transition-colors">
           <RefreshCw size={18} />
         </button>
       </div>
@@ -194,7 +194,7 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
             key={t.key}
             onClick={() => setTab(t.key)}
             className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-              tab === t.key ? 'bg-white/25 text-white' : 'text-white/50 hover:text-white/80 hover:bg-white/10'
+              tab === t.key ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
             }`}
           >
             {t.label}
@@ -205,10 +205,10 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
       {/* 列表 */}
       {loading ? (
         <div className="flex items-center justify-center h-40">
-          <Loader2 size={24} className="animate-spin text-white/50" />
+          <Loader2 size={24} className="animate-spin text-blue-600" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="glass-card rounded-3xl p-10 text-center text-white/50">
+        <div className="bg-white rounded-[32px] border border-white shadow-sm p-10 text-center text-slate-400">
           {items.length === 0 ? '暂无待审核项目' : '没有匹配结果'}
         </div>
       ) : (
@@ -218,30 +218,30 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
               key={item.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="glass-card rounded-2xl p-4 cursor-pointer hover:bg-white/20 transition-all"
+              className="bg-white rounded-2xl border border-white shadow-sm p-4 cursor-pointer hover:bg-blue-50 transition-all"
               onClick={() => setSelectedItem(item)}
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="font-bold text-white text-lg">{item.word?.word}</span>
-                  <span className="ml-3 text-sm text-white/50">{item.content_item?.dimension}</span>
-                  <span className="ml-2 text-xs text-white/40">重试 {item.content_item?.retry_count ?? 0}/3</span>
+                  <span className="font-bold text-slate-900 text-lg">{item.word?.word}</span>
+                  <span className="ml-3 text-sm text-slate-400">{item.content_item?.dimension}</span>
+                  <span className="ml-2 text-xs text-slate-300">重试 {item.content_item?.retry_count ?? 0}/3</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-1 rounded-lg text-xs ${
-                    item.reason === 'layer1_failed' ? 'bg-red-400/20 text-red-200'
-                    : item.reason === 'layer2_failed' ? 'bg-orange-400/20 text-orange-200'
-                    : 'bg-blue-400/20 text-blue-200'
+                    item.reason === 'layer1_failed' ? 'bg-red-50 text-red-600'
+                    : item.reason === 'layer2_failed' ? 'bg-orange-50 text-orange-600'
+                    : 'bg-blue-50 text-blue-600'
                   }`}>
                     {item.reason}
                   </span>
                   {actionLoading === item.id ? (
-                    <Loader2 size={16} className="animate-spin text-white/50" />
+                    <Loader2 size={16} className="animate-spin text-blue-600" />
                   ) : (
                     <>
                       <button
                         onClick={e => { e.stopPropagation(); handleApprove(item.id) }}
-                        className="p-2 rounded-xl hover:bg-green-400/20 text-green-300 transition-colors"
+                        className="p-2 rounded-xl hover:bg-green-50 text-green-600 transition-colors"
                         title="通过"
                       >
                         <CheckCircle2 size={16} />
@@ -249,7 +249,7 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
                       {item.content_item?.retry_count < 3 && (
                         <button
                           onClick={e => { e.stopPropagation(); handleRegenerate(item.id) }}
-                          className="p-2 rounded-xl hover:bg-blue-400/20 text-blue-300 transition-colors"
+                          className="p-2 rounded-xl hover:bg-blue-50 text-blue-600 transition-colors"
                           title="重新生成"
                         >
                           <RefreshCw size={16} />
@@ -257,7 +257,7 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
                       )}
                       <button
                         onClick={e => { e.stopPropagation(); setSelectedItem(item) }}
-                        className="p-2 rounded-xl hover:bg-yellow-400/20 text-yellow-300 transition-colors"
+                        className="p-2 rounded-xl hover:bg-yellow-50 text-yellow-600 transition-colors"
                         title="手动编辑"
                       >
                         <Edit3 size={16} />
@@ -265,7 +265,7 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
                       {batch && (
                         <button
                           onClick={e => { e.stopPropagation(); handleSkipWord(item.word_id) }}
-                          className="p-2 rounded-xl hover:bg-white/10 text-white/40 transition-colors"
+                          className="p-2 rounded-xl hover:bg-slate-50 text-slate-300 transition-colors"
                           title="跳过此词"
                         >
                           <SkipForward size={16} />
@@ -278,10 +278,10 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
               {item.issues.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {item.issues.slice(0, 3).map((issue, i) => (
-                    <span key={i} className="text-xs bg-white/10 text-white/60 px-2 py-0.5 rounded-lg">{issue.message}</span>
+                    <span key={i} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg">{issue.message}</span>
                   ))}
                   {item.issues.length > 3 && (
-                    <span className="text-xs text-white/40">+{item.issues.length - 3}</span>
+                    <span className="text-xs text-slate-300">+{item.issues.length - 3}</span>
                   )}
                 </div>
               )}
@@ -349,50 +349,50 @@ function ReviewDetailModal({
         initial={{ scale: 0.95 }}
         animate={{ scale: 1 }}
         exit={{ scale: 0.95 }}
-        className="glass-card rounded-3xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto"
+        className="bg-white rounded-[32px] p-6 shadow-2xl border border-slate-100 w-full max-w-lg max-h-[80vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-white">{item.word?.word}</h3>
-          <button onClick={onClose} className="text-white/40 hover:text-white/80">
+          <h3 className="text-xl font-bold text-slate-900">{item.word?.word}</h3>
+          <button onClick={onClose} className="text-slate-300 hover:text-slate-600">
             <X size={20} />
           </button>
         </div>
 
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-white/60 mb-1 block">维度: {item.content_item?.dimension}</label>
-            <label className="text-sm text-white/60 mb-1 block">原因: {item.reason}</label>
+            <label className="text-sm text-slate-500 mb-1 block">维度: {item.content_item?.dimension}</label>
+            <label className="text-sm text-slate-500 mb-1 block">原因: {item.reason}</label>
           </div>
 
           <div>
-            <label className="text-sm text-white/60 mb-1 block">内容</label>
+            <label className="text-sm text-slate-500 mb-1 block">内容</label>
             <textarea
               value={editContent}
               onChange={e => setEditContent(e.target.value)}
               rows={4}
-              className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-white/40 focus:outline-none focus:border-white/50 transition-all resize-none"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-300 transition-all resize-none"
             />
           </div>
 
           <div>
-            <label className="text-sm text-white/60 mb-1 block">中文翻译</label>
+            <label className="text-sm text-slate-500 mb-1 block">中文翻译</label>
             <textarea
               value={editContentCn}
               onChange={e => setEditContentCn(e.target.value)}
               rows={2}
-              className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-white/40 focus:outline-none focus:border-white/50 transition-all resize-none"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-300 transition-all resize-none"
             />
           </div>
 
           {/* 问题列表 */}
           {item.issues.length > 0 && (
             <div>
-              <label className="text-sm text-white/60 mb-2 block">质检问题</label>
+              <label className="text-sm text-slate-500 mb-2 block">质检问题</label>
               <div className="space-y-1">
                 {item.issues.map((issue, i) => (
-                  <div key={i} className="text-sm bg-red-400/10 text-red-200 px-3 py-2 rounded-xl">
-                    <span className="font-mono text-xs text-red-300 mr-2">[{issue.rule_id}]</span>
+                  <div key={i} className="text-sm bg-red-50 text-red-600 border border-red-100 px-3 py-2 rounded-xl">
+                    <span className="font-mono text-xs text-red-500 mr-2">[{issue.rule_id}]</span>
                     {issue.message}
                   </div>
                 ))}
@@ -400,19 +400,19 @@ function ReviewDetailModal({
             </div>
           )}
 
-          {error && <p className="text-red-200 text-sm bg-red-500/20 rounded-xl py-2 text-center">{error}</p>}
+          {error && <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-xl py-2 text-center">{error}</p>}
 
           <div className="flex gap-3">
             <button
               onClick={() => onApprove(item.id)}
-              className="flex-1 py-2.5 bg-green-500/20 hover:bg-green-500/30 text-green-200 rounded-2xl transition-all text-sm font-medium"
+              className="flex-1 py-2.5 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-2xl transition-all text-sm font-medium"
             >
               通过
             </button>
             {item.content_item?.retry_count < 3 && (
               <button
                 onClick={() => onRegenerate(item.id)}
-                className="flex-1 py-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 rounded-2xl transition-all text-sm font-medium"
+                className="flex-1 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-2xl transition-all text-sm font-medium"
               >
                 重新生成 ({item.content_item?.retry_count ?? 0}/3)
               </button>
@@ -420,7 +420,7 @@ function ReviewDetailModal({
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex-1 py-2.5 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-200 rounded-2xl transition-all text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50"
+              className="flex-1 py-2.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-2xl transition-all text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50"
             >
               {saving && <Loader2 size={14} className="animate-spin" />}
               保存修改
