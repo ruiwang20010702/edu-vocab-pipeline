@@ -87,7 +87,8 @@ class TestVerify:
         resp = client.post("/api/auth/verify", json={"email": "admin@test.com", "code": "999999"})
         assert resp.status_code == 401
 
-    def test_verify_unknown_user(self, auth_app):
+    def test_verify_unknown_user_auto_register(self, auth_app):
+        """未知用户首次验证码正确时自动注册。"""
         client, TestSession = auth_app
         session = TestSession()
         code = auth_service.generate_code(session, "nobody@test.com")
@@ -95,7 +96,10 @@ class TestVerify:
         session.close()
 
         resp = client.post("/api/auth/verify", json={"email": "nobody@test.com", "code": code})
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "access_token" in data
+        assert data["user_name"] == "nobody"
 
 
 class TestAdminEndpoints:

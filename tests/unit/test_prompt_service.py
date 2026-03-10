@@ -6,11 +6,11 @@ from vocab_qc.core.services import prompt_service
 
 class TestPromptService:
     def test_seed_defaults(self, db_session):
-        """种子数据应成功插入."""
+        """种子数据应成功插入（14 条: 7 generation + 7 quality）."""
         count = prompt_service.seed_defaults(db_session)
-        assert count == 8
+        assert count == 14
         prompts = prompt_service.list_prompts(db_session)
-        assert len(prompts) == 8
+        assert len(prompts) == 14
 
     def test_seed_idempotent(self, db_session):
         """重复调用 seed 不应创建重复数据."""

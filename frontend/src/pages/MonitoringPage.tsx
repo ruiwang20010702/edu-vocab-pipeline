@@ -234,7 +234,7 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
 
           {/* 操作区 */}
           <AnimatePresence>
-            {pending > 0 && !isRunning && (
+            {failedCount > 0 && !isRunning && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -260,7 +260,7 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
             )}
           </AnimatePresence>
 
-          {pending === 0 && progress >= 100 && (
+          {failedCount === 0 && progress >= 100 && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center">
               <button
                 onClick={onGoToReview}

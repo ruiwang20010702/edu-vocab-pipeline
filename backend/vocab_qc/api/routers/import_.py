@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_db, require_role
 from vocab_qc.api.routers.auth import limiter
-from vocab_qc.api.schemas.import_ import ImportResponse
+from vocab_qc.api.schemas.import_ import ImportResponse, PreviewResponse, PreviewRow
 from vocab_qc.core.config import settings
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import import_service
@@ -17,6 +17,47 @@ from vocab_qc.core.services import import_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["导入"])
+
+
+@router.post("/import/preview", response_model=PreviewResponse)
+@limiter.limit("20/minute")
+def preview_file(
+    request: Request,
+    file: UploadFile,
+    _current_user: User = Depends(require_role("admin", "reviewer")),
+):
+    """预览上传文件的前 5 条数据（不入库）。"""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="未提供文件")
+
+    max_size = settings.max_upload_size_mb * 1024 * 1024
+    content = file.file.read(max_size + 1)
+    if len(content) > max_size:
+        raise HTTPException(status_code=413, detail=f"文件大小超过 {settings.max_upload_size_mb}MB 限制")
+    if not content:
+        raise HTTPException(status_code=400, detail="文件为空")
+
+    safe_filename = Path(file.filename).name
+
+    try:
+        data = import_service.parse_upload(content, safe_filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 展平为行: 每个 meaning 一行
+    rows: list[PreviewRow] = []
+    for entry in data:
+        word = entry.get("word", "")
+        for m in entry.get("meanings", []):
+            rows.append(PreviewRow(
+                word=word,
+                pos=m.get("pos", ""),
+                definition=m.get("definition", ""),
+                source=m.get("sources", [""])[0] if m.get("sources") else "",
+            ))
+
+    total_count = len(rows)
+    return PreviewResponse(rows=rows[:5], total_count=total_count)
 
 
 @router.post("/import", response_model=ImportResponse)

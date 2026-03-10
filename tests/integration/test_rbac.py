@@ -188,7 +188,7 @@ class TestRolePermissions:
     def test_post_qc_run(self, role_client):
         role, client = role_client
         resp = client.post("/api/qc/run", json={"layers": [1], "dimension": "chunk"})
-        if role == "admin":
+        if role in ("admin", "reviewer"):
             assert resp.status_code == 200
         else:
             assert resp.status_code == 403
@@ -204,21 +204,21 @@ class TestRolePermissions:
     # --- 新增测试 ---
 
     def test_import_upload(self, role_client):
-        """POST /api/import — 仅 admin 可上传导入。"""
+        """POST /api/import — admin + reviewer 可上传导入。"""
         role, client = role_client
         resp = client.post("/api/import", files=_make_upload_file())
-        if role == "admin":
+        if role in ("admin", "reviewer"):
             assert resp.status_code == 200
         else:
             assert resp.status_code == 403
 
     def test_batch_produce(self, role_client):
-        """POST /api/batches/{id}/produce — 仅 admin 可触发生产。"""
+        """POST /api/batches/{id}/produce — admin + reviewer 可触发生产。"""
         role, client = role_client
         resp = client.post("/api/batches/1/produce")
-        if role == "admin":
-            # admin 能触发，返回 200 或 409（正在处理）
-            assert resp.status_code in (200, 409)
+        if role in ("admin", "reviewer"):
+            # 能触发，返回 200、404（批次不存在）或 409（正在处理）
+            assert resp.status_code in (200, 404, 409)
         else:
             assert resp.status_code == 403
 
