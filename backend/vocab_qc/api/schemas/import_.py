@@ -14,6 +14,7 @@ class PreviewRow(BaseModel):
     pos: str
     definition: str
     source: str
+    ipa: str = ""
 
 
 class PreviewResponse(BaseModel):

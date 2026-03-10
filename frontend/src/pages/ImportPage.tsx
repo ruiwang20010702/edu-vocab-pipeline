@@ -13,6 +13,7 @@ interface PreviewRow {
   pos: string
   definition: string
   source: string
+  ipa: string
 }
 
 export default function ImportPage({ onStartProduction }: Props) {
@@ -260,6 +261,7 @@ export default function ImportPage({ onStartProduction }: Props) {
                 <thead className="bg-slate-50 text-slate-400 text-xs uppercase tracking-wider">
                   <tr>
                     <th className="px-6 py-4 font-semibold">单词</th>
+                    <th className="px-6 py-4 font-semibold">音标</th>
                     <th className="px-6 py-4 font-semibold">词性</th>
                     <th className="px-6 py-4 font-semibold">中文释义</th>
                     <th className="px-6 py-4 font-semibold">教材来源</th>
@@ -269,6 +271,7 @@ export default function ImportPage({ onStartProduction }: Props) {
                   {previewRows.map((item, i) => (
                     <tr key={i} className="hover:bg-blue-50/30 transition-colors">
                       <td className="px-6 py-4 font-medium text-slate-900">{item.word}</td>
+                      <td className="px-6 py-4 font-mono text-sm text-blue-600">{item.ipa}</td>
                       <td className="px-6 py-4 text-slate-500">{item.pos}</td>
                       <td className="px-6 py-4 text-slate-700">{item.definition}</td>
                       <td className="px-6 py-4">
