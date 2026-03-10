@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
-import { motion } from 'motion/react'
-import { BookOpen, CheckCircle2, Clock, TrendingUp } from 'lucide-react'
+import { motion, AnimatePresence } from 'motion/react'
+import {
+  LayoutDashboard, CheckCircle2, AlertCircle, TrendingUp,
+  Clock, Activity, PieChart, Loader2, ArrowRight, ArrowUpRight,
+} from 'lucide-react'
 import { api } from '../lib/api'
 import type { DashboardStats, BatchInfo } from '../types'
 
@@ -8,10 +11,35 @@ interface Props {
   onViewBatch: (batchId: string, view: 'monitoring' | 'review') => void
 }
 
+/* ===== 维度映射与颜色 ===== */
+
+const DIMENSION_LABELS: Record<string, string> = {
+  phonetic: '语音 Sound',
+  syllable: '音节 Syllables',
+  meaning: '语义 Meaning',
+  chunk: '语境 Context',
+  sentence: '语境 Context',
+  mnemonic_root_affix: '助记 Mnemonic',
+  mnemonic_word_in_word: '助记 Mnemonic',
+  mnemonic_sound_meaning: '助记 Mnemonic',
+  mnemonic_exam_app: '助记 Mnemonic',
+}
+
+const ALL_DIMENSIONS = ['语音 Sound', '语义 Meaning', '音节 Syllables', '语境 Context', '助记 Mnemonic']
+
+const DIMENSION_COLORS: Record<string, { bar: string; bg: string; text: string }> = {
+  '语音 Sound': { bar: 'bg-blue-400', bg: 'bg-blue-50', text: 'text-blue-600' },
+  '语义 Meaning': { bar: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-600' },
+  '音节 Syllables': { bar: 'bg-purple-500', bg: 'bg-purple-50', text: 'text-purple-600' },
+  '语境 Context': { bar: 'bg-blue-600', bg: 'bg-blue-50', text: 'text-blue-700' },
+  '助记 Mnemonic': { bar: 'bg-yellow-500', bg: 'bg-yellow-50', text: 'text-yellow-700' },
+}
+
 export default function DashboardPage({ onViewBatch }: Props) {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [batches, setBatches] = useState<BatchInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeDim, setActiveDim] = useState<any | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -24,7 +52,7 @@ export default function DashboardPage({ onViewBatch }: Props) {
         setBatches(b)
       } catch (e) {
         console.error('加载仪表板数据失败', e)
-        setStats({ total_words: 0, approved_count: 0, pending_count: 0, rejected_count: 0, pass_rate: 0 })
+        setStats({ total_words: 0, approved_count: 0, pending_count: 0, rejected_count: 0, pass_rate: 0, issues: [] })
         setBatches([])
       } finally {
         setLoading(false)
@@ -36,92 +64,233 @@ export default function DashboardPage({ onViewBatch }: Props) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+        <Loader2 className="animate-spin text-blue-600" size={48} />
       </div>
     )
   }
 
   const statCards = [
-    { label: '词汇总量', value: stats?.total_words ?? 0, icon: BookOpen, color: 'from-blue-500/20 to-blue-600/20' },
-    { label: '已通过', value: stats?.approved_count ?? 0, icon: CheckCircle2, color: 'from-green-500/20 to-green-600/20' },
-    { label: '待审核', value: stats?.pending_count ?? 0, icon: Clock, color: 'from-yellow-500/20 to-yellow-600/20' },
-    { label: '通过率', value: `${(stats?.pass_rate ?? 0).toFixed(1)}%`, icon: TrendingUp, color: 'from-purple-500/20 to-purple-600/20' },
+    { label: '总词数', value: (stats?.total_words ?? 0).toLocaleString(), icon: LayoutDashboard, iconBg: 'bg-blue-50 text-blue-600', valueColor: 'text-blue-700' },
+    { label: '已入库', value: (stats?.approved_count ?? 0).toLocaleString(), icon: CheckCircle2, iconBg: 'bg-emerald-50 text-emerald-600', valueColor: 'text-emerald-700' },
+    { label: '待处理', value: (stats?.pending_count ?? 0).toLocaleString(), icon: AlertCircle, iconBg: 'bg-rose-50 text-rose-600', valueColor: 'text-rose-700' },
+    { label: '整体合格率', value: `${(stats?.pass_rate ?? 0).toFixed(1)}%`, icon: TrendingUp, iconBg: 'bg-yellow-50 text-yellow-600', valueColor: 'text-yellow-700' },
   ]
 
+  // 聚合 Bad Case 分类
+  const dimAgg: Record<string, { value: number; fields: { field: string; count: number }[] }> = {}
+  for (const issue of stats?.issues ?? []) {
+    const dim = DIMENSION_LABELS[issue.dimension] || '其他'
+    if (!dimAgg[dim]) dimAgg[dim] = { value: 0, fields: [] }
+    dimAgg[dim].value += issue.count
+    dimAgg[dim].fields.push({ field: issue.field, count: issue.count })
+  }
+
+  const badCases = ALL_DIMENSIONS.map(dim => {
+    const existing = dimAgg[dim]
+    const colors = DIMENSION_COLORS[dim] ?? DIMENSION_COLORS['语音 Sound']
+    return {
+      label: dim,
+      value: existing?.value ?? 0,
+      fields: existing?.fields ?? [],
+      color: colors.bar,
+      colors,
+    }
+  })
+
   return (
-    <div className="space-y-6">
-      {/* 统计卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map((card, i) => (
+    <div className="space-y-8">
+      {/* Stat Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {statCards.map((stat, i) => (
           <motion.div
-            key={card.label}
+            key={stat.label}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1 }}
-            className={`glass-card rounded-3xl p-6 bg-gradient-to-br ${card.color} module-hover`}
+            className="bg-white p-6 rounded-[32px] shadow-sm border border-white space-y-4 relative overflow-hidden group hover:shadow-md transition-shadow"
           >
-            <div className="flex items-center justify-between mb-3">
-              <card.icon size={24} className="text-white/70" />
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${stat.iconBg}`}>
+                  <stat.icon size={24} />
+                </div>
+                <button className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-50 hover:bg-blue-600 hover:text-white transition-all text-slate-400">
+                  <ArrowUpRight size={14} strokeWidth={2.5} />
+                </button>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{stat.label}</p>
+                <h3 className={`text-4xl font-black tracking-tight ${stat.valueColor}`}>{stat.value}</h3>
+              </div>
             </div>
-            <p className="text-3xl font-bold text-white">{card.value}</p>
-            <p className="text-sm text-white/60 mt-1">{card.label}</p>
           </motion.div>
         ))}
       </div>
 
-      {/* 批次列表 */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
-        className="glass-card rounded-3xl p-6"
-      >
-        <h2 className="text-lg font-bold text-white mb-4">批次历史</h2>
-        {batches.length === 0 ? (
-          <p className="text-white/50 text-center py-8">暂无批次数据</p>
-        ) : (
-          <div className="space-y-3">
+      {/* Batch History + Bad Cases */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Batch History */}
+        <section className="lg:col-span-2 bg-white p-8 rounded-[32px] shadow-sm border border-white space-y-6">
+          <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <Clock size={20} className="text-blue-600" />
+            批次生产历史
+          </h3>
+          <div className="space-y-4">
             {batches.map(batch => (
               <div
                 key={batch.id}
-                className="flex items-center justify-between p-4 rounded-2xl bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
-                onClick={() => onViewBatch(batch.id, batch.status === 'completed' ? 'review' : 'monitoring')}
+                onClick={() => onViewBatch(batch.id, 'monitoring')}
+                className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-blue-50/50 hover:border-blue-200 transition-all cursor-pointer group"
               >
-                <div>
-                  <p className="font-medium text-white">{batch.name}</p>
-                  <p className="text-sm text-white/50">{batch.total_words} 词 · {batch.created_at}</p>
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-600 border border-slate-100 shadow-sm group-hover:bg-blue-600 group-hover:text-white transition-all">
+                    <Activity size={20} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm group-hover:text-blue-600 transition-colors">{batch.name}</h4>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wider">{new Date(batch.created_at).toLocaleString()}</p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  {batch.pass_rate !== null && (
-                    <span className="text-sm text-white/60">{batch.pass_rate.toFixed(1)}%</span>
-                  )}
-                  <StatusBadge status={batch.status} />
+                <div className="flex items-center gap-6">
+                  <div className="text-right">
+                    <p className="text-xs font-bold">{batch.total_words}</p>
+                    <p className="text-[10px] text-slate-400 uppercase">总词数</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={e => { e.stopPropagation(); onViewBatch(batch.id, 'review') }}
+                      className="px-3 py-1 bg-white rounded-lg border border-slate-100 text-[10px] font-bold text-slate-400 hover:text-blue-600 hover:border-blue-300 transition-all"
+                    >
+                      质检
+                    </button>
+                    <button className="p-2 bg-white rounded-lg border border-slate-100 text-slate-300 group-hover:text-blue-600 transition-colors">
+                      <ArrowRight size={16} />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
+            {batches.length === 0 && (
+              <div className="text-center py-10 text-slate-400 italic text-sm">
+                暂无生产批次记录
+              </div>
+            )}
           </div>
-        )}
-      </motion.div>
-    </div>
-  )
-}
+        </section>
 
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    pending: 'bg-gray-400/20 text-gray-200',
-    processing: 'bg-blue-400/20 text-blue-200',
-    completed: 'bg-green-400/20 text-green-200',
-    failed: 'bg-red-400/20 text-red-200',
-  }
-  const labels: Record<string, string> = {
-    pending: '待处理',
-    processing: '处理中',
-    completed: '已完成',
-    failed: '失败',
-  }
-  return (
-    <span className={`px-3 py-1 rounded-full text-xs font-medium ${styles[status] ?? styles.pending}`}>
-      {labels[status] ?? status}
-    </span>
+        {/* Bad Case Classification */}
+        <section className="bg-white rounded-[32px] shadow-sm border border-white overflow-hidden relative" style={{ minHeight: 420 }}>
+          <AnimatePresence mode="wait">
+            {!activeDim ? (
+              <motion.div
+                key="list"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.2 }}
+                className="p-8 space-y-5"
+              >
+                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                  <PieChart size={20} className="text-blue-600" />
+                  Bad Case 分类
+                </h3>
+                <div className="space-y-3">
+                  {badCases.map((item, i) => {
+                    const maxValue = Math.max(...badCases.map(b => b.value), 1)
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setActiveDim(item)}
+                        className="w-full p-3 flex items-center gap-3 rounded-2xl hover:bg-slate-50 transition-all group text-left"
+                      >
+                        <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${item.color}`} />
+                        <div className="flex-1">
+                          <div className="flex justify-between items-center mb-1.5">
+                            <span className="text-xs font-bold text-slate-600 group-hover:text-slate-900 transition-colors">{item.label}</span>
+                            <span className="text-sm font-black text-slate-900">{item.value}</span>
+                          </div>
+                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(item.value / maxValue) * 100}%` }}
+                              transition={{ delay: i * 0.1 + 0.5, duration: 0.8 }}
+                              className={`h-full rounded-full ${item.color}`}
+                            />
+                          </div>
+                        </div>
+                        <ArrowRight size={14} className="text-slate-300 shrink-0 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-all" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="detail"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.2 }}
+                className="flex flex-col h-full"
+              >
+                {/* Detail header */}
+                <div className={`px-6 py-5 flex items-center gap-3 ${activeDim.colors.bg}`}>
+                  <button
+                    onClick={() => setActiveDim(null)}
+                    className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-white/60 transition-colors text-slate-500"
+                  >
+                    <ArrowRight className="rotate-180" size={16} />
+                  </button>
+                  <div className={`w-3 h-3 rounded-full ${activeDim.color}`} />
+                  <div className="flex-1">
+                    <h3 className={`text-sm font-bold ${activeDim.colors.text}`}>{activeDim.label}</h3>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-widest">规则明细</p>
+                  </div>
+                  <span className={`text-2xl font-black ${activeDim.colors.text}`}>{activeDim.value}</span>
+                </div>
+
+                {/* Rules list */}
+                <div className="flex-1 p-5 space-y-2 overflow-y-auto">
+                  {activeDim.fields.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400 text-sm">暂无失败记录</div>
+                  ) : (
+                    activeDim.fields.map((field: any, j: number) => (
+                      <motion.div
+                        key={j}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: j * 0.04 }}
+                        className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-100 hover:bg-white hover:shadow-sm transition-all"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className={`w-1.5 h-6 rounded-full shrink-0 ${field.count > 0 ? activeDim.color : 'bg-slate-200'}`} />
+                          <p className="text-xs text-slate-800 font-medium font-mono">{field.field}</p>
+                        </div>
+                        <div className={`shrink-0 ml-3 px-2.5 py-1 rounded-lg ${
+                          field.count > 0 ? `${activeDim.colors.bg} ${activeDim.colors.text}` : 'bg-slate-100 text-slate-300'
+                        }`}>
+                          <span className="text-sm font-black">{field.count}</span>
+                        </div>
+                      </motion.div>
+                    ))
+                  )}
+                </div>
+
+                {/* Back button */}
+                <div className="px-5 pb-5">
+                  <button
+                    onClick={() => setActiveDim(null)}
+                    className="w-full py-3 bg-slate-50 text-slate-500 rounded-xl text-sm font-bold hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <ArrowRight className="rotate-180" size={14} />
+                    返回维度总览
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
+      </div>
+    </div>
   )
 }

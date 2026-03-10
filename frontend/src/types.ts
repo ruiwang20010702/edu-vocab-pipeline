@@ -131,12 +131,19 @@ export interface BatchInfo {
   created_at: string
 }
 
+export interface IssueCount {
+  field: string
+  dimension: string
+  count: number
+}
+
 export interface DashboardStats {
   total_words: number
   approved_count: number
   pending_count: number
   rejected_count: number
   pass_rate: number
+  issues: IssueCount[]
 }
 
 /* ===== 认证类型 ===== */
