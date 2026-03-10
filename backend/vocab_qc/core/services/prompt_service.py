@@ -1,81 +1,68 @@
 """Prompt 管理服务."""
 
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models.prompt import Prompt
 
-# 默认 Prompt 种子数据
-DEFAULT_PROMPTS = [
-    {
-        "name": "语块生成",
-        "category": "generation",
-        "dimension": "chunk",
-        "model": "gemini-3-flash-preview",
-        "content": "请为单词 {word} 的义项「{pos} {definition}」生成一个常用语块...",
-    },
-    {
-        "name": "例句生成",
-        "category": "generation",
-        "dimension": "sentence",
-        "model": "gemini-3-flash-preview",
-        "content": "请为单词 {word} 的义项「{pos} {definition}」生成一个例句...",
-    },
-    {
-        "name": "助记-词根词缀生成",
-        "category": "generation",
-        "dimension": "mnemonic_root_affix",
-        "model": "gemini-3-flash-preview",
-        "content": "请为单词 {word} 生成词根词缀助记法...",
-    },
-    {
-        "name": "助记-词中词生成",
-        "category": "generation",
-        "dimension": "mnemonic_word_in_word",
-        "model": "gemini-3-flash-preview",
-        "content": "请为单词 {word} 生成词中词助记法...",
-    },
-    {
-        "name": "助记-音义联想生成",
-        "category": "generation",
-        "dimension": "mnemonic_sound_meaning",
-        "model": "gemini-3-flash-preview",
-        "content": "请为单词 {word} 生成音义联想助记法...",
-    },
-    {
-        "name": "助记-考试应用生成",
-        "category": "generation",
-        "dimension": "mnemonic_exam_app",
-        "model": "gemini-3-flash-preview",
-        "content": "请为单词 {word} 生成考试应用助记法...",
-    },
-    {
-        "name": "语块质检",
-        "category": "qa",
-        "dimension": "chunk",
-        "model": "gemini-3-flash-preview",
-        "content": "请检查以下语块是否符合标准...",
-    },
-    {
-        "name": "例句质检",
-        "category": "qa",
-        "dimension": "sentence",
-        "model": "gemini-3-flash-preview",
-        "content": "请检查以下例句是否符合标准...",
-    },
+# 文件名 → (dimension, 显示名)
+_PROMPT_FILE_MAP: list[tuple[str, str, str]] = [
+    ("语块.md", "chunk", "语块"),
+    ("例句.md", "sentence", "例句"),
+    ("音节.md", "syllable", "音节"),
+    ("助记-词根词缀.md", "mnemonic_root_affix", "助记-词根词缀"),
+    ("助记-词中词.md", "mnemonic_word_in_word", "助记-词中词"),
+    ("助记-音义联想.md", "mnemonic_sound_meaning", "助记-音义联想"),
+    ("助记-考试应用.md", "mnemonic_exam_app", "助记-考试应用"),
 ]
+
+DEFAULT_MODEL = "gpt-5.2"
+
+
+def _find_prompts_dir() -> Path | None:
+    """查找 docs/prompts 目录。"""
+    # 从当前文件向上查找项目根目录
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        candidate = parent / "docs" / "prompts"
+        if candidate.is_dir():
+            return candidate
+    return None
 
 
 def seed_defaults(session: Session) -> int:
-    """插入默认 Prompt（仅在表为空时）."""
+    """从 docs/prompts/ 目录读取 Prompt 模板并插入（仅在表为空时）."""
     count = session.query(Prompt).count()
     if count > 0:
         return 0
-    for data in DEFAULT_PROMPTS:
-        session.add(Prompt(**data))
+
+    prompts_dir = _find_prompts_dir()
+    if prompts_dir is None:
+        return 0
+
+    created = 0
+    for category, subdir in [("generation", "generation"), ("qa", "quality")]:
+        category_dir = prompts_dir / subdir
+        if not category_dir.is_dir():
+            continue
+        for filename, dimension, display_name in _PROMPT_FILE_MAP:
+            filepath = category_dir / filename
+            if not filepath.exists():
+                continue
+            content = filepath.read_text(encoding="utf-8").strip()
+            session.add(Prompt(
+                name=f"{display_name}{'生成' if category == 'generation' else '质检'}",
+                category=category,
+                dimension=dimension,
+                model=DEFAULT_MODEL,
+                content=content,
+            ))
+            created += 1
+
     session.flush()
-    return len(DEFAULT_PROMPTS)
+    return created
 
 
 def list_prompts(

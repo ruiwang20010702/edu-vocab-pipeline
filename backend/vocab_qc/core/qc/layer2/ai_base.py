@@ -39,7 +39,8 @@ class AiClient:
         self.base_url = base_url or settings.ai_api_base_url
         self.model = model or settings.ai_model
         self.max_retries = max_retries
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._max_concurrency = max_concurrency
+        self._semaphore: asyncio.Semaphore | None = None
         self._http_client = httpx.AsyncClient(
             timeout=60.0,
             limits=httpx.Limits(
@@ -48,9 +49,15 @@ class AiClient:
             ),
         )
 
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """延迟创建 Semaphore，确保绑定到当前运行的事件循环。"""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self._max_concurrency)
+        return self._semaphore
+
     async def check(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         """发送 AI 校验请求，返回 JSON 结果."""
-        async with self._semaphore:
+        async with self._get_semaphore():
             return await self._call_with_retry(system_prompt, user_prompt)
 
     async def _call_with_retry(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
