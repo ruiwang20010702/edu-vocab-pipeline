@@ -187,7 +187,7 @@ class QcService:
             phonetics_by_word[p.word_id] = p
 
         for item in items:
-            kwargs = {}
+            kwargs: dict = {"content_cn": item.content_cn or ""}
             phonetic = phonetics_by_word.get(item.word_id)
             if phonetic:
                 kwargs["ipa"] = phonetic.ipa

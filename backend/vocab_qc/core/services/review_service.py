@@ -140,6 +140,12 @@ class ReviewService:
         session.refresh(counter)
         content_item.retry_count = counter.count
 
+        # 调用生成器重新生成内容
+        self._do_regenerate(session, content_item)
+
+        # 重置质检状态，让流水线重新质检
+        content_item.qc_status = QcStatus.PENDING.value
+
         # 更新审核项
         review.status = ReviewStatus.RESOLVED.value
         review.resolution = ReviewResolution.REGENERATE.value
@@ -162,6 +168,41 @@ class ReviewService:
             "retry_count": counter.count,
             "message": f"第{counter.count}次重新生成已触发",
         }
+
+    @staticmethod
+    def _do_regenerate(session: Session, content_item: ContentItem) -> None:
+        """调用生成器重新生成单个 ContentItem 的内容。"""
+        from vocab_qc.core.models.data_layer import Meaning, Word
+        from vocab_qc.core.services.production_service import _GENERATORS
+
+        generator = _GENERATORS.get(content_item.dimension)
+        if generator is None:
+            return
+
+        word = session.query(Word).filter_by(id=content_item.word_id).first()
+        if word is None:
+            return
+
+        meaning_text = None
+        pos = None
+        if content_item.meaning_id:
+            meaning = session.query(Meaning).filter_by(id=content_item.meaning_id).first()
+            if meaning:
+                meaning_text = meaning.definition
+                pos = meaning.pos
+
+        result = generator.generate(
+            word=word.word, meaning=meaning_text, pos=pos, session=session,
+        )
+
+        if result.get("valid") is False:
+            content_item.content = ""
+            content_item.qc_status = QcStatus.REJECTED.value
+            return
+
+        content_item.content = result.get("content", "")
+        if result.get("content_cn"):
+            content_item.content_cn = result["content_cn"]
 
     def manual_edit(
         self,

@@ -52,6 +52,7 @@ class ExportService:
                 "def": meaning.definition,
                 "sources": [s.source_name for s in sources],
                 "chunk": chunk.content if chunk else None,
+                "chunk_cn": chunk.content_cn if chunk else None,
                 "sentence": sentence.content if sentence else None,
                 "sentence_cn": sentence.content_cn if sentence else None,
             }
@@ -154,6 +155,7 @@ class ExportService:
                     "def": meaning.definition,
                     "sources": [s.source_name for s in sources],
                     "chunk": chunk.content if chunk else None,
+                    "chunk_cn": chunk.content_cn if chunk else None,
                     "sentence": sentence.content if sentence else None,
                     "sentence_cn": sentence.content_cn if sentence else None,
                 }

@@ -24,7 +24,7 @@ class Prompt(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     category: Mapped[str] = mapped_column(String(20), nullable=False)  # generation / qa
-    dimension: Mapped[str] = mapped_column(String(20), nullable=False)  # chunk / sentence / mnemonic
+    dimension: Mapped[str] = mapped_column(String(50), nullable=False)  # chunk / sentence / mnemonic_*
     model: Mapped[str] = mapped_column(String(50), nullable=False, default="gemini-3-flash-preview")
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     ai_api_key: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)

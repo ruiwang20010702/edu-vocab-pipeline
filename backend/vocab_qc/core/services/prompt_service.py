@@ -81,11 +81,14 @@ def seed_defaults(session: Session) -> int:
 def list_prompts(
     session: Session,
     category: Optional[str] = None,
+    is_active: Optional[bool] = None,
 ) -> list[Prompt]:
     """获取 Prompt 列表."""
     q = session.query(Prompt)
     if category:
         q = q.filter_by(category=category)
+    if is_active is not None:
+        q = q.filter_by(is_active=is_active)
     return q.order_by(Prompt.id).all()
 
 
@@ -130,7 +133,28 @@ def update_prompt(session: Session, prompt_id: int, data: dict) -> Optional[Prom
     return prompt
 
 
+def archive_prompt(session: Session, prompt_id: int) -> Optional[Prompt]:
+    """归档 Prompt（软删除）."""
+    prompt = session.query(Prompt).filter_by(id=prompt_id).first()
+    if prompt is None:
+        return None
+    prompt.is_active = False
+    session.flush()
+    return prompt
+
+
+def restore_prompt(session: Session, prompt_id: int) -> Optional[Prompt]:
+    """复原已归档的 Prompt."""
+    prompt = session.query(Prompt).filter_by(id=prompt_id).first()
+    if prompt is None:
+        return None
+    prompt.is_active = True
+    session.flush()
+    return prompt
+
+
 def delete_prompt(session: Session, prompt_id: int) -> bool:
+    """永久删除 Prompt（保留兼容性）."""
     prompt = session.query(Prompt).filter_by(id=prompt_id).first()
     if prompt is None:
         return False

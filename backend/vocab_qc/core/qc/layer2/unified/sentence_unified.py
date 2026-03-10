@@ -42,6 +42,7 @@ class UnifiedSentenceChecker:
         word: str,
         meaning: Optional[str] = None,
         content_cn: str = "",
+        **kwargs: Any,
     ) -> list[RuleResult]:
         user_prompt = (
             f"单词: {word}\n义项: {meaning or '无'}\n"

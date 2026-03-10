@@ -14,11 +14,12 @@ router = APIRouter(prefix="/api/prompts", tags=["Prompt"])
 @router.get("", response_model=list[PromptResponse])
 def list_prompts(
     category: str | None = Query(default=None),
+    is_active: bool | None = Query(default=None),
     db: Session = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
     """获取 Prompt 列表."""
-    return prompt_service.list_prompts(db, category=category)
+    return prompt_service.list_prompts(db, category=category, is_active=is_active)
 
 
 @router.get("/{prompt_id}", response_model=PromptResponse)
@@ -62,16 +63,31 @@ def update_prompt(
 
 
 @router.delete("/{prompt_id}")
-def delete_prompt(
+def archive_prompt(
     prompt_id: int,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin")),
 ):
-    """删除 Prompt."""
-    if not prompt_service.delete_prompt(db, prompt_id):
+    """归档 Prompt（软删除）."""
+    prompt = prompt_service.archive_prompt(db, prompt_id)
+    if prompt is None:
         raise HTTPException(status_code=404, detail="Prompt 不存在")
     db.commit()
-    return {"message": "已删除"}
+    return {"message": "已归档"}
+
+
+@router.post("/{prompt_id}/restore", response_model=PromptResponse)
+def restore_prompt(
+    prompt_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """复原已归档的 Prompt."""
+    prompt = prompt_service.restore_prompt(db, prompt_id)
+    if prompt is None:
+        raise HTTPException(status_code=404, detail="Prompt 不存在")
+    db.commit()
+    return prompt
 
 
 @router.post("/seed")

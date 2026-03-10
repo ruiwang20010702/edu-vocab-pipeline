@@ -26,7 +26,7 @@ class ContentItem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
     meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id"), nullable=True, index=True)
-    dimension: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    dimension: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_cn: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

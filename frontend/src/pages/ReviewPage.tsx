@@ -43,8 +43,8 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
         // 有批次时从批次加载
         const detail = await api.get<BatchDetail>(`/batches/${batch.id}/words`)
         // 同时加载完整审核列表以获取嵌套对象
-        const allReviews = await api.get<ReviewItem[]>('/reviews')
-        const reviewMap = new Map(allReviews.map(r => [r.id, r]))
+        const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
+        const allReviews = res.items ?? []
 
         // 从批次词汇中提取 review_id，匹配完整 ReviewItem
         const batchReviewIds = new Set(
@@ -53,8 +53,8 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
         setItems(allReviews.filter(r => batchReviewIds.has(r.id)))
       } else {
         // 无批次时加载全部待审
-        const data = await api.get<ReviewItem[]>('/reviews')
-        setItems(data)
+        const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
+        setItems(res.items ?? [])
       }
     } catch (e) {
       console.error('加载审核列表失败', e)
