@@ -18,7 +18,7 @@ def run_qc(
     request: QcRunRequest,
     db: Session = Depends(get_db),
     qc_service: QcService = Depends(get_qc_service),
-    _current_user: User = Depends(require_role("admin")),
+    _current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """触发质检运行."""
     results: dict = {}

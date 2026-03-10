@@ -28,7 +28,7 @@ def import_file(
     model: str = "gemini-3-flash-preview",
     force: bool = False,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role("admin")),
+    _current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """上传文件并导入词汇数据。"""
     if not file.filename:

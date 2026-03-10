@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from vocab_qc.api.deps import get_db
 from vocab_qc.api.schemas.auth import SendCodeRequest, TokenResponse, VerifyRequest
 from vocab_qc.core.config import settings
+from vocab_qc.core.models.user import User
 from vocab_qc.core.services import auth_service, user_service
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,12 @@ def verify(request: Request, body: VerifyRequest, db: Session = Depends(get_db))
 
     user = user_service.get_user_by_email(db, body.email)
     if user is None:
-        raise HTTPException(status_code=404, detail="用户不存在，请联系管理员添加")
+        # 首次登录自动注册；如果系统无用户则为 admin，否则为 reviewer
+        has_any_user = db.query(User).first() is not None
+        role = "reviewer" if has_any_user else "admin"
+        name = body.email.split("@")[0]
+        user = user_service.create_user(db, email=body.email, name=name, role=role)
+        logger.info("自动注册新用户: %s (角色: %s)", body.email, role)
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账号已停用")
 

@@ -229,7 +229,7 @@ def produce_batch(
     batch_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role("admin")),
+    _current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """触发生产流水线（后台执行）: 生成内容→Layer1 质检→失败项入队审核。"""
     pkg = db.query(Package).filter_by(id=batch_id).first()
