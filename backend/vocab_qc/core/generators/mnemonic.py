@@ -12,8 +12,7 @@ class _MnemonicBase(ContentGenerator):
     """助记生成器基类，统一处理 valid/false 逻辑."""
 
     def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
-        session = kwargs.get("session")
-        ai_config = self.get_ai_config(session)
+        ai_config = self.resolve_ai_config(**kwargs)
         user_prompt = f"Word: {word} | POS: {pos or '未知'} | Meaning: {meaning or '未知'}"
 
         result = self._call_ai(

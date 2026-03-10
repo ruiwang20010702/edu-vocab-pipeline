@@ -19,8 +19,7 @@ class SyllableGenerator(ContentGenerator):
         )
 
     def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
-        session = kwargs.get("session")
-        ai_config = self.get_ai_config(session)
+        ai_config = self.resolve_ai_config(**kwargs)
         user_prompt = f"Input: {word}"
 
         result = self._call_ai(

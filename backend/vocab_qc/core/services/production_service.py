@@ -1,9 +1,12 @@
 """生产编排服务: 导入后触发 生成→质检→入队审核 全流程."""
 
-from typing import Optional
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from vocab_qc.core.config import settings
 from vocab_qc.core.generators.chunk import ChunkGenerator
 from vocab_qc.core.generators.mnemonic import (
     ExamAppMnemonicGenerator,
@@ -214,26 +217,41 @@ def run_production(
     }
 
 
+logger = logging.getLogger(__name__)
+
+
 def _generate_content(session: Session, items: list[ContentItem]) -> int:
-    """为空的 ContentItem 调用生成器填充内容。"""
+    """为空的 ContentItem 并发调用 AI 生成器填充内容。
+
+    Step A: 预加载数据 + AI config，构造纯参数任务列表
+    Step B: 线程池并发调用 AI（不涉及 DB session）
+    Step C: 主线程批量写入结果
+    """
     if not items:
         return 0
 
-    # 批量预加载 Word 和 Meaning，避免 N+1
+    # --- Step A: 预加载，构造任务 ---
     word_ids = {item.word_id for item in items}
     meaning_ids = {item.meaning_id for item in items if item.meaning_id}
     words_map = {w.id: w for w in session.query(Word).filter(Word.id.in_(word_ids)).all()}
-    meanings_map = {m.id: m for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all()} if meaning_ids else {}
+    meanings_map = (
+        {m.id: m for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all()}
+        if meaning_ids else {}
+    )
 
-    count = 0
+    # 预加载每个维度的 AI config（避免线程内读 DB）
+    ai_configs: dict[str, Any] = {}
+    for dim, gen in _GENERATORS.items():
+        ai_configs[dim] = gen.get_ai_config(session)
+
+    # 构造纯参数任务列表: (item_id, generator, word_text, meaning_text, pos, ai_config)
+    tasks: list[tuple[int, str, str, Optional[str], Optional[str]]] = []
+    item_map: dict[int, ContentItem] = {}
     for item in items:
-        if item.content:  # 已有内容则跳过
+        if item.content:
             continue
-
-        generator = _GENERATORS.get(item.dimension)
-        if generator is None:
+        if item.dimension not in _GENERATORS:
             continue
-
         word = words_map.get(item.word_id)
         if word is None:
             continue
@@ -246,14 +264,44 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
                 meaning_text = meaning.definition
                 pos = meaning.pos
 
-        result = generator.generate(
-            word=word.word,
-            meaning=meaning_text,
-            pos=pos,
-            session=session,
-        )
+        tasks.append((item.id, item.dimension, word.word, meaning_text, pos))
+        item_map[item.id] = item
 
-        # 助记类型返回 valid: false → 该类型不适用，跳过
+    if not tasks:
+        return 0
+
+    # --- Step B: 并发 AI 调用 ---
+    def _call_one(task: tuple) -> tuple[int, dict]:
+        item_id, dimension, word_text, meaning_text, pos = task
+        generator = _GENERATORS[dimension]
+        config = ai_configs[dimension]
+        # 直接调用 _call_ai，绕过 session
+        result = generator.generate(
+            word=word_text, meaning=meaning_text, pos=pos,
+            # 传入预加载的 config，不再读 DB
+            _preloaded_config=config,
+        )
+        return item_id, result
+
+    workers = min(settings.ai_max_concurrency, len(tasks))
+    results: dict[int, dict] = {}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_call_one, t): t[0] for t in tasks}
+        for future in as_completed(futures):
+            item_id = futures[future]
+            try:
+                _, result = future.result()
+                results[item_id] = result
+            except Exception:
+                logger.warning("生成失败 item_id=%s", item_id, exc_info=True)
+                results[item_id] = {}
+
+    # --- Step C: 主线程批量写入 ---
+    count = 0
+    for item_id, result in results.items():
+        item = item_map[item_id]
+
         if result.get("valid") is False:
             item.content = ""
             item.qc_status = QcStatus.REJECTED.value
@@ -263,7 +311,6 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
         item.content = result.get("content", "")
         if result.get("content_cn"):
             item.content_cn = result["content_cn"]
-
         count += 1
 
     session.flush()

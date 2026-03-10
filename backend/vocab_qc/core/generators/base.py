@@ -102,7 +102,13 @@ class ContentGenerator:
         """硬编码兜底 Prompt，子类可覆盖."""
         return ""
 
-    def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, session: Any = None, **kwargs: Any) -> dict:
+    def resolve_ai_config(self, session: Any = None, _preloaded_config: Optional["AiConfig"] = None, **kwargs: Any) -> "AiConfig":
+        """获取 AI 配置：优先使用预加载配置（并发安全），否则从 DB 读取。"""
+        if _preloaded_config is not None:
+            return _preloaded_config
+        return self.get_ai_config(session)
+
+    def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, session: Any = None, _preloaded_config: Optional["AiConfig"] = None, **kwargs: Any) -> dict:
         """生成内容.
 
         Returns:
