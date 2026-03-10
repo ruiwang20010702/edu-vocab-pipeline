@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,12 +18,15 @@ _PROMPT_DIR = _PROJECT_ROOT / "docs" / "prompts" / "generation"
 
 # 模块级复用的 HTTP 客户端，避免每次请求创建新连接
 _http_client: httpx.Client | None = None
+_http_client_lock = threading.Lock()
 
 
 def _get_http_client() -> httpx.Client:
     global _http_client
     if _http_client is None:
-        _http_client = httpx.Client(timeout=60.0)
+        with _http_client_lock:
+            if _http_client is None:
+                _http_client = httpx.Client(timeout=60.0)
     return _http_client
 
 

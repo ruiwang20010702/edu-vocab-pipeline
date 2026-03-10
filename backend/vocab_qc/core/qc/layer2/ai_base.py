@@ -42,13 +42,22 @@ class AiClient:
         self._max_concurrency = max_concurrency
         self._semaphore: asyncio.Semaphore | None = None
         self._semaphore_loop: asyncio.AbstractEventLoop | None = None
-        self._http_client = httpx.AsyncClient(
-            timeout=60.0,
-            limits=httpx.Limits(
-                max_connections=max_concurrency,
-                max_keepalive_connections=max_concurrency,
-            ),
-        )
+        self._http_client: httpx.AsyncClient | None = None
+        self._http_client_loop: asyncio.AbstractEventLoop | None = None
+
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """延迟创建 AsyncClient，事件循环变化时自动重建。"""
+        loop = asyncio.get_running_loop()
+        if self._http_client is None or self._http_client_loop is not loop:
+            self._http_client = httpx.AsyncClient(
+                timeout=60.0,
+                limits=httpx.Limits(
+                    max_connections=self._max_concurrency,
+                    max_keepalive_connections=self._max_concurrency,
+                ),
+            )
+            self._http_client_loop = loop
+        return self._http_client
 
     def _get_semaphore(self) -> asyncio.Semaphore:
         """延迟创建 Semaphore，事件循环变化时自动重建。"""
@@ -79,7 +88,7 @@ class AiClient:
             logger.warning("AI API 未配置，占位模式跳过校验")
             return {"passed": True, "detail": "占位模式 - 未配置 AI API"}
 
-        response = await self._http_client.post(
+        response = await self._get_http_client().post(
             f"{self.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             json={

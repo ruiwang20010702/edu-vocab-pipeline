@@ -1,6 +1,7 @@
 """Layer 2 异步运行器."""
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Optional
@@ -18,6 +19,8 @@ from vocab_qc.core.qc.registry import RuleRegistry
 
 # 确保 Layer 2 规则被加载
 import vocab_qc.core.qc.layer2.per_rule  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 
 class Layer2Runner:
@@ -116,7 +119,8 @@ class Layer2Runner:
         results_map: dict[int, list[RuleResult]] = {}
         for r in gathered:
             if isinstance(r, Exception):
-                continue  # 跳过失败的，AiClient 已有 semaphore 控制并发度
+                logger.warning("AI 质检任务异常: %s", r)
+                continue
             item_id, item_results = r
             results_map[item_id] = item_results
         return results_map

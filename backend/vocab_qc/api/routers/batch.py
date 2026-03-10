@@ -254,7 +254,7 @@ def _run_production_bg(batch_id: int) -> None:
 
 async def _run_production_bg_async(batch_id: int) -> None:
     """将同步生产任务包装到线程池执行，避免阻塞事件循环。"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(_production_executor, _run_production_bg, batch_id)
 
 
