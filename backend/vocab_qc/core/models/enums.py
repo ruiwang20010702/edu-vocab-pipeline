@@ -54,6 +54,7 @@ class ReviewReason(str, enum.Enum):
 
     LAYER1_FAILED = "layer1_failed"
     LAYER2_FAILED = "layer2_failed"
+    GENERATION_REJECTED = "generation_rejected"
     SAMPLING = "sampling"
 
 

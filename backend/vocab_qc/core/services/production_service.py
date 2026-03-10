@@ -15,9 +15,10 @@ from vocab_qc.core.generators.sentence import SentenceGenerator
 from vocab_qc.core.generators.syllable import SyllableGenerator
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
-from vocab_qc.core.models.enums import QcStatus
+from vocab_qc.core.models.enums import QcStatus, ReviewReason
 from vocab_qc.core.models.package_layer import Package, PackageMeaning
 from vocab_qc.core.services.qc_service import QcService
+from vocab_qc.core.services.review_service import ReviewService
 
 # 维度→生成器映射
 _GENERATORS = {
@@ -219,6 +220,8 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
     if not items:
         return 0
 
+    review_service = ReviewService()
+
     # 批量预加载 Word 和 Meaning，避免 N+1
     word_ids = {item.word_id for item in items}
     meaning_ids = {item.meaning_id for item in items if item.meaning_id}
@@ -253,10 +256,13 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
             session=session,
         )
 
-        # 助记类型返回 valid: false → 该类型不适用，跳过
+        # 助记类型返回 valid: false → 该类型不适用，入队审核
         if result.get("valid") is False:
             item.content = ""
             item.qc_status = QcStatus.REJECTED.value
+            review_service.create_review_item(
+                session, item, ReviewReason.GENERATION_REJECTED, priority=3,
+            )
             count += 1
             continue
 
