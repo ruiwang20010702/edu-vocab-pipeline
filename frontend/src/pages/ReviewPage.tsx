@@ -341,6 +341,8 @@ function ReviewDetailModal({
   const [editContent, setEditContent] = useState(item.content_item?.content ?? '')
   const [editContentCn, setEditContentCn] = useState(item.content_item?.content_cn ?? '')
   const [saving, setSaving] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const [regenMsg, setRegenMsg] = useState<{ passed: boolean; message: string } | null>(null)
   const [error, setError] = useState('')
 
   const handleSave = async () => {
@@ -357,6 +359,25 @@ function ReviewDetailModal({
       setError(e instanceof ApiError ? e.detail : '保存失败')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleRegen = async () => {
+    setRegenerating(true)
+    setRegenMsg(null)
+    setError('')
+    try {
+      const res = await api.post<{ success: boolean; qc_passed: boolean; retry_count: number; message: string }>(`/reviews/${item.id}/regenerate`)
+      setRegenMsg({ passed: res.qc_passed, message: res.message })
+      if (res.qc_passed) {
+        setTimeout(() => { onSaved(); onClose() }, 1500)
+      } else {
+        onSaved()
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : '重新生成失败')
+    } finally {
+      setRegenerating(false)
     }
   }
 
@@ -394,7 +415,8 @@ function ReviewDetailModal({
               value={editContent}
               onChange={e => setEditContent(e.target.value)}
               rows={4}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-300 transition-all resize-none"
+              disabled={regenerating}
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-300 transition-all resize-none disabled:opacity-50"
             />
           </div>
 
@@ -404,12 +426,30 @@ function ReviewDetailModal({
               value={editContentCn}
               onChange={e => setEditContentCn(e.target.value)}
               rows={2}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-300 transition-all resize-none"
+              disabled={regenerating}
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-300 transition-all resize-none disabled:opacity-50"
             />
           </div>
 
+          {/* 重新生成结果提示 */}
+          {regenMsg && (
+            <div className={`text-sm px-4 py-3 rounded-2xl text-center font-medium ${
+              regenMsg.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'
+            }`}>
+              {regenMsg.message}
+            </div>
+          )}
+
+          {/* 正在重新生成提示 */}
+          {regenerating && (
+            <div className="flex items-center justify-center gap-2 text-blue-600 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-sm font-medium">正在重新生成并质检...</span>
+            </div>
+          )}
+
           {/* 问题列表 */}
-          {item.issues.length > 0 && (
+          {item.issues.length > 0 && !regenerating && (
             <div>
               <label className="text-sm text-slate-500 mb-2 block">质检问题</label>
               <div className="space-y-1">
@@ -428,21 +468,24 @@ function ReviewDetailModal({
           <div className="flex gap-3">
             <button
               onClick={() => onApprove(item.id)}
-              className="flex-1 py-2.5 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-2xl transition-all text-sm font-medium"
+              disabled={regenerating}
+              className="flex-1 py-2.5 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-2xl transition-all text-sm font-medium disabled:opacity-50"
             >
               通过
             </button>
             {item.content_item?.retry_count < 3 && (
               <button
-                onClick={() => onRegenerate(item.id)}
-                className="flex-1 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-2xl transition-all text-sm font-medium"
+                onClick={handleRegen}
+                disabled={regenerating || saving}
+                className="flex-1 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-2xl transition-all text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50"
               >
-                重新生成 ({item.content_item?.retry_count ?? 0}/3)
+                {regenerating && <Loader2 size={14} className="animate-spin" />}
+                {regenerating ? '重新生成中...' : `重新生成 (${item.content_item?.retry_count ?? 0}/3)`}
               </button>
             )}
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || regenerating}
               className="flex-1 py-2.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-2xl transition-all text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50"
             >
               {saving && <Loader2 size={14} className="animate-spin" />}
