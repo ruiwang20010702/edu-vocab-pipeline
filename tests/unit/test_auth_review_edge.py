@@ -155,12 +155,12 @@ class TestManualEditContentCn:
         db_session.refresh(content)
         assert content.content_cn == original_cn, "不传 new_content_cn 时原值应保持不变"
 
-    def test_manual_edit_sets_qc_status_to_pending(self, db_session: Session):
-        """manual_edit 后 qc_status 应重置为 pending，以便重过 Layer 1。"""
+    def test_manual_edit_runs_qc(self, db_session: Session):
+        """manual_edit 后自动运行质检，状态不再是 pending。"""
         review, content = self._setup_review(db_session)
         service = ReviewService()
 
-        service.manual_edit(
+        result = service.manual_edit(
             db_session,
             review_id=review.id,
             reviewer="editor@test.com",
@@ -168,8 +168,10 @@ class TestManualEditContentCn:
             new_content_cn="我享受苹果。",
         )
 
+        assert result["success"] is True
+        assert "qc_passed" in result
         db_session.refresh(content)
-        assert content.qc_status == QcStatus.PENDING.value
+        assert content.qc_status != QcStatus.PENDING.value
 
 
 # ---------------------------------------------------------------------------

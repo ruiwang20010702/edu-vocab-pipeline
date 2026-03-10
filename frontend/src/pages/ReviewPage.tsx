@@ -525,13 +525,29 @@ function ReviewDetailModal({
   const handleSave = async () => {
     setSaving(true)
     setError('')
+    setRegenMsg(null)
     try {
-      await api.post(`/reviews/${item.id}/edit`, {
+      const res = await api.post<{
+        success: boolean; qc_passed: boolean; message: string
+        new_content: string | null; new_content_cn: string | null
+        new_issues: Array<{ rule_id: string; field: string; message: string }>
+      }>(`/reviews/${item.id}/edit`, {
         content: editContent,
         content_cn: editContentCn || null,
       })
-      onSaved()
-      onClose()
+      if (res.qc_passed) {
+        setRegenMsg({ passed: true, message: res.message })
+        setTimeout(() => { onSaved(); onClose() }, 1500)
+      } else {
+        setRegenMsg({ passed: false, message: res.message })
+        if (res.new_content !== null) setEditContent(res.new_content)
+        if (res.new_content_cn !== null) setEditContentCn(res.new_content_cn)
+        setIssues(res.new_issues.map((iss, i) => ({
+          id: -(i + 1), content_item_id: item.content_item_id,
+          rule_id: iss.rule_id, field: iss.field, message: iss.message, severity: 'error',
+        })))
+        onSaved()
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : '保存失败')
     } finally {

@@ -95,12 +95,13 @@ def test_manual_edit(db_session, review_with_item, review_service):
         new_content="be kind to others",
     )
 
-    assert result.resolution == ReviewResolution.MANUAL_EDIT.value
+    assert result["success"] is True
+    assert "qc_passed" in result
 
     content_item = db_session.query(ContentItem).filter_by(id=review.content_item_id).one()
     assert content_item.content == "be kind to others"
-    # 人工修改后需重过 Layer 1
-    assert content_item.qc_status == QcStatus.PENDING.value
+    # 人工修改后自动质检，状态不再是 pending
+    assert content_item.qc_status != QcStatus.PENDING.value
 
 
 def test_get_pending_reviews(db_session, sample_word, review_service):

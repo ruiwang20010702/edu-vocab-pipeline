@@ -175,7 +175,7 @@ def regenerate(
         raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
-@router.post("/{review_id}/edit", response_model=ReviewItemResponse)
+@router.post("/{review_id}/edit", response_model=RegenerateResponse)
 def manual_edit(
     review_id: int,
     request: ManualEditRequest,
@@ -183,7 +183,7 @@ def manual_edit(
     service: ReviewService = Depends(get_review_service),
     current_user: User = Depends(require_role("admin", "reviewer")),
 ):
-    """人工修改."""
+    """人工修改 + 自动质检."""
     try:
         result = service.manual_edit(
             db,
@@ -194,7 +194,7 @@ def manual_edit(
             user_id=current_user.id,
         )
         db.commit()
-        return _enrich_review(db, result)
+        return RegenerateResponse(**result)
     except NoResultFound:
         raise HTTPException(status_code=404, detail="审核项不存在")
     except ValueError as e:

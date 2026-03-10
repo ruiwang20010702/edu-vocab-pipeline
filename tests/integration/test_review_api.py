@@ -288,9 +288,9 @@ class TestManualEdit:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "resolved"
-        assert data["resolution"] == "manual_edit"
-        assert data["reviewer"] == "Admin"
+        assert data["success"] is True
+        assert "qc_passed" in data
+        assert "message" in data
 
     def test_edit_updates_content_item(self, admin_client):
         """修改后 ContentItem 的内容已更新。"""
@@ -306,8 +306,8 @@ class TestManualEdit:
         session = TestSession()
         item = session.query(ContentItem).filter_by(id=ids["item_id"]).one()
         assert item.content == new_content
-        # manual_edit 后状态重置为 pending，等待重新质检
-        assert item.qc_status == QcStatus.PENDING.value
+        # manual_edit 后自动质检，状态不再是初始 pending
+        assert item.qc_status != QcStatus.PENDING.value
         session.close()
 
     def test_edit_404_not_found(self, admin_client):

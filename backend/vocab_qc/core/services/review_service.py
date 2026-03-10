@@ -257,8 +257,12 @@ class ReviewService:
         new_content: str,
         new_content_cn: Optional[str] = None,
         user_id: Optional[int] = None,
-    ) -> ReviewItem:
-        """人工修改内容."""
+    ) -> dict:
+        """人工修改内容 + 自动质检.
+
+        Returns:
+            {"success": bool, "qc_passed": bool, "message": str, "new_issues": list}
+        """
         review = self._lock_review_item(session, review_id)
         self._check_concurrency(review, user_id)
 
@@ -269,13 +273,21 @@ class ReviewService:
         if new_content_cn is not None:
             content_item.content_cn = new_content_cn
 
-        # 人工修改后需重过 Layer 1 确认格式，状态设为 pending
         content_item.qc_status = QcStatus.PENDING.value
+        session.flush()
 
-        review.status = ReviewStatus.RESOLVED.value
-        review.resolution = ReviewResolution.MANUAL_EDIT.value
-        review.reviewer = reviewer
-        review.resolved_at = datetime.now(UTC)
+        # 自动运行质检
+        qc_passed = self._run_qc_for_item(session, content_item)
+
+        if qc_passed:
+            content_item.qc_status = QcStatus.APPROVED.value
+            review.status = ReviewStatus.RESOLVED.value
+            review.resolution = ReviewResolution.MANUAL_EDIT.value
+            review.reviewer = reviewer
+            review.resolved_at = datetime.now(UTC)
+            message = "保存成功，质检通过"
+        else:
+            message = "已保存，但质检未通过，请继续修改"
 
         log_action(
             session,
@@ -289,7 +301,30 @@ class ReviewService:
 
         session.flush()
         self._update_batch_progress(session, review.batch_id)
-        return review
+
+        # 查询最新质检失败问题
+        from vocab_qc.core.models.quality_layer import QcRuleResult
+        new_issues = []
+        if content_item.last_qc_run_id and not qc_passed:
+            failed_results = (
+                session.query(QcRuleResult)
+                .filter_by(content_item_id=content_item.id, run_id=content_item.last_qc_run_id, passed=False)
+                .all()
+            )
+            new_issues = [
+                {"rule_id": r.rule_id, "field": r.dimension, "message": r.detail or ""}
+                for r in failed_results
+            ]
+
+        return {
+            "success": True,
+            "qc_passed": qc_passed,
+            "retry_count": content_item.retry_count or 0,
+            "message": message,
+            "new_content": content_item.content,
+            "new_content_cn": content_item.content_cn,
+            "new_issues": new_issues,
+        }
 
     def get_pending_reviews(
         self,
