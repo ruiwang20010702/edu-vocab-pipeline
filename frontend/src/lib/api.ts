@@ -51,7 +51,16 @@ async function request<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: '请求失败' }))
-    throw new ApiError(res.status, body.detail ?? '请求失败')
+    // FastAPI 422 返回 detail 为数组（Pydantic 校验错误），统一中文提示
+    let detail: string
+    if (res.status === 422) {
+      detail = '输入格式有误，请检查后重试'
+    } else if (typeof body.detail === 'string') {
+      detail = body.detail
+    } else {
+      detail = '请求失败'
+    }
+    throw new ApiError(res.status, detail)
   }
 
   if (res.status === 204) return undefined as T

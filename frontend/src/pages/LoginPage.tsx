@@ -29,6 +29,7 @@ export default function LoginPage({ onLogin }: Props) {
 
   const handleSendCode = async () => {
     if (!email.trim()) { setError('请输入邮箱'); return }
+    if (!email.includes('@')) { setError('请输入有效的邮箱地址'); return }
     setLoading(true)
     setError('')
     try {
