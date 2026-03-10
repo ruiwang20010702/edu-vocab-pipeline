@@ -106,11 +106,27 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
     finally { setActionLoading(null) }
   }
 
+  const [regenResult, setRegenResult] = useState<{ id: number; passed: boolean; message: string } | null>(null)
+
   const handleRegenerate = async (id: number) => {
     setActionLoading(id)
+    setRegenResult(null)
     try {
-      await api.post(`/reviews/${id}/regenerate`)
-      await loadItems()
+      const res = await api.post<{ success: boolean; qc_passed: boolean; retry_count: number; message: string }>(`/reviews/${id}/regenerate`)
+      if (res.qc_passed) {
+        // 质检通过 → 显示成功提示，移除项
+        setRegenResult({ id, passed: true, message: res.message })
+        setTimeout(() => {
+          setItems(prev => prev.filter(i => i.id !== id))
+          if (selectedItem?.id === id) setSelectedItem(null)
+          setRegenResult(null)
+        }, 1500)
+      } else {
+        // 质检失败 → 显示失败提示，刷新列表显示新内容
+        setRegenResult({ id, passed: false, message: res.message })
+        await loadItems()
+        setTimeout(() => setRegenResult(null), 3000)
+      }
     } catch (e) { console.error('重新生成失败', e) }
     finally { setActionLoading(null) }
   }
@@ -235,6 +251,13 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
                   }`}>
                     {item.reason}
                   </span>
+                  {regenResult?.id === item.id && (
+                    <span className={`text-xs px-2 py-1 rounded-lg ${
+                      regenResult.passed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
+                    }`}>
+                      {regenResult.message}
+                    </span>
+                  )}
                   {actionLoading === item.id ? (
                     <Loader2 size={16} className="animate-spin text-blue-600" />
                   ) : (

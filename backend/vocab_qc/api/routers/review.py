@@ -83,11 +83,21 @@ def _batch_enrich(db: Session, reviews: list) -> list[ReviewItemResponse]:
     words = db.query(Word).filter(Word.id.in_(word_ids)).all()
     words_map = {w.id: w for w in words}
 
-    all_issues = (
-        db.query(QcRuleResult)
-        .filter(QcRuleResult.content_item_id.in_(content_item_ids), QcRuleResult.passed == False)  # noqa: E712
-        .all()
-    )
+    # 只显示最新一次质检的失败问题（排除重新生成前的旧记录）
+    latest_run_ids = {
+        ci.id: ci.last_qc_run_id for ci in content_items if ci.last_qc_run_id
+    }
+    all_issues = []
+    if latest_run_ids:
+        all_issues = (
+            db.query(QcRuleResult)
+            .filter(
+                QcRuleResult.content_item_id.in_(content_item_ids),
+                QcRuleResult.passed == False,  # noqa: E712
+                QcRuleResult.run_id.in_(set(latest_run_ids.values())),
+            )
+            .all()
+        )
     issues_map: dict[int, list[QcRuleResult]] = {}
     for iss in all_issues:
         issues_map.setdefault(iss.content_item_id, []).append(iss)

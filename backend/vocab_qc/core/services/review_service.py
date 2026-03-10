@@ -112,10 +112,10 @@ class ReviewService:
         reviewer: str,
         user_id: Optional[int] = None,
     ) -> dict:
-        """触发重新生成（≤3次）.
+        """触发重新生成（≤3次）+ 自动质检.
 
         Returns:
-            {"success": bool, "retry_count": int, "message": str}
+            {"success": bool, "qc_passed": bool, "retry_count": int, "message": str}
         """
         review = self._lock_review_item(session, review_id)
         self._check_concurrency(review, user_id)
@@ -134,6 +134,7 @@ class ReviewService:
         if result.rowcount == 0:
             return {
                 "success": False,
+                "qc_passed": False,
                 "retry_count": counter.count,
                 "message": "已达到最大重试次数，请手动修改",
             }
@@ -143,14 +144,39 @@ class ReviewService:
         # 调用生成器重新生成内容
         self._do_regenerate(session, content_item)
 
-        # 重置质检状态，让流水线重新质检
-        content_item.qc_status = QcStatus.PENDING.value
+        # 如果生成器标记为 rejected（助记类型不适用），直接 resolve
+        if content_item.qc_status == QcStatus.REJECTED.value:
+            review.status = ReviewStatus.RESOLVED.value
+            review.resolution = ReviewResolution.REGENERATE.value
+            review.reviewer = reviewer
+            review.resolved_at = datetime.now(UTC)
+            session.flush()
+            self._update_batch_progress(session, review.batch_id)
+            return {
+                "success": True,
+                "qc_passed": True,
+                "retry_count": counter.count,
+                "message": "该助记类型不适用，已跳过",
+            }
 
-        # 更新审核项
-        review.status = ReviewStatus.RESOLVED.value
-        review.resolution = ReviewResolution.REGENERATE.value
-        review.reviewer = reviewer
-        review.resolved_at = datetime.now(UTC)
+        # 重置质检状态
+        content_item.qc_status = QcStatus.PENDING.value
+        session.flush()
+
+        # 自动运行质检
+        qc_passed = self._run_qc_for_item(session, content_item)
+
+        if qc_passed:
+            # 质检通过 → 标记 approved，审核项 resolved
+            content_item.qc_status = QcStatus.APPROVED.value
+            review.status = ReviewStatus.RESOLVED.value
+            review.resolution = ReviewResolution.REGENERATE.value
+            review.reviewer = reviewer
+            review.resolved_at = datetime.now(UTC)
+            message = f"第{counter.count}次重新生成成功，质检通过"
+        else:
+            # 质检失败 → 审核项保持 pending，内容已更新
+            message = f"第{counter.count}次重新生成完成，但质检未通过"
 
         log_action(
             session,
@@ -158,15 +184,16 @@ class ReviewService:
             entity_id=review.id,
             action="regenerate",
             actor=reviewer,
-            new_value={"retry_count": counter.count},
+            new_value={"retry_count": counter.count, "qc_passed": qc_passed},
         )
 
         session.flush()
         self._update_batch_progress(session, review.batch_id)
         return {
             "success": True,
+            "qc_passed": qc_passed,
             "retry_count": counter.count,
-            "message": f"第{counter.count}次重新生成已触发",
+            "message": message,
         }
 
     @staticmethod
@@ -260,6 +287,51 @@ class ReviewService:
         total = query.count()
         items = query.order_by(ReviewItem.priority.desc(), ReviewItem.created_at).offset(offset).limit(limit).all()
         return items, total
+
+    @staticmethod
+    def _run_qc_for_item(session: Session, content_item: ContentItem) -> bool:
+        """对单个内容项运行 Layer 1 + Layer 2 质检，返回是否全部通过。"""
+        from vocab_qc.core.models.data_layer import Meaning, Phonetic, Word
+        from vocab_qc.core.qc.layer2.runner import Layer2Runner
+        from vocab_qc.core.qc.runner import Layer1Runner
+
+        word = session.query(Word).filter_by(id=content_item.word_id).first()
+        word_text = word.word if word else ""
+
+        meaning_text = None
+        meaning_texts: dict[int, str] = {}
+        if content_item.meaning_id:
+            meaning = session.query(Meaning).filter_by(id=content_item.meaning_id).first()
+            if meaning:
+                meaning_text = meaning.definition
+                meaning_texts[meaning.id] = meaning_text
+
+        # 构建额外参数
+        extra: dict = {"content_cn": content_item.content_cn or ""}
+        phonetic = session.query(Phonetic).filter_by(word_id=content_item.word_id).first()
+        if phonetic:
+            extra["ipa"] = phonetic.ipa
+            extra["syllables"] = phonetic.syllables
+        if content_item.dimension == "meaning" and content_item.meaning_id:
+            meaning_obj = session.query(Meaning).filter_by(id=content_item.meaning_id).first()
+            if meaning_obj and meaning_obj.pos:
+                extra["pos"] = meaning_obj.pos
+
+        word_texts = {content_item.word_id: word_text}
+        extra_kwargs = {content_item.id: extra}
+
+        # Layer 1
+        l1_runner = Layer1Runner()
+        l1_runner.run(session, [content_item], word_texts, meaning_texts, extra_kwargs)
+
+        if content_item.qc_status != QcStatus.LAYER1_PASSED.value:
+            return False
+
+        # Layer 2
+        l2_runner = Layer2Runner()
+        l2_runner.run(session, [content_item], word_texts, meaning_texts, extra_kwargs=extra_kwargs)
+
+        return content_item.qc_status == QcStatus.LAYER2_PASSED.value
 
     def _get_or_create_counter(self, session: Session, content_item: ContentItem) -> RetryCounter:
         """获取或创建重试计数器."""

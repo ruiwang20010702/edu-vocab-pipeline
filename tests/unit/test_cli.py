@@ -252,7 +252,7 @@ class TestReviewRegenerate:
 
         result = runner.invoke(app, ["review", "regenerate", str(review.id)])
         assert result.exit_code == 0
-        assert "重新生成已触发" in result.output
+        assert "重新生成" in result.output
 
 
 class TestReviewEdit:

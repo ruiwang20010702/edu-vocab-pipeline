@@ -66,6 +66,7 @@ class ApproveRequest(BaseModel):
 
 class RegenerateResponse(BaseModel):
     success: bool
+    qc_passed: bool = False
     retry_count: int
     message: str
 
