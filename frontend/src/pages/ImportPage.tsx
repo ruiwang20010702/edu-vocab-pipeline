@@ -10,7 +10,6 @@ interface Props {
 export default function ImportPage({ onStartProduction }: Props) {
   const [file, setFile] = useState<File | null>(null)
   const [batchName, setBatchName] = useState('')
-  const [model, setModel] = useState('gpt-4o-mini')
   const [dragOver, setDragOver] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -22,19 +21,18 @@ export default function ImportPage({ onStartProduction }: Props) {
     if (f) setFile(f)
   }, [])
 
-  const handleImport = async () => {
-    if (!file) { setError('请选择文件'); return }
-    if (!batchName.trim()) { setError('请输入批次名称'); return }
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false)
 
+  const doImport = async (force = false) => {
     setLoading(true)
     setError('')
+    setConfirmOverwrite(false)
     try {
       const fd = new FormData()
-      fd.append('file', file)
-      fd.append('batch_name', batchName.trim())
-      fd.append('model', model)
-      const res = await api.upload<{ batch_id: string }>('/import', fd)
-      // 导入成功后触发生产流水线
+      fd.append('file', file!)
+      const params = new URLSearchParams({ batch_name: batchName.trim() })
+      if (force) params.set('force', 'true')
+      const res = await api.upload<{ batch_id: string }>(`/import?${params}`, fd)
       try {
         await api.post(`/batches/${res.batch_id}/produce`)
       } catch {
@@ -42,10 +40,20 @@ export default function ImportPage({ onStartProduction }: Props) {
       }
       onStartProduction(res.batch_id)
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : '导入失败')
+      if (e instanceof ApiError && e.status === 409) {
+        setConfirmOverwrite(true)
+      } else {
+        setError(e instanceof ApiError ? e.detail : '导入失败')
+      }
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleImport = async () => {
+    if (!file) { setError('请选择文件'); return }
+    if (!batchName.trim()) { setError('请输入批次名称'); return }
+    await doImport(false)
   }
 
   return (
@@ -104,22 +112,33 @@ export default function ImportPage({ onStartProduction }: Props) {
               className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-white/40 focus:outline-none focus:border-white/50 transition-all"
             />
           </div>
-          <div>
-            <label className="text-sm text-white/60 mb-1 block">AI 模型</label>
-            <select
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-2xl text-white focus:outline-none focus:border-white/50 transition-all appearance-none"
-            >
-              <option value="gpt-4o-mini">GPT-4o Mini（推荐）</option>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="claude-sonnet-4-20250514">Claude Sonnet</option>
-            </select>
-          </div>
         </div>
 
         {error && (
           <p className="text-red-200 text-sm text-center bg-red-500/20 rounded-xl py-2 mt-4">{error}</p>
+        )}
+
+        {confirmOverwrite && (
+          <div className="mt-4 p-4 bg-amber-500/20 border border-amber-400/30 rounded-2xl">
+            <p className="text-amber-100 text-sm text-center mb-3">
+              批次「{batchName.trim()}」已存在，是否覆盖并重新导入？
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmOverwrite(false)}
+                className="flex-1 py-2 bg-white/10 hover:bg-white/20 text-white/80 rounded-xl transition-all text-sm border border-white/20"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => doImport(true)}
+                disabled={loading}
+                className="flex-1 py-2 bg-amber-500/40 hover:bg-amber-500/60 text-white font-medium rounded-xl transition-all text-sm border border-amber-400/30"
+              >
+                确认覆盖
+              </button>
+            </div>
+          </div>
         )}
 
         <button

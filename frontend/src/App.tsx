@@ -30,6 +30,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [currentBatchId, setCurrentBatchId] = useState<string | null>(null)
+  const [monitorKey, setMonitorKey] = useState(0)
 
   if (!authed) {
     return <LoginPage onLogin={() => setAuthed(true)} />
@@ -59,9 +60,9 @@ export default function App() {
       case 'dashboard':
         return <DashboardPage onViewBatch={(batchId, view) => { setCurrentBatchId(batchId); setCurrentPage(view) }} />
       case 'import':
-        return <ImportPage onStartProduction={(batchId) => { setCurrentBatchId(batchId); setCurrentPage('monitoring') }} />
+        return <ImportPage onStartProduction={(batchId) => { setCurrentBatchId(batchId); setMonitorKey(k => k + 1); setCurrentPage('monitoring') }} />
       case 'monitoring':
-        return <MonitoringPage batchId={currentBatchId} onGoToReview={() => setCurrentPage('review')} />
+        return <MonitoringPage key={monitorKey} batchId={currentBatchId} onGoToReview={() => setCurrentPage('review')} />
       case 'review':
         return <ReviewPage onBack={() => setCurrentPage('monitoring')} />
       case 'master':

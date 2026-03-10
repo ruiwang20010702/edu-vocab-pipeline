@@ -13,7 +13,7 @@ from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageMeaning
 
 
-def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: str) -> dict:
+def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: str, *, force: bool = False) -> dict:
     """从 JSON 数据导入词汇。
 
     期望格式:
@@ -26,7 +26,7 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
       }
     ]
     """
-    package = _get_or_create_package(session, batch_name)
+    package = _get_or_create_package(session, batch_name, force=force)
     word_count = 0
     imported_words: list[Word] = []
     imported_meanings: list[tuple[Word, Meaning]] = []
@@ -108,6 +108,60 @@ def import_from_csv(session: Session, content: str, batch_name: str) -> dict:
     return import_from_json(session, entries, batch_name)
 
 
+def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
+    """将 Excel 文件解析为词汇 entries 列表。
+
+    期望列: word, pos, definition, source（与 CSV 格式一致）。
+    """
+    from openpyxl import load_workbook
+
+    try:
+        wb = load_workbook(filename=io.BytesIO(file_content), read_only=True, data_only=True)
+    except Exception as exc:
+        raise ValueError(f"无法解析 Excel 文件: {exc}") from exc
+    ws = wb.active
+    if ws is None:
+        raise ValueError("Excel 文件中没有工作表")
+
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows:
+        raise ValueError("Excel 文件为空")
+
+    # 首行为表头，查找列索引
+    header = [str(c).strip().lower() if c else "" for c in rows[0]]
+    col_map: dict[str, int] = {}
+    for alias, key in [
+        ("word", "word"), ("单词", "word"),
+        ("pos", "pos"), ("词性", "pos"),
+        ("definition", "definition"), ("释义", "definition"), ("中文释义", "definition"),
+        ("source", "source"), ("来源", "source"), ("教材来源", "source"),
+    ]:
+        if alias in header and key not in col_map:
+            col_map[key] = header.index(alias)
+
+    if "word" not in col_map:
+        raise ValueError("Excel 缺少必要的 'word'（或 '单词'）列")
+
+    entries: dict[str, dict[str, Any]] = {}
+    for row in rows[1:]:
+        word = str(row[col_map["word"]] or "").strip()
+        if not word:
+            continue
+        if word not in entries:
+            entries[word] = {"word": word, "meanings": []}
+        pos = str(row[col_map.get("pos", -1)] or "").strip() if "pos" in col_map else ""
+        definition = str(row[col_map.get("definition", -1)] or "").strip() if "definition" in col_map else ""
+        source = str(row[col_map.get("source", -1)] or "").strip() if "source" in col_map else ""
+        if pos and definition:
+            entries[word]["meanings"].append({
+                "pos": pos,
+                "definition": definition,
+                "sources": [source] if source else [],
+            })
+    return list(entries.values())
+
+
 def parse_upload(file_content: bytes, filename: str) -> list[dict[str, Any]]:
     """根据文件扩展名解析上传内容。"""
     lower = filename.lower()
@@ -115,19 +169,92 @@ def parse_upload(file_content: bytes, filename: str) -> list[dict[str, Any]]:
         return json.loads(file_content.decode("utf-8"))
     if lower.endswith(".csv"):
         return _parse_csv_text(file_content.decode("utf-8"))
-    raise ValueError(f"不支持的文件格式: {filename}，请使用 .json 或 .csv")
+    if lower.endswith((".xlsx", ".xls")):
+        return _parse_excel(file_content)
+    raise ValueError(f"不支持的文件格式: {filename}，请使用 .xlsx, .csv 或 .json")
 
 
-def _get_or_create_package(session: Session, name: str) -> Package:
+def _get_or_create_package(session: Session, name: str, *, force: bool = False) -> Package:
     pkg = session.query(Package).filter_by(name=name).first()
     if pkg is not None:
-        if pkg.status != "pending":
+        if pkg.status == "pending":
+            return pkg
+        if not force:
             raise ValueError(f"批次 '{name}' 已在处理中（状态: {pkg.status}），不可重复导入")
+        # force=True: 清理旧数据，重新导入
+        _clean_package_data(session, pkg)
+        pkg.status = "pending"
+        pkg.processed_words = 0
+        session.flush()
         return pkg
     pkg = Package(name=name)
     session.add(pkg)
     session.flush()
     return pkg
+
+
+def _clean_package_data(session: Session, pkg: Package) -> None:
+    """清理批次关联的旧数据，为重新导入做准备。
+
+    策略：
+    - 删除该包独占义项的 pending ContentItem（chunk/sentence）
+    - 删除该包独占单词的 pending mnemonic ContentItem
+    - 删除该包的 PackageMeaning 映射
+    - 不删除已生成的内容（非空 content），不删除跨包共享的数据
+    """
+    from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+
+    # 1. 找出该包关联的所有 meaning_id
+    old_pm_rows = session.query(PackageMeaning).filter_by(package_id=pkg.id).all()
+    old_meaning_ids = {pm.meaning_id for pm in old_pm_rows}
+    if not old_meaning_ids:
+        return
+
+    # 2. 找出哪些 meaning 被其他包共享
+    shared_meaning_ids: set[int] = set()
+    for mid in old_meaning_ids:
+        other = (
+            session.query(PackageMeaning)
+            .filter(PackageMeaning.meaning_id == mid, PackageMeaning.package_id != pkg.id)
+            .first()
+        )
+        if other is not None:
+            shared_meaning_ids.add(mid)
+
+    exclusive_meaning_ids = old_meaning_ids - shared_meaning_ids
+
+    # 3. 找出独占义项对应的 word_id
+    exclusive_word_ids: set[int] = set()
+    if exclusive_meaning_ids:
+        meanings = session.query(Meaning).filter(Meaning.id.in_(exclusive_meaning_ids)).all()
+        candidate_word_ids = {m.word_id for m in meanings}
+        # 只有当该词的所有义项都是本包独占时，才算独占词
+        for wid in candidate_word_ids:
+            word_meaning_ids = {m.id for m in session.query(Meaning).filter_by(word_id=wid).all()}
+            if word_meaning_ids <= exclusive_meaning_ids:
+                exclusive_word_ids.add(wid)
+
+    # 4. 删除独占义项的 pending chunk/sentence
+    if exclusive_meaning_ids:
+        session.query(ContentItem).filter(
+            ContentItem.meaning_id.in_(exclusive_meaning_ids),
+            ContentItem.dimension.in_(("chunk", "sentence")),
+            ContentItem.qc_status == QcStatus.PENDING.value,
+            ContentItem.content == "",
+        ).delete(synchronize_session=False)
+
+    # 5. 删除独占单词的 pending mnemonic
+    if exclusive_word_ids:
+        session.query(ContentItem).filter(
+            ContentItem.word_id.in_(exclusive_word_ids),
+            ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
+            ContentItem.qc_status == QcStatus.PENDING.value,
+            ContentItem.content == "",
+        ).delete(synchronize_session=False)
+
+    # 6. 删除 PackageMeaning 映射
+    session.query(PackageMeaning).filter_by(package_id=pkg.id).delete(synchronize_session=False)
+    session.flush()
 
 
 def _get_or_create_word(session: Session, word_text: str) -> Word:

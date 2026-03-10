@@ -26,6 +26,7 @@ def import_file(
     file: UploadFile,
     batch_name: str = "",
     model: str = "gemini-3-flash-preview",
+    force: bool = False,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin")),
 ):
@@ -61,7 +62,7 @@ def import_file(
 
     try:
         data = import_service.parse_upload(content, safe_filename)
-        result = import_service.import_from_json(db, data, batch_name.strip())
+        result = import_service.import_from_json(db, data, batch_name.strip(), force=force)
     except ValueError as e:
         status = 409 if "不可重复导入" in str(e) else 400
         raise HTTPException(status_code=status, detail=str(e))

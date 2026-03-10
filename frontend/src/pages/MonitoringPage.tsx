@@ -15,6 +15,7 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
 
   useEffect(() => {
     if (!batchId) return
+    setBatch(null)
 
     const poll = async () => {
       try {
@@ -85,9 +86,9 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
 
           {/* 统计 */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <StatCard label="处理词数" value={batch?.processed_words ?? 0} icon={Activity} />
-            <StatCard label="通过率" value={batch?.pass_rate !== null ? `${(batch?.pass_rate ?? 0).toFixed(1)}%` : '-'} icon={CheckCircle2} />
-            <StatCard label="异常数" value={batch ? batch.total_words - batch.processed_words : '-'} icon={XCircle} />
+            <StatCard label="处理词数" value={batch ? `${batch.processed_words} / ${batch.total_words}` : '-'} icon={Activity} />
+            <StatCard label="通过率" value={batch?.pass_rate != null ? `${batch.pass_rate.toFixed(1)}%` : '-'} icon={CheckCircle2} />
+            <StatCard label="异常数" value={batch && (batch.status === 'completed' || batch.status === 'failed') ? batch.total_words - batch.processed_words : '-'} icon={XCircle} />
           </div>
 
           {/* 完成后入口 */}
