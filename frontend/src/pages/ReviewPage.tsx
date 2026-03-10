@@ -66,7 +66,7 @@ export default function ReviewPage({ onBack }: Props) {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<Tab>('all')
-  const [selectedWordGroup, setSelectedWordGroup] = useState<WordGroup | null>(null)
+  const [selectedWordId, setSelectedWordId] = useState<number | null>(null)
   const [actionLoading, setActionLoading] = useState<number | null>(null)
   const [filterDim, setFilterDim] = useState('')
   const [isFilterOpen, setIsFilterOpen] = useState(false)
@@ -180,6 +180,11 @@ export default function ReviewPage({ onBack }: Props) {
   })
 
   const wordGroups = groupByWord(filtered)
+
+  // 从实时数据派生当前选中的 group（而非快照）
+  const selectedWordGroup = selectedWordId !== null
+    ? groupByWord(items).find(g => g.word_id === selectedWordId) ?? null
+    : null
 
   const counts = {
     total: items.length,
@@ -369,7 +374,7 @@ export default function ReviewPage({ onBack }: Props) {
             <WordGroupCard
               key={group.word_id}
               group={group}
-              onOpen={() => setSelectedWordGroup(group)}
+              onOpen={() => setSelectedWordId(group.word_id)}
             />
           ))}
         </div>
@@ -380,7 +385,7 @@ export default function ReviewPage({ onBack }: Props) {
         {selectedWordGroup && (
           <WordReviewModal
             group={selectedWordGroup}
-            onClose={() => setSelectedWordGroup(null)}
+            onClose={() => setSelectedWordId(null)}
             onApprove={handleApprove}
             onRegenerate={handleRegenerate}
             onSaved={() => { loadItems(); }}
