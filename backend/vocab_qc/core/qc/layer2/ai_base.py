@@ -41,6 +41,7 @@ class AiClient:
         self.max_retries = max_retries
         self._max_concurrency = max_concurrency
         self._semaphore: asyncio.Semaphore | None = None
+        self._semaphore_loop: asyncio.AbstractEventLoop | None = None
         self._http_client = httpx.AsyncClient(
             timeout=60.0,
             limits=httpx.Limits(
@@ -50,9 +51,11 @@ class AiClient:
         )
 
     def _get_semaphore(self) -> asyncio.Semaphore:
-        """延迟创建 Semaphore，确保绑定到当前运行的事件循环。"""
-        if self._semaphore is None:
+        """延迟创建 Semaphore，事件循环变化时自动重建。"""
+        loop = asyncio.get_running_loop()
+        if self._semaphore is None or self._semaphore_loop is not loop:
             self._semaphore = asyncio.Semaphore(self._max_concurrency)
+            self._semaphore_loop = loop
         return self._semaphore
 
     async def check(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
