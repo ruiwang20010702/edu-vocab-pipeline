@@ -163,7 +163,7 @@ def test_e2e_export_only_approved(db_session, full_word_data):
     data = export_service.export_word(db_session, word.id)
     assert data["meanings"][0]["chunk"] is None
     assert data["meanings"][0]["sentence"] is None
-    assert data["mnemonics"] == []
+    assert data["meanings"][0].get("mnemonics", []) == []
 
     # 手动设为 approved
     chunk = full_word_data["chunk"]

@@ -99,11 +99,12 @@ def _build_word_detail_from_loaded(word: Word, issues: list[QcRuleResult]) -> di
     """从已预加载的 ORM 对象组装单词详情（避免 N+1 查询）。"""
     # 按 (meaning_id, dimension) 索引内容项
     content_by_key: dict[tuple[int | None, str], ContentItem] = {}
-    mnemonics = []
+    # 按 meaning_id 收集助记
+    mnemonics_by_meaning: dict[int, list] = {}
     for item in word.content_items:
         content_by_key[(item.meaning_id, item.dimension)] = item
-        if item.dimension in MNEMONIC_DIMENSIONS:
-            mnemonics.append(item)
+        if item.dimension in MNEMONIC_DIMENSIONS and item.meaning_id:
+            mnemonics_by_meaning.setdefault(item.meaning_id, []).append(item)
 
     meanings_data = []
     for m in word.meanings:
@@ -115,6 +116,7 @@ def _build_word_detail_from_loaded(word: Word, issues: list[QcRuleResult]) -> di
             "sources": [{"id": s.id, "meaning_id": s.meaning_id, "source_name": s.source_name} for s in m.sources],
             "chunk": content_by_key.get((m.id, "chunk")),
             "sentence": content_by_key.get((m.id, "sentence")),
+            "mnemonics": mnemonics_by_meaning.get(m.id, []),
         })
 
     return {
@@ -124,7 +126,6 @@ def _build_word_detail_from_loaded(word: Word, issues: list[QcRuleResult]) -> di
         "updated_at": word.updated_at,
         "phonetics": word.phonetics,
         "meanings": meanings_data,
-        "mnemonics": mnemonics,
         "issues": [
             {
                 "id": iss.id,

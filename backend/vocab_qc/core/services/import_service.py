@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models.content_layer import ContentItem
-from vocab_qc.core.models.data_layer import Meaning, Source, Word
+from vocab_qc.core.models.data_layer import Meaning, Phonetic, Source, Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageMeaning
 
@@ -40,6 +40,11 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
         word_count += 1
         imported_words.append(word)
 
+        # 音标（IPA）— 从 Excel/JSON 导入
+        ipa = entry.get("ipa", "").strip()
+        if ipa:
+            _upsert_phonetic_ipa(session, word, ipa)
+
         for m_data in entry.get("meanings", []):
             pos = m_data.get("pos", "").strip()
             definition = m_data.get("definition", "").strip()
@@ -68,7 +73,7 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
             if existing_pm is None:
                 session.add(PackageMeaning(package_id=package.id, meaning_id=meaning.id))
 
-    # 创建 ContentItem 占位记录（chunk/sentence 按义项, mnemonic 按单词）
+    # 创建 ContentItem 占位记录（chunk/sentence/mnemonic 均按义项）
     _create_content_placeholders(session, imported_words, imported_meanings)
 
     # 更新 Package 统计
@@ -93,6 +98,9 @@ def _parse_csv_text(text: str) -> list[dict[str, Any]]:
         pos = row.get("pos", "").strip()
         definition = row.get("definition", "").strip()
         source = row.get("source", "").strip()
+        ipa = row.get("ipa", "").strip()
+        if ipa and not entries[word].get("ipa"):
+            entries[word]["ipa"] = ipa
         if pos and definition:
             entries[word]["meanings"].append({
                 "pos": pos,
@@ -136,6 +144,7 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
         ("pos", "pos"), ("词性", "pos"),
         ("definition", "definition"), ("释义", "definition"), ("中文释义", "definition"),
         ("source", "source"), ("来源", "source"), ("教材来源", "source"),
+        ("ipa", "ipa"), ("音标", "ipa"),
     ]:
         if alias in header and key not in col_map:
             col_map[key] = header.index(alias)
@@ -153,6 +162,9 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
         pos = str(row[col_map.get("pos", -1)] or "").strip() if "pos" in col_map else ""
         definition = str(row[col_map.get("definition", -1)] or "").strip() if "definition" in col_map else ""
         source = str(row[col_map.get("source", -1)] or "").strip() if "source" in col_map else ""
+        ipa = str(row[col_map.get("ipa", -1)] or "").strip() if "ipa" in col_map else ""
+        if ipa and not entries[word].get("ipa"):
+            entries[word]["ipa"] = ipa
         if pos and definition:
             entries[word]["meanings"].append({
                 "pos": pos,
@@ -198,7 +210,7 @@ def _clean_package_data(session: Session, pkg: Package) -> None:
 
     策略：
     - 删除该包独占义项的 pending ContentItem（chunk/sentence）
-    - 删除该包独占单词的 pending mnemonic ContentItem
+    - 删除该包独占义项的 pending mnemonic ContentItem
     - 删除该包的 PackageMeaning 映射
     - 不删除已生成的内容（非空 content），不删除跨包共享的数据
     """
@@ -234,20 +246,11 @@ def _clean_package_data(session: Session, pkg: Package) -> None:
             if word_meaning_ids <= exclusive_meaning_ids:
                 exclusive_word_ids.add(wid)
 
-    # 4. 删除独占义项的 pending chunk/sentence
+    # 4. 删除独占义项的 pending chunk/sentence/mnemonic
     if exclusive_meaning_ids:
         session.query(ContentItem).filter(
             ContentItem.meaning_id.in_(exclusive_meaning_ids),
-            ContentItem.dimension.in_(("chunk", "sentence")),
-            ContentItem.qc_status == QcStatus.PENDING.value,
-            ContentItem.content == "",
-        ).delete(synchronize_session=False)
-
-    # 5. 删除独占单词的 pending mnemonic
-    if exclusive_word_ids:
-        session.query(ContentItem).filter(
-            ContentItem.word_id.in_(exclusive_word_ids),
-            ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
+            ContentItem.dimension.in_(("chunk", "sentence", *MNEMONIC_DIMENSIONS)),
             ContentItem.qc_status == QcStatus.PENDING.value,
             ContentItem.content == "",
         ).delete(synchronize_session=False)
@@ -274,12 +277,14 @@ def _create_content_placeholders(
 ) -> None:
     """为导入的数据创建 ContentItem 占位记录。
 
-    - chunk / sentence: 按义项生成（防止多义词张冠李戴）
-    - mnemonic: 按单词生成（面向拼写/发音，与义项无关）
+    chunk / sentence / mnemonic 均按义项生成（防止一词多义混淆）。
     """
-    # chunk + sentence — 每个义项各一条
+    from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+
+    per_meaning_dims = ("chunk", "sentence", *MNEMONIC_DIMENSIONS)
+
     for word, meaning in meanings:
-        for dim in ("chunk", "sentence"):
+        for dim in per_meaning_dims:
             exists = (
                 session.query(ContentItem)
                 .filter_by(word_id=word.id, meaning_id=meaning.id, dimension=dim)
@@ -296,30 +301,15 @@ def _create_content_placeholders(
                     )
                 )
 
-    # mnemonic — 每个单词 4 条（4 种助记类型，与义项无关）
-    from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
 
-    seen_word_ids: set[int] = set()
-    for word in words:
-        if word.id in seen_word_ids:
-            continue
-        seen_word_ids.add(word.id)
-        for mnem_dim in MNEMONIC_DIMENSIONS:
-            exists = (
-                session.query(ContentItem)
-                .filter_by(word_id=word.id, dimension=mnem_dim)
-                .first()
-            )
-            if exists is None:
-                session.add(
-                    ContentItem(
-                        word_id=word.id,
-                        meaning_id=None,
-                        dimension=mnem_dim,
-                        content="",
-                        qc_status=QcStatus.PENDING.value,
-                    )
-                )
+def _upsert_phonetic_ipa(session: Session, word: Word, ipa: str) -> None:
+    """创建或更新 Phonetic 记录的 IPA 音标。"""
+    phonetic = session.query(Phonetic).filter_by(word_id=word.id).first()
+    if phonetic is None:
+        session.add(Phonetic(word_id=word.id, ipa=ipa, syllables=""))
+    else:
+        phonetic.ipa = ipa
+    session.flush()
 
 
 def _find_or_create_meaning(session: Session, word: Word, pos: str, definition: str) -> Meaning:

@@ -42,7 +42,9 @@ class TestListWords:
     def test_word_detail_has_mnemonic(self, db_session, sample_word):
         result = word_service.list_words(db_session)
         word_data = result["items"][0]
-        assert len(word_data["mnemonics"]) > 0
+        # 助记现在在 meaning 级别
+        all_mnemonics = [mn for m in word_data["meanings"] for mn in m.get("mnemonics", [])]
+        assert len(all_mnemonics) > 0
 
 
 class TestGetWordDetail:

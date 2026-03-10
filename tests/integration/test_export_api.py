@@ -206,7 +206,7 @@ class TestExportWord:
         assert data["word"] == "bright"
         assert data["id"] == word_id
         assert "meanings" in data
-        assert "mnemonics" in data
+        assert "mnemonics" in data["meanings"][0]
 
     def test_export_nonexistent_word_returns_404(self, test_app):
         """不存在的 word_id 返回 404."""
@@ -220,7 +220,7 @@ class TestExportWord:
         client, word_id = test_app_with_data
         response = client.get(f"/api/export/word/{word_id}")
         data = response.json()
-        for key in ("id", "word", "syllables", "ipa", "meanings", "mnemonics"):
+        for key in ("id", "word", "syllables", "ipa", "meanings"):
             assert key in data
 
     def test_export_word_phonetic(self, test_app_with_data):

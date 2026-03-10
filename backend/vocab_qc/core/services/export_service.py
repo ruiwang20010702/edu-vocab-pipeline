@@ -27,24 +27,33 @@ class ExportService:
             "syllables": phonetic.syllables if phonetic else "",
             "ipa": phonetic.ipa if phonetic else "",
             "meanings": [],
-            "mnemonics": [],
         }
 
         for meaning in meanings:
             sources = session.query(Source).filter_by(meaning_id=meaning.id).all()
 
-            # 获取 approved 的语块
             chunk = (
                 session.query(ContentItem)
                 .filter_by(word_id=word.id, meaning_id=meaning.id, dimension="chunk", qc_status=QcStatus.APPROVED.value)
                 .first()
             )
 
-            # 获取 approved 的例句
             sentence = (
                 session.query(ContentItem)
                 .filter_by(word_id=word.id, meaning_id=meaning.id, dimension="sentence", qc_status=QcStatus.APPROVED.value)
                 .first()
+            )
+
+            # 获取该义项的 approved 助记
+            mnemonics = (
+                session.query(ContentItem)
+                .filter(
+                    ContentItem.word_id == word.id,
+                    ContentItem.meaning_id == meaning.id,
+                    ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
+                    ContentItem.qc_status == QcStatus.APPROVED.value,
+                )
+                .all()
             )
 
             meaning_data = {
@@ -55,23 +64,9 @@ class ExportService:
                 "chunk_cn": chunk.content_cn if chunk else None,
                 "sentence": sentence.content if sentence else None,
                 "sentence_cn": sentence.content_cn if sentence else None,
+                "mnemonics": [{"type": m.dimension, "content": m.content} for m in mnemonics],
             }
             result["meanings"].append(meaning_data)
-
-        # 获取 approved 的助记（4 种类型）
-        mnemonics = (
-            session.query(ContentItem)
-            .filter(
-                ContentItem.word_id == word.id,
-                ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
-                ContentItem.qc_status == QcStatus.APPROVED.value,
-            )
-            .all()
-        )
-        result["mnemonics"] = [
-            {"type": m.dimension, "content": m.content}
-            for m in mnemonics
-        ]
 
         return result
 
@@ -121,10 +116,10 @@ class ExportService:
 
         # 按 (word_id, meaning_id, dimension) 建索引
         content_index: dict[tuple[int, int | None, str], ContentItem] = {}
-        mnemonic_by_word: dict[int, list[ContentItem]] = defaultdict(list)
+        mnemonics_by_meaning: dict[int, list[ContentItem]] = defaultdict(list)
         for ci in approved_items:
-            if ci.dimension in MNEMONIC_DIMENSIONS:
-                mnemonic_by_word[ci.word_id].append(ci)
+            if ci.dimension in MNEMONIC_DIMENSIONS and ci.meaning_id:
+                mnemonics_by_meaning[ci.meaning_id].append(ci)
             else:
                 content_index[(ci.word_id, ci.meaning_id, ci.dimension)] = ci
 
@@ -142,7 +137,6 @@ class ExportService:
                 "syllables": phonetic.syllables if phonetic else "",
                 "ipa": phonetic.ipa if phonetic else "",
                 "meanings": [],
-                "mnemonics": [],
             }
 
             for meaning in meanings_by_word.get(word_id, []):
@@ -158,13 +152,12 @@ class ExportService:
                     "chunk_cn": chunk.content_cn if chunk else None,
                     "sentence": sentence.content if sentence else None,
                     "sentence_cn": sentence.content_cn if sentence else None,
+                    "mnemonics": [
+                        {"type": m.dimension, "content": m.content}
+                        for m in mnemonics_by_meaning.get(meaning.id, [])
+                    ],
                 }
                 result["meanings"].append(meaning_data)
-
-            result["mnemonics"] = [
-                {"type": m.dimension, "content": m.content}
-                for m in mnemonic_by_word.get(word_id, [])
-            ]
 
             results.append(result)
         return results

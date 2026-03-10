@@ -212,11 +212,6 @@ export default function MasterTablePage() {
                   const ipa = w.phonetics?.[0]?.ipa ?? ''
                   const syllables = w.phonetics?.[0]?.syllables ?? ''
 
-                  // 第一条有效助记
-                  const firstMnemonic = w.mnemonics?.find(m => m.content) ?? null
-                  const mnemonicData = firstMnemonic ? parseMnemonic(firstMnemonic.content) : null
-                  const mnemonicType = firstMnemonic ? (MNEMONIC_TYPE_LABELS[firstMnemonic.dimension] ?? firstMnemonic.dimension) : ''
-
                   if (meanings.length === 0) {
                     return (
                       <tr key={w.id} className="hover:bg-blue-50/30 transition-colors group">
@@ -225,11 +220,7 @@ export default function MasterTablePage() {
                         </td>
                         <td className="px-5 py-3 font-mono text-xs text-slate-400">{ipa}</td>
                         <td className="px-5 py-3 text-xs text-slate-500">{syllables}</td>
-                        <td className="px-5 py-3 text-xs text-slate-300 italic" colSpan={6}>暂无义项数据</td>
-                        <td className="px-5 py-3 text-xs text-slate-400">{mnemonicType}</td>
-                        <td className="px-5 py-3"><span className="text-xs font-mono text-blue-600 line-clamp-2 max-w-[140px]">{mnemonicData?.formula}</span></td>
-                        <td className="px-5 py-3"><span className="text-xs text-slate-500 line-clamp-2 max-w-[140px]">{mnemonicData?.chant}</span></td>
-                        <td className="px-5 py-3"><span className="text-xs text-slate-400 line-clamp-2 max-w-[160px]">{mnemonicData?.script}</span></td>
+                        <td className="px-5 py-3 text-xs text-slate-300 italic" colSpan={10}>暂无义项数据</td>
                         <td className="px-5 py-3 text-xs text-slate-400 whitespace-nowrap">{w.created_at ? new Date(w.created_at).toLocaleDateString() : '-'}</td>
                         <td className="px-5 py-3 sticky right-0 bg-white group-hover:bg-blue-50/30 transition-colors z-10">
                           <button onClick={() => handleOpenDetail(w.id)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -240,48 +231,56 @@ export default function MasterTablePage() {
                     )
                   }
 
-                  return meanings.map((m: any, mi: number) => (
-                    <tr key={`${w.id}-${mi}`} className={`hover:bg-blue-50/30 transition-colors group ${mi > 0 ? 'border-t border-dashed border-slate-100' : ''}`}>
-                      {mi === 0 && (
-                        <>
-                          <td rowSpan={rowCount} className="px-5 py-3 sticky left-0 bg-white group-hover:bg-blue-50/30 transition-colors z-10 align-top border-r border-slate-50">
-                            <button onClick={() => handleOpenDetail(w.id)} className="font-bold text-slate-900 hover:text-blue-600 transition-colors cursor-pointer text-left">{w.word}</button>
-                            {rowCount > 1 && <span className="block text-[9px] text-slate-400 mt-0.5">{rowCount} 个义项</span>}
-                          </td>
-                          <td rowSpan={rowCount} className="px-5 py-3 font-mono text-xs text-slate-400 align-top">{ipa}</td>
-                          <td rowSpan={rowCount} className="px-5 py-3 text-xs text-slate-500 align-top">{syllables}</td>
-                        </>
-                      )}
-                      {/* 义项行 */}
-                      <td className="px-5 py-2">
-                        <div className="flex flex-col gap-0.5 min-w-[100px]">
-                          <span className="text-[10px] font-bold text-blue-600 uppercase">{m.pos}</span>
-                          <span className="text-xs text-slate-700 line-clamp-1">{m.definition}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[130px]">{m.sources?.map((s: any) => s.source_name).join('; ') ?? ''}</span></td>
-                      <td className="px-5 py-2"><span className="text-xs text-slate-500 italic line-clamp-1 max-w-[130px]">{m.chunk?.content ?? ''}</span></td>
-                      <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[130px]">{m.chunk?.content_cn ?? ''}</span></td>
-                      <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[180px]">{m.sentence?.content ?? ''}</span></td>
-                      <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[180px]">{m.sentence?.content_cn ?? ''}</span></td>
-                      {mi === 0 && (
-                        <>
-                          <td rowSpan={rowCount} className="px-5 py-3 align-top">
-                            {mnemonicType && <span className="px-2 py-0.5 bg-yellow-50 text-yellow-700 text-[10px] font-bold rounded border border-yellow-200 whitespace-nowrap">{mnemonicType}</span>}
-                          </td>
-                          <td rowSpan={rowCount} className="px-5 py-3 align-top"><span className="text-xs font-mono text-blue-600 line-clamp-2 max-w-[140px]">{mnemonicData?.formula}</span></td>
-                          <td rowSpan={rowCount} className="px-5 py-3 align-top"><span className="text-xs text-slate-500 line-clamp-2 max-w-[140px]">{mnemonicData?.chant}</span></td>
-                          <td rowSpan={rowCount} className="px-5 py-3 align-top"><span className="text-xs text-slate-400 line-clamp-2 max-w-[160px]">{mnemonicData?.script}</span></td>
-                          <td rowSpan={rowCount} className="px-5 py-3 text-xs text-slate-400 whitespace-nowrap align-top">{w.created_at ? new Date(w.created_at).toLocaleDateString() : '-'}</td>
-                          <td rowSpan={rowCount} className="px-5 py-3 sticky right-0 bg-white group-hover:bg-blue-50/30 transition-colors z-10 align-top">
-                            <button onClick={() => handleOpenDetail(w.id)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <MoreHorizontal size={16} />
-                            </button>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))
+                  return meanings.map((m: any, mi: number) => {
+                    // 每个义项的第一条有效助记
+                    const firstMn = m.mnemonics?.find((mn: any) => mn.content) ?? null
+                    const mnData = firstMn ? parseMnemonic(firstMn.content) : null
+                    const mnType = firstMn ? (MNEMONIC_TYPE_LABELS[firstMn.dimension] ?? firstMn.dimension) : ''
+
+                    return (
+                      <tr key={`${w.id}-${mi}`} className={`hover:bg-blue-50/30 transition-colors group ${mi > 0 ? 'border-t border-dashed border-slate-100' : ''}`}>
+                        {mi === 0 && (
+                          <>
+                            <td rowSpan={rowCount} className="px-5 py-3 sticky left-0 bg-white group-hover:bg-blue-50/30 transition-colors z-10 align-top border-r border-slate-50">
+                              <button onClick={() => handleOpenDetail(w.id)} className="font-bold text-slate-900 hover:text-blue-600 transition-colors cursor-pointer text-left">{w.word}</button>
+                              {rowCount > 1 && <span className="block text-[9px] text-slate-400 mt-0.5">{rowCount} 个义项</span>}
+                            </td>
+                            <td rowSpan={rowCount} className="px-5 py-3 font-mono text-xs text-slate-400 align-top">{ipa}</td>
+                            <td rowSpan={rowCount} className="px-5 py-3 text-xs text-slate-500 align-top">{syllables}</td>
+                          </>
+                        )}
+                        {/* 义项行 */}
+                        <td className="px-5 py-2">
+                          <div className="flex flex-col gap-0.5 min-w-[100px]">
+                            <span className="text-[10px] font-bold text-blue-600 uppercase">{m.pos}</span>
+                            <span className="text-xs text-slate-700 line-clamp-1">{m.definition}</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[130px]">{m.sources?.map((s: any) => s.source_name).join('; ') ?? ''}</span></td>
+                        <td className="px-5 py-2"><span className="text-xs text-slate-500 italic line-clamp-1 max-w-[130px]">{m.chunk?.content ?? ''}</span></td>
+                        <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[130px]">{m.chunk?.content_cn ?? ''}</span></td>
+                        <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[180px]">{m.sentence?.content ?? ''}</span></td>
+                        <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[180px]">{m.sentence?.content_cn ?? ''}</span></td>
+                        {/* 助记列 — 每个义项独立 */}
+                        <td className="px-5 py-2">
+                          {mnType && <span className="px-2 py-0.5 bg-yellow-50 text-yellow-700 text-[10px] font-bold rounded border border-yellow-200 whitespace-nowrap">{mnType}</span>}
+                        </td>
+                        <td className="px-5 py-2"><span className="text-xs font-mono text-blue-600 line-clamp-2 max-w-[140px]">{mnData?.formula}</span></td>
+                        <td className="px-5 py-2"><span className="text-xs text-slate-500 line-clamp-2 max-w-[140px]">{mnData?.chant}</span></td>
+                        <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-2 max-w-[160px]">{mnData?.script}</span></td>
+                        {mi === 0 && (
+                          <>
+                            <td rowSpan={rowCount} className="px-5 py-3 text-xs text-slate-400 whitespace-nowrap align-top">{w.created_at ? new Date(w.created_at).toLocaleDateString() : '-'}</td>
+                            <td rowSpan={rowCount} className="px-5 py-3 sticky right-0 bg-white group-hover:bg-blue-50/30 transition-colors z-10 align-top">
+                              <button onClick={() => handleOpenDetail(w.id)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <MoreHorizontal size={16} />
+                              </button>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    )
+                  })
                 })}
               </tbody>
             </table>
@@ -345,6 +344,10 @@ export default function MasterTablePage() {
 /* ===== 详情弹窗 ===== */
 
 function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; loading: boolean; onClose: () => void }) {
+  const [meaningIdx, setMeaningIdx] = useState(0)
+  const meanings = word?.meanings ?? []
+  const currentMeaning = meanings[meaningIdx] ?? null
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -392,92 +395,111 @@ function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; 
 
             {/* 内容 */}
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
-              {/* 义项 */}
-              {word.meanings?.map((m, idx) => (
-                <div key={m.id || idx} className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <BookOpen size={15} className="text-blue-500" />
-                    <span className="text-xs font-bold text-slate-400 uppercase">义项 {idx + 1}</span>
-                  </div>
-                  <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-xs font-bold text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded">{m.pos}</span>
-                      <span className="text-sm font-medium text-slate-900">{m.definition}</span>
-                    </div>
-
-                    {m.sources && m.sources.length > 0 && (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <GraduationCap size={13} className="text-slate-400 shrink-0" />
-                        {m.sources.map((s, si) => (
-                          <span key={si} className="text-[10px] px-2 py-0.5 bg-white border border-slate-200 rounded-md text-slate-500">{s.source_name}</span>
-                        ))}
-                      </div>
-                    )}
-
-                    {m.chunk && m.chunk.content && (
-                      <div className="flex items-start gap-2">
-                        <Layers size={13} className="text-violet-400 mt-0.5 shrink-0" />
-                        <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">核心语块</p>
-                          <p className="text-sm text-violet-700 italic font-medium">{m.chunk.content}</p>
-                          {m.chunk.content_cn && <p className="text-xs text-slate-500 mt-0.5">{m.chunk.content_cn}</p>}
-                        </div>
-                      </div>
-                    )}
-
-                    {m.sentence && m.sentence.content && (
-                      <div className="flex items-start gap-2">
-                        <Volume2 size={13} className="text-emerald-400 mt-0.5 shrink-0" />
-                        <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">例句</p>
-                          <p className="text-sm text-slate-800">{m.sentence.content}</p>
-                          {m.sentence.content_cn && <p className="text-xs text-slate-500 mt-1">{m.sentence.content_cn}</p>}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {/* 全部助记 */}
-              {word.mnemonics && word.mnemonics.filter(m => m.content).length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Lightbulb size={15} className="text-yellow-500" />
-                    <span className="text-xs font-bold text-slate-400 uppercase">助记（{word.mnemonics.filter(m => m.content).length} 种类型）</span>
-                  </div>
-                  {word.mnemonics.filter(m => m.content).map((mn) => {
-                    const parsed = parseMnemonic(mn.content)
-                    const typeLabel = MNEMONIC_TYPE_LABELS[mn.dimension] ?? mn.dimension
-                    return (
-                      <div key={mn.id} className="bg-yellow-50/60 rounded-2xl p-4 space-y-3 border border-yellow-100">
-                        <span className="text-[10px] px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-md font-bold">{typeLabel}</span>
-
-                        {parsed.formula && (
-                          <div>
-                            <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">核心公式</p>
-                            <p className="text-sm font-mono font-bold text-yellow-800">{parsed.formula}</p>
-                          </div>
-                        )}
-
-                        {parsed.chant && (
-                          <div>
-                            <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">助记口诀</p>
-                            <p className="text-sm text-yellow-700">{parsed.chant}</p>
-                          </div>
-                        )}
-
-                        {parsed.script && (
-                          <div className="pt-2 border-t border-yellow-200/60">
-                            <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">老师话术</p>
-                            <p className="text-xs text-yellow-800/80 leading-relaxed">{parsed.script}</p>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
+              {/* 义项 Tab 切换 */}
+              {meanings.length > 1 && (
+                <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-2xl w-fit">
+                  {meanings.map((m, idx) => (
+                    <button
+                      key={m.id || idx}
+                      onClick={() => setMeaningIdx(idx)}
+                      className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        meaningIdx === idx
+                          ? 'bg-white text-blue-600 shadow-sm'
+                          : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                    >
+                      义项 {idx + 1}
+                    </button>
+                  ))}
                 </div>
               )}
+
+              {/* 当前义项内容 */}
+              {currentMeaning && (() => {
+                const m = currentMeaning
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <BookOpen size={15} className="text-blue-500" />
+                      <span className="text-xs font-bold text-slate-400 uppercase">义项 {meaningIdx + 1}</span>
+                    </div>
+                    <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-xs font-bold text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded">{m.pos}</span>
+                        <span className="text-sm font-medium text-slate-900">{m.definition}</span>
+                      </div>
+
+                      {m.sources && m.sources.length > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <GraduationCap size={13} className="text-slate-400 shrink-0" />
+                          {m.sources.map((s: any, si: number) => (
+                            <span key={si} className="text-[10px] px-2 py-0.5 bg-white border border-slate-200 rounded-md text-slate-500">{s.source_name}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {m.chunk && m.chunk.content && (
+                        <div className="flex items-start gap-2">
+                          <Layers size={13} className="text-violet-400 mt-0.5 shrink-0" />
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">核心语块</p>
+                            <p className="text-sm text-violet-700 italic font-medium">{m.chunk.content}</p>
+                            {m.chunk.content_cn && <p className="text-xs text-slate-500 mt-0.5">{m.chunk.content_cn}</p>}
+                          </div>
+                        </div>
+                      )}
+
+                      {m.sentence && m.sentence.content && (
+                        <div className="flex items-start gap-2">
+                          <Volume2 size={13} className="text-emerald-400 mt-0.5 shrink-0" />
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">例句</p>
+                            <p className="text-sm text-slate-800">{m.sentence.content}</p>
+                            {m.sentence.content_cn && <p className="text-xs text-slate-500 mt-1">{m.sentence.content_cn}</p>}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 该义项的助记 */}
+                      {m.mnemonics && m.mnemonics.filter((mn: any) => mn.content).length > 0 && (
+                        <div className="space-y-2 pt-2 border-t border-slate-200/60">
+                          <div className="flex items-center gap-1.5">
+                            <Lightbulb size={13} className="text-yellow-500 shrink-0" />
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">助记（{m.mnemonics.filter((mn: any) => mn.content).length} 种）</span>
+                          </div>
+                          {m.mnemonics.filter((mn: any) => mn.content).map((mn: any) => {
+                            const parsed = parseMnemonic(mn.content)
+                            const typeLabel = MNEMONIC_TYPE_LABELS[mn.dimension] ?? mn.dimension
+                            return (
+                              <div key={mn.id} className="bg-yellow-50/60 rounded-xl p-3 space-y-2 border border-yellow-100">
+                                <span className="text-[10px] px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-md font-bold">{typeLabel}</span>
+                                {parsed.formula && (
+                                  <div>
+                                    <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">核心公式</p>
+                                    <p className="text-sm font-mono font-bold text-yellow-800">{parsed.formula}</p>
+                                  </div>
+                                )}
+                                {parsed.chant && (
+                                  <div>
+                                    <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">助记口诀</p>
+                                    <p className="text-sm text-yellow-700">{parsed.chant}</p>
+                                  </div>
+                                )}
+                                {parsed.script && (
+                                  <div className="pt-2 border-t border-yellow-200/60">
+                                    <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">老师话术</p>
+                                    <p className="text-xs text-yellow-800/80 leading-relaxed">{parsed.script}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* 质检问题 */}
               {word.issues && word.issues.length > 0 && (

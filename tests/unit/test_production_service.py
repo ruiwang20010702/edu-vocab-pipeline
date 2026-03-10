@@ -36,7 +36,7 @@ class TestRunProduction:
         mnem_items = []
         for dim in ["mnemonic_root_affix", "mnemonic_word_in_word", "mnemonic_sound_meaning", "mnemonic_exam_app"]:
             item = ContentItem(
-                word_id=word.id, meaning_id=None,
+                word_id=word.id, meaning_id=meaning.id,
                 dimension=dim, content="", qc_status=QcStatus.PENDING.value,
             )
             mnem_items.append(item)

@@ -112,8 +112,8 @@ class TestImportFromJson:
         assert len(chunks) == 2  # 两个义项各一条
         assert len(sentences) == 2
 
-    def test_mnemonic_placeholder_created_per_word(self, db_session):
-        """每个单词应有 1 条 mnemonic 占位 ContentItem（与义项无关）。"""
+    def test_mnemonic_placeholder_created_per_meaning(self, db_session):
+        """每个义项应有 4 条 mnemonic 占位 ContentItem。"""
         data = [
             {
                 "word": "bright",
@@ -132,8 +132,9 @@ class TestImportFromJson:
             ContentItem.word_id == word.id,
             ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
         ).all()
-        assert len(mnemonics) == 4
-        assert all(m.meaning_id is None for m in mnemonics)
+        # bright 有 2 个义项 × 4 种助记类型 = 8 条
+        assert len(mnemonics) == 8
+        assert all(m.meaning_id is not None for m in mnemonics)
 
     def test_content_placeholders_not_duplicated(self, db_session):
         """重复导入相同数据不会重复创建 ContentItem。"""

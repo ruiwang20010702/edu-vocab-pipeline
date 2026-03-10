@@ -76,12 +76,12 @@ def _seed_package_with_items(session, word_text="apple", definition="苹果", po
         )
         items.append(item)
 
-    # 助记类型（meaning_id=None）
+    # 助记类型（按义项）
     for dim in ["mnemonic_root_affix", "mnemonic_word_in_word",
                 "mnemonic_sound_meaning", "mnemonic_exam_app"]:
         item = ContentItem(
             word_id=word.id,
-            meaning_id=None,
+            meaning_id=meaning.id,
             dimension=dim,
             content="",
             qc_status=QcStatus.PENDING.value,

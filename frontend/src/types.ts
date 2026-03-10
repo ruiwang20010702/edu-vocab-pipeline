@@ -115,8 +115,8 @@ export interface WordDetail extends Word {
   meanings: (Meaning & {
     chunk?: ContentItem
     sentence?: ContentItem
+    mnemonics?: ContentItem[]
   })[]
-  mnemonics: ContentItem[]
   issues: QualityIssue[]
 }
 
