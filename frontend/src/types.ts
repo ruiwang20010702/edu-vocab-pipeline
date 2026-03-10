@@ -127,6 +127,7 @@ export interface BatchInfo {
   total_words: number
   processed_words: number
   pass_rate: number | null
+  failed_count: number
   created_at: string
 }
 

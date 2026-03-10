@@ -32,14 +32,50 @@ router = APIRouter(prefix="/api/batches", tags=["批次"])
 _production_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="production")
 
 
-def _package_to_info(pkg: Package) -> BatchInfoResponse:
+def _package_to_info(pkg: Package, db: Session | None = None) -> BatchInfoResponse:
+    pass_rate = None
+    failed_count = 0
+
+    if db is not None:
+        from sqlalchemy import distinct, func
+        from vocab_qc.core.models import ContentItem, QcStatus
+        from vocab_qc.core.models.package_layer import PackageMeaning
+
+        # 找到该 package 关联的所有 word_id
+        word_ids_q = (
+            db.query(distinct(ContentItem.word_id))
+            .join(PackageMeaning, PackageMeaning.meaning_id == ContentItem.meaning_id)
+            .filter(PackageMeaning.package_id == pkg.id)
+        )
+        word_ids = [r[0] for r in word_ids_q.all()]
+
+        if word_ids:
+            total = db.query(func.count(ContentItem.id)).filter(ContentItem.word_id.in_(word_ids)).scalar() or 0
+            approved = db.query(func.count(ContentItem.id)).filter(
+                ContentItem.word_id.in_(word_ids),
+                ContentItem.qc_status == QcStatus.APPROVED.value,
+            ).scalar() or 0
+            failed = db.query(func.count(ContentItem.id)).filter(
+                ContentItem.word_id.in_(word_ids),
+                ContentItem.qc_status.in_([
+                    QcStatus.LAYER1_FAILED.value,
+                    QcStatus.LAYER2_FAILED.value,
+                    QcStatus.REJECTED.value,
+                ]),
+            ).scalar() or 0
+
+            if total > 0:
+                pass_rate = round(approved / total * 100, 1)
+            failed_count = failed
+
     return BatchInfoResponse(
         id=str(pkg.id),
         name=pkg.name,
         status=pkg.status,
         total_words=pkg.total_words,
         processed_words=pkg.processed_words,
-        pass_rate=None,
+        pass_rate=pass_rate,
+        failed_count=failed_count,
         created_at=pkg.created_at,
     )
 
@@ -51,7 +87,7 @@ def list_batches(
 ):
     """获取生产批次列表（基于 Package）。"""
     packages = db.query(Package).order_by(Package.created_at.desc()).all()
-    return [_package_to_info(pkg) for pkg in packages]
+    return [_package_to_info(pkg, db) for pkg in packages]
 
 
 @router.get("/info/{batch_id}", response_model=BatchInfoResponse)
@@ -64,7 +100,7 @@ def get_batch_info(
     pkg = db.query(Package).filter_by(id=batch_id).first()
     if pkg is None:
         raise HTTPException(status_code=404, detail="批次不存在")
-    return _package_to_info(pkg)
+    return _package_to_info(pkg, db)
 
 
 @router.post("/assign", response_model=BatchResponse | None)

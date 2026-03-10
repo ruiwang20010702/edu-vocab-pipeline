@@ -13,6 +13,7 @@ class BatchInfoResponse(BaseModel):
     total_words: int
     processed_words: int
     pass_rate: Optional[float]
+    failed_count: int = 0
     created_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
