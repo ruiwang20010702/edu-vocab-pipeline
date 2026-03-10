@@ -50,7 +50,11 @@ def _package_to_info(pkg: Package, db: Session | None = None) -> BatchInfoRespon
         word_ids = [r[0] for r in word_ids_q.all()]
 
         if word_ids:
-            total = db.query(func.count(ContentItem.id)).filter(ContentItem.word_id.in_(word_ids)).scalar() or 0
+            # 排除 rejected（助记不适用等正常场景），只统计参与质检的内容项
+            total = db.query(func.count(ContentItem.id)).filter(
+                ContentItem.word_id.in_(word_ids),
+                ContentItem.qc_status != QcStatus.REJECTED.value,
+            ).scalar() or 0
             approved = db.query(func.count(ContentItem.id)).filter(
                 ContentItem.word_id.in_(word_ids),
                 ContentItem.qc_status == QcStatus.APPROVED.value,
@@ -60,7 +64,6 @@ def _package_to_info(pkg: Package, db: Session | None = None) -> BatchInfoRespon
                 ContentItem.qc_status.in_([
                     QcStatus.LAYER1_FAILED.value,
                     QcStatus.LAYER2_FAILED.value,
-                    QcStatus.REJECTED.value,
                 ]),
             ).scalar() or 0
 
