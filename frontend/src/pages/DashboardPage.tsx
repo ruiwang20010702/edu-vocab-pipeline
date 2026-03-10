@@ -27,6 +27,55 @@ const DIMENSION_LABELS: Record<string, string> = {
 
 const ALL_DIMENSIONS = ['语音 Sound', '语义 Meaning', '音节 Syllables', '语境 Context', '助记 Mnemonic']
 
+// 每个维度的完整规则列表 + 人类可读标签（field 与后端 rule_id 一一对应）
+const DIMENSION_RULES: Record<string, { field: string; label: string }[]> = {
+  '语音 Sound': [
+    { field: 'P1', label: 'IPA 格式校验' },
+    { field: 'P2', label: '音标-音节对齐校验' },
+  ],
+  '语义 Meaning': [
+    { field: 'M3', label: '词性标签格式校验' },
+    { field: 'M4', label: '词性换行分隔校验' },
+    { field: 'M5', label: '义项分号分隔校验' },
+    { field: 'M6', label: '禁止括号校验' },
+    { field: 'M7', label: '词义-词性匹配（AI）' },
+  ],
+  '音节 Syllables': [
+    { field: 'S1', label: '元音锚点校验' },
+    { field: 'S2', label: '音节分隔符校验' },
+    { field: 'S3', label: '原子单位完整性校验' },
+    { field: 'S4', label: '单音节不切分校验' },
+  ],
+  '语境 Context': [
+    { field: 'C1', label: '语块含目标词校验' },
+    { field: 'C2', label: '语块长度校验' },
+    { field: 'C3', label: '搭配合理性（AI）' },
+    { field: 'C4', label: '语块禁止括号校验' },
+    { field: 'C5', label: '中文独立成行校验' },
+    { field: 'E6', label: '例句含目标词校验' },
+    { field: 'E7', label: '例句长度校验' },
+    { field: 'E8', label: '中文翻译非空校验' },
+    { field: 'E1', label: '语法难度（AI）' },
+    { field: 'E2', label: '主干结构（AI）' },
+    { field: 'E3', label: '连接词限制（AI）' },
+    { field: 'E4', label: '从句限制（AI）' },
+    { field: 'E5', label: '禁区检测（AI）' },
+    { field: 'E8_AI', label: '中文翻译语义对应（AI）' },
+    { field: 'E9', label: '义项匹配（AI）' },
+    { field: 'E10', label: '语言地道性（AI）' },
+    { field: 'E11', label: '内容安全性（AI）' },
+  ],
+  '助记 Mnemonic': [
+    { field: 'N1', label: '助记类型校验' },
+    { field: 'N2', label: '助记结构完整性校验' },
+    { field: 'N3', label: '公式符号校验' },
+    { field: 'N4', label: '口诀字数校验' },
+    { field: 'N5', label: '话术字数校验' },
+    { field: 'N5_AI', label: '话术完整性（AI）' },
+    { field: 'N6', label: '逻辑合理性（AI）' },
+  ],
+}
+
 const DIMENSION_COLORS: Record<string, { bar: string; bg: string; text: string }> = {
   '语音 Sound': { bar: 'bg-blue-400', bg: 'bg-blue-50', text: 'text-blue-600' },
   '语义 Meaning': { bar: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-600' },
@@ -76,22 +125,24 @@ export default function DashboardPage({ onViewBatch }: Props) {
     { label: '整体合格率', value: `${(stats?.pass_rate ?? 0).toFixed(1)}%`, icon: TrendingUp, iconBg: 'bg-yellow-50 text-yellow-600', valueColor: 'text-yellow-700' },
   ]
 
-  // 聚合 Bad Case 分类
-  const dimAgg: Record<string, { value: number; fields: { field: string; count: number }[] }> = {}
+  // 聚合 Bad Case 分类：按 field(rule_id) 索引
+  const issueByField: Record<string, number> = {}
   for (const issue of stats?.issues ?? []) {
-    const dim = DIMENSION_LABELS[issue.dimension] || '其他'
-    if (!dimAgg[dim]) dimAgg[dim] = { value: 0, fields: [] }
-    dimAgg[dim].value += issue.count
-    dimAgg[dim].fields.push({ field: issue.field, count: issue.count })
+    issueByField[issue.field] = (issueByField[issue.field] ?? 0) + issue.count
   }
 
   const badCases = ALL_DIMENSIONS.map(dim => {
-    const existing = dimAgg[dim]
+    const rules = DIMENSION_RULES[dim] ?? []
     const colors = DIMENSION_COLORS[dim] ?? DIMENSION_COLORS['语音 Sound']
+    const fields = rules.map(r => ({
+      field: r.field,
+      label: r.label,
+      count: issueByField[r.field] ?? 0,
+    }))
     return {
       label: dim,
-      value: existing?.value ?? 0,
-      fields: existing?.fields ?? [],
+      value: fields.reduce((sum, f) => sum + f.count, 0),
+      fields,
       color: colors.bar,
       colors,
     }
@@ -109,6 +160,7 @@ export default function DashboardPage({ onViewBatch }: Props) {
             transition={{ delay: i * 0.1 }}
             className="bg-white p-6 rounded-[32px] shadow-sm border border-white space-y-4 relative overflow-hidden group hover:shadow-md transition-shadow"
           >
+            <div className="absolute inset-0 card-shimmer opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
             <div className="relative z-10">
               <div className="flex items-center justify-between mb-4">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${stat.iconBg}`}>
@@ -244,36 +296,37 @@ export default function DashboardPage({ onViewBatch }: Props) {
                   <div className={`w-3 h-3 rounded-full ${activeDim.color}`} />
                   <div className="flex-1">
                     <h3 className={`text-sm font-bold ${activeDim.colors.text}`}>{activeDim.label}</h3>
-                    <p className="text-[10px] text-slate-400 uppercase tracking-widest">规则明细</p>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-widest">原子标准明细</p>
                   </div>
                   <span className={`text-2xl font-black ${activeDim.colors.text}`}>{activeDim.value}</span>
                 </div>
 
                 {/* Rules list */}
                 <div className="flex-1 p-5 space-y-2 overflow-y-auto">
-                  {activeDim.fields.length === 0 ? (
-                    <div className="text-center py-10 text-slate-400 text-sm">暂无失败记录</div>
-                  ) : (
-                    activeDim.fields.map((field: any, j: number) => (
-                      <motion.div
-                        key={j}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: j * 0.04 }}
-                        className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-100 hover:bg-white hover:shadow-sm transition-all"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className={`w-1.5 h-6 rounded-full shrink-0 ${field.count > 0 ? activeDim.color : 'bg-slate-200'}`} />
-                          <p className="text-xs text-slate-800 font-medium font-mono">{field.field}</p>
+                  {activeDim.fields.map((field: any, j: number) => (
+                    <motion.div
+                      key={j}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: j * 0.04 }}
+                      className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-100 hover:bg-white hover:shadow-sm transition-all"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`w-1.5 h-6 rounded-full shrink-0 ${field.count > 0 ? activeDim.color : 'bg-slate-200'}`} />
+                        <div className="min-w-0">
+                          <p className={`text-xs leading-snug ${field.count > 0 ? 'text-slate-800 font-medium' : 'text-slate-400'}`}>
+                            {field.label}
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-0.5 font-mono">{field.field}</p>
                         </div>
-                        <div className={`shrink-0 ml-3 px-2.5 py-1 rounded-lg ${
-                          field.count > 0 ? `${activeDim.colors.bg} ${activeDim.colors.text}` : 'bg-slate-100 text-slate-300'
-                        }`}>
-                          <span className="text-sm font-black">{field.count}</span>
-                        </div>
-                      </motion.div>
-                    ))
-                  )}
+                      </div>
+                      <div className={`shrink-0 ml-3 px-2.5 py-1 rounded-lg ${
+                        field.count > 0 ? `${activeDim.colors.bg} ${activeDim.colors.text}` : 'bg-slate-100 text-slate-300'
+                      }`}>
+                        <span className="text-sm font-black">{field.count}</span>
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
 
                 {/* Back button */}

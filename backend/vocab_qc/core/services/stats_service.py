@@ -48,14 +48,18 @@ def get_dashboard_stats(session: Session) -> dict:
 
     pass_rate = round(approved_count / total_words * 100, 1) if total_words > 0 else 0.0
 
-    # Bad Case 分类：按 rule_id + dimension 聚合失败数
+    # Bad Case 分类：按 rule_id + dimension 聚合失败数（仅统计最新质检结果）
     issue_rows = (
         session.query(
             QcRuleResult.rule_id,
             QcRuleResult.dimension,
             func.count().label("count"),
         )
-        .filter(QcRuleResult.passed == False)  # noqa: E712
+        .join(ContentItem, ContentItem.id == QcRuleResult.content_item_id)
+        .filter(
+            QcRuleResult.passed == False,  # noqa: E712
+            QcRuleResult.run_id == ContentItem.last_qc_run_id,
+        )
         .group_by(QcRuleResult.rule_id, QcRuleResult.dimension)
         .all()
     )

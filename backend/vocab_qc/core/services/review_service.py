@@ -316,24 +316,20 @@ class ReviewService:
         word = session.query(Word).filter_by(id=content_item.word_id).first()
         word_text = word.word if word else ""
 
-        meaning_text = None
         meaning_texts: dict[int, str] = {}
+        extra: dict = {"content_cn": content_item.content_cn or ""}
+
         if content_item.meaning_id:
             meaning = session.query(Meaning).filter_by(id=content_item.meaning_id).first()
             if meaning:
-                meaning_text = meaning.definition
-                meaning_texts[meaning.id] = meaning_text
+                meaning_texts[meaning.id] = meaning.definition
+                if meaning.pos:
+                    extra["pos"] = meaning.pos
 
-        # 构建额外参数
-        extra: dict = {"content_cn": content_item.content_cn or ""}
         phonetic = session.query(Phonetic).filter_by(word_id=content_item.word_id).first()
         if phonetic:
             extra["ipa"] = phonetic.ipa
             extra["syllables"] = phonetic.syllables
-        if content_item.dimension == "meaning" and content_item.meaning_id:
-            meaning_obj = session.query(Meaning).filter_by(id=content_item.meaning_id).first()
-            if meaning_obj and meaning_obj.pos:
-                extra["pos"] = meaning_obj.pos
 
         word_texts = {content_item.word_id: word_text}
         extra_kwargs = {content_item.id: extra}
