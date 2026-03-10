@@ -231,10 +231,9 @@ export default function ReviewPage({ onBack: _onBack }: Props) {
                   <span className={`px-2 py-1 rounded-lg text-xs ${
                     item.reason === 'layer1_failed' ? 'bg-red-50 text-red-600'
                     : item.reason === 'layer2_failed' ? 'bg-orange-50 text-orange-600'
-                    : item.reason === 'generation_rejected' ? 'bg-amber-50 text-amber-600'
                     : 'bg-blue-50 text-blue-600'
                   }`}>
-                    {item.reason === 'generation_rejected' ? '生成不适用' : item.reason}
+                    {item.reason}
                   </span>
                   {actionLoading === item.id ? (
                     <Loader2 size={16} className="animate-spin text-blue-600" />
