@@ -36,17 +36,29 @@ def list_words(
         .all()
     )
 
-    # 批量查询 issues（一次查出所有 word_ids 的失败规则）
+    # 批量查询 issues（只显示最新一次质检的失败规则，排除已通过/重新生成前的旧记录）
     word_ids = [w.id for w in words]
     issues_map: dict[int, list] = {}
     if word_ids:
-        all_issues = (
-            session.query(QcRuleResult)
-            .filter(QcRuleResult.word_id.in_(word_ids), QcRuleResult.passed == False)  # noqa: E712
-            .all()
-        )
-        for iss in all_issues:
-            issues_map.setdefault(iss.word_id, []).append(iss)
+        # 收集每个 content_item 的最新 run_id
+        latest_run_ids: set[str] = set()
+        for w in words:
+            for ci in w.content_items:
+                if ci.last_qc_run_id:
+                    latest_run_ids.add(ci.last_qc_run_id)
+
+        if latest_run_ids:
+            all_issues = (
+                session.query(QcRuleResult)
+                .filter(
+                    QcRuleResult.word_id.in_(word_ids),
+                    QcRuleResult.passed == False,  # noqa: E712
+                    QcRuleResult.run_id.in_(latest_run_ids),
+                )
+                .all()
+            )
+            for iss in all_issues:
+                issues_map.setdefault(iss.word_id, []).append(iss)
 
     items = [_build_word_detail_from_loaded(w, issues_map.get(w.id, [])) for w in words]
     return {"items": items, "total": total, "page": page, "limit": limit}
@@ -67,11 +79,19 @@ def get_word_detail(session: Session, word_id: int) -> dict[str, Any] | None:
     if word is None:
         return None
 
-    issues = (
-        session.query(QcRuleResult)
-        .filter_by(word_id=word.id, passed=False)
-        .all()
-    )
+    # 只查询最新一次质检的失败记录
+    latest_run_ids = {ci.last_qc_run_id for ci in word.content_items if ci.last_qc_run_id}
+    issues = []
+    if latest_run_ids:
+        issues = (
+            session.query(QcRuleResult)
+            .filter(
+                QcRuleResult.word_id == word.id,
+                QcRuleResult.passed == False,  # noqa: E712
+                QcRuleResult.run_id.in_(latest_run_ids),
+            )
+            .all()
+        )
     return _build_word_detail_from_loaded(word, issues)
 
 
