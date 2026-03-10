@@ -64,11 +64,20 @@ class ApproveRequest(BaseModel):
     note: Optional[str] = None
 
 
+class RegenerateIssue(BaseModel):
+    rule_id: str
+    field: str
+    message: str
+
+
 class RegenerateResponse(BaseModel):
     success: bool
     qc_passed: bool = False
     retry_count: int
     message: str
+    new_content: str | None = None
+    new_content_cn: str | None = None
+    new_issues: list[RegenerateIssue] = []
 
 
 class ReviewListResponse(BaseModel):

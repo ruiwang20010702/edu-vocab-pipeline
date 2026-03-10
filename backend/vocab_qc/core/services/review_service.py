@@ -189,11 +189,29 @@ class ReviewService:
 
         session.flush()
         self._update_batch_progress(session, review.batch_id)
+
+        # 查询最新质检失败问题
+        from vocab_qc.core.models.quality_layer import QcRuleResult
+        new_issues = []
+        if content_item.last_qc_run_id and not qc_passed:
+            failed_results = (
+                session.query(QcRuleResult)
+                .filter_by(content_item_id=content_item.id, run_id=content_item.last_qc_run_id, passed=False)
+                .all()
+            )
+            new_issues = [
+                {"rule_id": r.rule_id, "field": r.dimension, "message": r.detail or ""}
+                for r in failed_results
+            ]
+
         return {
             "success": True,
             "qc_passed": qc_passed,
             "retry_count": counter.count,
             "message": message,
+            "new_content": content_item.content,
+            "new_content_cn": content_item.content_cn,
+            "new_issues": new_issues,
         }
 
     @staticmethod

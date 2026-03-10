@@ -340,6 +340,7 @@ function ReviewDetailModal({
 }) {
   const [editContent, setEditContent] = useState(item.content_item?.content ?? '')
   const [editContentCn, setEditContentCn] = useState(item.content_item?.content_cn ?? '')
+  const [issues, setIssues] = useState(item.issues)
   const [saving, setSaving] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
   const [regenMsg, setRegenMsg] = useState<{ passed: boolean; message: string } | null>(null)
@@ -367,8 +368,13 @@ function ReviewDetailModal({
     setRegenMsg(null)
     setError('')
     try {
-      const res = await api.post<{ success: boolean; qc_passed: boolean; retry_count: number; message: string }>(`/reviews/${item.id}/regenerate`)
+      const res = await api.post<{ success: boolean; qc_passed: boolean; retry_count: number; message: string; new_content: string | null; new_content_cn: string | null; new_issues: Array<{ rule_id: string; field: string; message: string }> }>(`/reviews/${item.id}/regenerate`)
       setRegenMsg({ passed: res.qc_passed, message: res.message })
+      // 更新弹窗中的内容为新生成的内容
+      if (res.new_content !== null) setEditContent(res.new_content)
+      if (res.new_content_cn !== null) setEditContentCn(res.new_content_cn)
+      // 更新质检问题
+      setIssues(res.new_issues.map((iss, i) => ({ id: -(i + 1), content_item_id: item.content_item_id, rule_id: iss.rule_id, field: iss.field, message: iss.message, severity: 'error' })))
       if (res.qc_passed) {
         setTimeout(() => { onSaved(); onClose() }, 1500)
       } else {
@@ -449,11 +455,11 @@ function ReviewDetailModal({
           )}
 
           {/* 问题列表 */}
-          {item.issues.length > 0 && !regenerating && (
+          {issues.length > 0 && !regenerating && (
             <div>
               <label className="text-sm text-slate-500 mb-2 block">质检问题</label>
               <div className="space-y-1">
-                {item.issues.map((issue, i) => (
+                {issues.map((issue, i) => (
                   <div key={i} className="text-sm bg-red-50 text-red-600 border border-red-100 px-3 py-2 rounded-xl">
                     <span className="font-mono text-xs text-red-500 mr-2">[{issue.rule_id}]</span>
                     {issue.message}
