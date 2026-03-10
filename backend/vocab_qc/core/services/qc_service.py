@@ -186,6 +186,13 @@ class QcService:
         for p in session.query(Phonetic).filter(Phonetic.word_id.in_(word_ids)).all():
             phonetics_by_word[p.word_id] = p
 
+        # 批量预加载 meaning pos（避免 N+1）
+        meaning_ids = {item.meaning_id for item in items if item.meaning_id and item.dimension == "meaning"}
+        meanings_pos = {}
+        if meaning_ids:
+            for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all():
+                meanings_pos[m.id] = m.pos
+
         for item in items:
             kwargs: dict = {"content_cn": item.content_cn or ""}
             phonetic = phonetics_by_word.get(item.word_id)
@@ -195,9 +202,9 @@ class QcService:
 
             # 为 meaning 维度传入 pos
             if item.dimension == "meaning" and item.meaning_id:
-                meaning = session.query(Meaning).filter_by(id=item.meaning_id).first()
-                if meaning:
-                    kwargs["pos"] = meaning.pos
+                pos = meanings_pos.get(item.meaning_id)
+                if pos:
+                    kwargs["pos"] = pos
 
             extra[item.id] = kwargs
 

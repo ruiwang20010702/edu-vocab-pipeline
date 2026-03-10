@@ -25,7 +25,8 @@ class S1VowelAnchor(_RuleCheckerBase):
     description = "元音锚点校验"
 
     def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
-        syllables_str = kwargs.get("syllables", content)
+        # 校验 ContentItem 自身的 content（生产产出），而非 Phonetic 表的 syllables
+        syllables_str = content
         if not syllables_str:
             return RuleResult(rule_id=self.rule_id, passed=False, detail="缺少音节数据")
 
@@ -65,7 +66,7 @@ class S2Separator(_RuleCheckerBase):
     description = "音节分隔符校验"
 
     def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
-        syllables_str = kwargs.get("syllables", content)
+        syllables_str = content
         if not syllables_str:
             return RuleResult(rule_id=self.rule_id, passed=False, detail="缺少音节数据")
 
@@ -101,7 +102,7 @@ class S3AtomicUnitIntegrity(_RuleCheckerBase):
     description = "原子单位完整性校验"
 
     def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
-        syllables_str = kwargs.get("syllables", content)
+        syllables_str = content
         if not syllables_str:
             return RuleResult(rule_id=self.rule_id, passed=False, detail="缺少音节数据")
 
@@ -137,11 +138,11 @@ class S4SingleSyllableNoSplit(_RuleCheckerBase):
     description = "单音节不切分校验"
 
     def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
-        syllables_str = kwargs.get("syllables", content)
+        syllables_str = content
         if not syllables_str:
             return RuleResult(rule_id=self.rule_id, passed=False, detail="缺少音节数据")
 
-        # 判断是否为单音节词
+        # 判断是否为单音节词（ipa 来自 Phonetic 表，用于交叉验证）
         ipa = kwargs.get("ipa", "")
         parts = syllables_str.split("·")
 
