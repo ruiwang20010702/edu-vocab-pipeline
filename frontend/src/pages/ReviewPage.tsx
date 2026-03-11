@@ -613,86 +613,107 @@ function WordReviewModal({
 
             {/* 内容区 */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {/* 当前义项信息 */}
+              {/* 义项头 */}
               {currentMeaning && (
-                <div className="bg-slate-50 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <BookOpen size={14} className="text-blue-500" />
-                    <span className="text-xs font-bold text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded">{currentMeaning.pos}</span>
-                    <span className="text-sm font-medium text-slate-900">{currentMeaning.definition}</span>
-                  </div>
-
-                  {/* 语块/例句预览 */}
-                  {currentMeaning.chunk?.content && (
-                    <div className="flex items-start gap-2 pt-1">
-                      <Layers size={12} className="text-violet-400 mt-0.5 shrink-0" />
-                      <p className="text-xs text-violet-700 italic">{currentMeaning.chunk.content}</p>
-                    </div>
-                  )}
-                  {currentMeaning.sentence?.content && (
-                    <div className="flex items-start gap-2">
-                      <Volume2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />
-                      <p className="text-xs text-slate-600">{currentMeaning.sentence.content}</p>
-                    </div>
-                  )}
+                <div className="flex items-center gap-2">
+                  <BookOpen size={14} className="text-blue-500" />
+                  <span className="text-xs font-bold text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded">{currentMeaning.pos}</span>
+                  <span className="text-sm font-medium text-slate-900">{currentMeaning.definition}</span>
                 </div>
               )}
 
-              {/* 该义项下的异常维度列表 */}
-              {currentItems.length > 0 ? (
-                <div className="space-y-3">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">待修复维度</p>
-                  <AnimatePresence>
-                  {currentItems.map(item => (
-                    <ReviewDimensionCard
-                      key={item.id}
-                      item={item}
-                      isLoading={actionLoading === item.id}
-                      isResolved={resolvedIds.has(item.id)}
-                      regenResult={regenResult?.id === item.id ? regenResult : null}
-                      isEditing={editingId === item.id}
-                      editContent={editContent}
-                      editContentCn={editContentCn}
-                      editResult={editResult}
-                      editError={editError}
-                      saving={saving}
-                      onEditContentChange={setEditContent}
-                      onEditContentCnChange={setEditContentCn}
-                      onApprove={() => onApprove(item.id)}
-                      onRegenerate={() => onRegenerate(item.id)}
-                      onStartEdit={() => startEdit(item)}
-                      onCancelEdit={cancelEdit}
-                      onSaveEdit={() => handleSaveEdit(item.id)}
-                    />
-                  ))}
-                  </AnimatePresence>
-                </div>
-              ) : (
-                <div className="text-center py-8 text-slate-400 text-sm">
-                  该义项下暂无异常
-                </div>
-              )}
-
-              {/* 不适用的助记维度（rejected） */}
+              {/* 语块 — 完整展示 */}
               {currentMeaning && (() => {
-                const rejectedMnemonics = (currentMeaning.mnemonics ?? []).filter(
-                  (mn: any) => mn.qc_status === 'rejected' || (!mn.content && mn.dimension?.startsWith('mnemonic_'))
-                )
-                if (rejectedMnemonics.length === 0) return null
+                const chunk = currentMeaning.chunk
+                const reviewItem = currentItems.find(i => i.content_item?.dimension === 'chunk')
+                if (!chunk) return null
                 return (
-                  <RejectedMnemonicsSection
-                    mnemonics={rejectedMnemonics}
-                    onRegenerated={() => {
-                      // 刷新 wordDetail
-                      api.get<WordDetail>(`/words/${group.word_id}`)
-                        .then(data => setWordDetail(data))
-                        .catch(() => {})
-                    }}
+                  <ContentDimensionCard
+                    icon={<Layers size={13} className="text-violet-400" />}
+                    label="语块"
+                    content={chunk}
+                    reviewItem={reviewItem}
+                    actionLoading={actionLoading}
+                    resolvedIds={resolvedIds}
+                    regenResult={regenResult}
+                    editingId={editingId}
+                    editContent={editContent}
+                    editContentCn={editContentCn}
+                    editResult={editResult}
+                    editError={editError}
+                    saving={saving}
+                    onEditContentChange={setEditContent}
+                    onEditContentCnChange={setEditContentCn}
+                    onApprove={onApprove}
+                    onRegenerate={onRegenerate}
+                    onStartEdit={startEdit}
+                    onCancelEdit={cancelEdit}
+                    onSaveEdit={handleSaveEdit}
                   />
                 )
               })()}
 
-              {/* 词级维度（音标等） */}
+              {/* 例句 — 完整展示 */}
+              {currentMeaning && (() => {
+                const sentence = currentMeaning.sentence
+                const reviewItem = currentItems.find(i => i.content_item?.dimension === 'sentence')
+                if (!sentence) return null
+                return (
+                  <ContentDimensionCard
+                    icon={<Volume2 size={13} className="text-emerald-400" />}
+                    label="例句"
+                    content={sentence}
+                    reviewItem={reviewItem}
+                    actionLoading={actionLoading}
+                    resolvedIds={resolvedIds}
+                    regenResult={regenResult}
+                    editingId={editingId}
+                    editContent={editContent}
+                    editContentCn={editContentCn}
+                    editResult={editResult}
+                    editError={editError}
+                    saving={saving}
+                    onEditContentChange={setEditContent}
+                    onEditContentCnChange={setEditContentCn}
+                    onApprove={onApprove}
+                    onRegenerate={onRegenerate}
+                    onStartEdit={startEdit}
+                    onCancelEdit={cancelEdit}
+                    onSaveEdit={handleSaveEdit}
+                  />
+                )
+              })()}
+
+              {/* 助记 — 全部 4 种类型 */}
+              {currentMeaning && (currentMeaning.mnemonics ?? []).length > 0 && (
+                <MnemonicReviewSection
+                  mnemonics={currentMeaning.mnemonics ?? []}
+                  reviewItems={currentItems.filter(i => i.content_item?.dimension?.startsWith('mnemonic_'))}
+                  actionLoading={actionLoading}
+                  resolvedIds={resolvedIds}
+                  regenResult={regenResult}
+                  editingId={editingId}
+                  editContent={editContent}
+                  editContentCn={editContentCn}
+                  editResult={editResult}
+                  editError={editError}
+                  saving={saving}
+                  onEditContentChange={setEditContent}
+                  onEditContentCnChange={setEditContentCn}
+                  onApprove={onApprove}
+                  onRegenerate={onRegenerate}
+                  onStartEdit={startEdit}
+                  onCancelEdit={cancelEdit}
+                  onSaveEdit={handleSaveEdit}
+                  onRegenerated={() => {
+                    api.get<WordDetail>(`/words/${group.word_id}`)
+                      .then(data => setWordDetail(data))
+                      .catch(() => {})
+                  }}
+                />
+              )}
+
+              {/* 词级维度（音节等） */}
               {wordLevelItems.length > 0 && meaningIdx === 0 && (
                 <div className="space-y-3 pt-2 border-t border-slate-100">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">词级维度</p>
@@ -730,6 +751,255 @@ function WordReviewModal({
   )
 }
 
+/* ===== 内容维度完整展示卡片（语块/例句） ===== */
+
+const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  approved: { bg: 'bg-green-50 border-green-200', text: 'text-green-600', label: '已通过' },
+  rejected: { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-400', label: '不适用' },
+  layer1_failed: { bg: 'bg-rose-50 border-rose-200', text: 'text-rose-600', label: '异常' },
+  layer2_failed: { bg: 'bg-rose-50 border-rose-200', text: 'text-rose-600', label: '异常' },
+  layer1_passed: { bg: 'bg-blue-50 border-blue-200', text: 'text-blue-600', label: '质检中' },
+  layer2_passed: { bg: 'bg-blue-50 border-blue-200', text: 'text-blue-600', label: '质检中' },
+  pending: { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-400', label: '待处理' },
+}
+
+function ContentDimensionCard({
+  icon, label, content, reviewItem,
+  actionLoading, resolvedIds, regenResult,
+  editingId, editContent, editContentCn, editResult, editError, saving,
+  onEditContentChange, onEditContentCnChange,
+  onApprove, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit,
+}: {
+  icon: React.ReactNode
+  label: string
+  content: any
+  reviewItem?: ReviewItem
+  actionLoading: number | null
+  resolvedIds: Set<number>
+  regenResult: { id: number; passed: boolean; message: string } | null
+  editingId: number | null
+  editContent: string
+  editContentCn: string
+  editResult: { passed: boolean; message: string } | null
+  editError: string
+  saving: boolean
+  onEditContentChange: (v: string) => void
+  onEditContentCnChange: (v: string) => void
+  onApprove: (id: number) => void
+  onRegenerate: (id: number) => void
+  onStartEdit: (item: ReviewItem) => void
+  onCancelEdit: () => void
+  onSaveEdit: (id: number) => void
+}) {
+  const status = content.qc_status ?? 'pending'
+  const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending
+  const hasIssue = !!reviewItem
+
+  return (
+    <div className={`rounded-2xl border p-4 space-y-2 ${hasIssue ? 'bg-white border-rose-200' : 'bg-slate-50 border-slate-100'}`}>
+      {/* 标题行 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {icon}
+          <span className="text-xs font-bold text-slate-700">{label}</span>
+        </div>
+        <span className={`flex items-center gap-1 text-[10px] font-bold ${badge.text}`}>
+          {status === 'approved' && <CheckCircle2 size={10} />}
+          {hasIssue && <AlertCircle size={10} />}
+          {badge.label}
+        </span>
+      </div>
+
+      {/* 异常提示 */}
+      {reviewItem?.issues?.[0]?.message && (
+        <p className="text-xs text-rose-600/80 bg-rose-50/50 px-3 py-2 rounded-xl border border-rose-100/50 leading-relaxed">
+          {reviewItem.issues[0].message}
+        </p>
+      )}
+
+      {/* 内容 */}
+      {content.content && (
+        <div className="space-y-1">
+          <p className="text-sm text-slate-800">{content.content}</p>
+          {content.content_cn && <p className="text-xs text-slate-500">{content.content_cn}</p>}
+        </div>
+      )}
+
+      {/* 有审核项 → 展示审核按钮 */}
+      {reviewItem && (
+        <ReviewDimensionCard
+          item={reviewItem}
+          isLoading={actionLoading === reviewItem.id}
+          isResolved={resolvedIds.has(reviewItem.id)}
+          regenResult={regenResult?.id === reviewItem.id ? regenResult : null}
+          isEditing={editingId === reviewItem.id}
+          editContent={editContent}
+          editContentCn={editContentCn}
+          editResult={editResult}
+          editError={editError}
+          saving={saving}
+          onEditContentChange={onEditContentChange}
+          onEditContentCnChange={onEditContentCnChange}
+          onApprove={() => onApprove(reviewItem.id)}
+          onRegenerate={() => onRegenerate(reviewItem.id)}
+          onStartEdit={() => onStartEdit(reviewItem)}
+          onCancelEdit={onCancelEdit}
+          onSaveEdit={() => onSaveEdit(reviewItem.id)}
+          embedded
+        />
+      )}
+    </div>
+  )
+}
+
+/* ===== 助记完整审核区块 ===== */
+
+const ALL_MNEMONIC_DIMS = [
+  'mnemonic_root_affix', 'mnemonic_word_in_word',
+  'mnemonic_sound_meaning', 'mnemonic_exam_app',
+] as const
+
+function MnemonicReviewSection({
+  mnemonics, reviewItems, actionLoading, resolvedIds, regenResult,
+  editingId, editContent, editContentCn, editResult, editError, saving,
+  onEditContentChange, onEditContentCnChange,
+  onApprove, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit,
+  onRegenerated,
+}: {
+  mnemonics: any[]
+  reviewItems: ReviewItem[]
+  actionLoading: number | null
+  resolvedIds: Set<number>
+  regenResult: { id: number; passed: boolean; message: string } | null
+  editingId: number | null
+  editContent: string
+  editContentCn: string
+  editResult: { passed: boolean; message: string } | null
+  editError: string
+  saving: boolean
+  onEditContentChange: (v: string) => void
+  onEditContentCnChange: (v: string) => void
+  onApprove: (id: number) => void
+  onRegenerate: (id: number) => void
+  onStartEdit: (item: ReviewItem) => void
+  onCancelEdit: () => void
+  onSaveEdit: (id: number) => void
+  onRegenerated: () => void
+}) {
+  const mnMap = new Map<string, any>()
+  for (const mn of mnemonics) mnMap.set(mn.dimension, mn)
+
+  const reviewMap = new Map<string, ReviewItem>()
+  for (const ri of reviewItems) {
+    if (ri.content_item?.dimension) reviewMap.set(ri.content_item.dimension, ri)
+  }
+
+  // 分类：有内容的（通过/异常）和 rejected 的
+  const rejectedMns = ALL_MNEMONIC_DIMS
+    .map(d => mnMap.get(d))
+    .filter(mn => mn && (mn.qc_status === 'rejected' || !mn.content))
+
+  return (
+    <div className="space-y-3 pt-2 border-t border-slate-100">
+      <div className="flex items-center gap-1.5">
+        <Lightbulb size={13} className="text-yellow-500" />
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">助记（4 种类型）</span>
+      </div>
+
+      {ALL_MNEMONIC_DIMS.map(dim => {
+        const mn = mnMap.get(dim)
+        if (!mn) return null
+        const typeLabel = DIMENSION_LABELS[dim] ?? dim
+        const isRejected = mn.qc_status === 'rejected' || !mn.content
+        const reviewItem = reviewMap.get(dim)
+
+        if (isRejected) return null // 下面统一渲染 rejected
+
+        // 有内容的助记
+        const parsed = parseMnemonicJson(mn.content)
+        const status = mn.qc_status ?? 'pending'
+        const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending
+        const hasIssue = !!reviewItem
+
+        return (
+          <div key={dim} className={`rounded-2xl border p-4 space-y-2 ${hasIssue ? 'bg-white border-rose-200' : 'bg-yellow-50/60 border-yellow-100'}`}>
+            <div className="flex items-center justify-between">
+              <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${hasIssue ? 'bg-rose-50 text-rose-600' : 'bg-yellow-100 text-yellow-700'}`}>{typeLabel}</span>
+              <span className={`flex items-center gap-1 text-[10px] font-bold ${badge.text}`}>
+                {status === 'approved' && <CheckCircle2 size={10} />}
+                {hasIssue && <AlertCircle size={10} />}
+                {badge.label}
+              </span>
+            </div>
+
+            {/* 异常提示 */}
+            {reviewItem?.issues?.[0]?.message && (
+              <p className="text-xs text-rose-600/80 bg-rose-50/50 px-3 py-2 rounded-xl border border-rose-100/50 leading-relaxed">
+                {reviewItem.issues[0].message}
+              </p>
+            )}
+
+            {/* 助记内容 */}
+            {parsed ? (
+              <div className="space-y-2 text-xs">
+                {parsed.formula && (
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span>
+                    <span className="text-slate-700">{parsed.formula}</span>
+                  </div>
+                )}
+                {parsed.chant && (
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span>
+                    <span className="text-slate-700">{parsed.chant}</span>
+                  </div>
+                )}
+                {parsed.script && (
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span>
+                    <span className="text-slate-500">{parsed.script}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500 italic">{mn.content || '暂无内容'}</p>
+            )}
+
+            {/* 有审核项 → 审核按钮 */}
+            {reviewItem && (
+              <ReviewDimensionCard
+                item={reviewItem}
+                isLoading={actionLoading === reviewItem.id}
+                isResolved={resolvedIds.has(reviewItem.id)}
+                regenResult={regenResult?.id === reviewItem.id ? regenResult : null}
+                isEditing={editingId === reviewItem.id}
+                editContent={editContent}
+                editContentCn={editContentCn}
+                editResult={editResult}
+                editError={editError}
+                saving={saving}
+                onEditContentChange={onEditContentChange}
+                onEditContentCnChange={onEditContentCnChange}
+                onApprove={() => onApprove(reviewItem.id)}
+                onRegenerate={() => onRegenerate(reviewItem.id)}
+                onStartEdit={() => onStartEdit(reviewItem)}
+                onCancelEdit={onCancelEdit}
+                onSaveEdit={() => onSaveEdit(reviewItem.id)}
+                embedded
+              />
+            )}
+          </div>
+        )
+      })}
+
+      {/* Rejected 助记维度 */}
+      {rejectedMns.length > 0 && (
+        <RejectedMnemonicsSection mnemonics={rejectedMns} onRegenerated={onRegenerated} />
+      )}
+    </div>
+  )
+}
+
 /* ===== 维度审核卡片 ===== */
 
 /* ===== 助记 JSON 解析 ===== */
@@ -758,6 +1028,7 @@ function ReviewDimensionCard({
   editContent, editContentCn, editResult, editError, saving,
   onEditContentChange, onEditContentCnChange,
   onApprove, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit,
+  embedded = false,
 }: {
   item: ReviewItem
   isLoading: boolean
@@ -776,6 +1047,7 @@ function ReviewDimensionCard({
   onStartEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: () => void
+  embedded?: boolean
 }) {
   const dim = item.content_item?.dimension ?? ''
   const dimLabel = DIMENSION_LABELS[dim] ?? dim
@@ -810,6 +1082,118 @@ function ReviewDimensionCard({
     setTimeout(() => onSaveEdit(), 0)
   }
 
+  // 编辑表单（共享：embedded 和独立模式都用）
+  const editForm = isEditing ? (
+    isMnemonic ? (
+      <div className="space-y-2">
+        <div>
+          <label className="text-[10px] font-bold text-slate-400 uppercase">核心公式</label>
+          <textarea value={editFormula} onChange={e => setEditFormula(e.target.value)} rows={2}
+            className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold text-slate-400 uppercase">助记口诀</label>
+          <textarea value={editChant} onChange={e => setEditChant(e.target.value)} rows={2}
+            className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
+          <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={4}
+            className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+        </div>
+        {editResult && (
+          <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
+            {editResult.message}
+          </div>
+        )}
+        {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
+        <div className="flex items-center gap-2">
+          <button onClick={handleMnemonicSave} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存
+          </button>
+          <button onClick={onCancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
+        </div>
+      </div>
+    ) : (
+      <div className="space-y-2">
+        <textarea value={editContent} onChange={e => onEditContentChange(e.target.value)} rows={3}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+        <textarea value={editContentCn} onChange={e => onEditContentCnChange(e.target.value)} rows={2} placeholder="中文翻译（可选）"
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400" />
+        {editResult && (
+          <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
+            {editResult.message}
+          </div>
+        )}
+        {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
+        <div className="flex items-center gap-2">
+          <button onClick={onSaveEdit} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存
+          </button>
+          <button onClick={onCancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
+        </div>
+      </div>
+    )
+  ) : null
+
+  const actionButtons = !isEditing ? (
+    <div className="flex items-center gap-2 pt-1">
+      <button onClick={onApprove} className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-[11px] font-bold transition-all">
+        通过
+      </button>
+      {!atLimit && (
+        <button onClick={onRegenerate} disabled={isLoading}
+          className="py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 flex items-center gap-1">
+          {isLoading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+          AI 修复
+        </button>
+      )}
+      <button onClick={isMnemonic ? handleStartMnemonicEdit : onStartEdit} className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-xl text-[11px] font-bold transition-all">
+        <UserCog size={11} className="inline mr-1" /> 手动编辑
+      </button>
+      <span className={`text-[10px] font-bold ml-auto ${atLimit ? 'text-rose-500' : 'text-slate-400'}`}>{retryCount}/3</span>
+    </div>
+  ) : null
+
+  const regenResultBanner = regenResult ? (
+    <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${regenResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
+      {regenResult.message}
+    </div>
+  ) : null
+
+  // embedded 模式：只渲染操作按钮和编辑表单，不渲染外层卡片
+  if (embedded) {
+    return (
+      <div className="relative space-y-2">
+        <AnimatePresence>
+          {isResolved && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 z-10 bg-gradient-to-br from-green-50/95 to-emerald-50/95 backdrop-blur-[2px] rounded-xl flex items-center justify-center"
+            >
+              <motion.div
+                initial={{ scale: 0, rotate: -180 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+                className="flex flex-col items-center gap-2"
+              >
+                <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center shadow-lg shadow-green-200">
+                  <CheckCircle2 size={22} className="text-white" />
+                </div>
+                <span className="text-xs font-bold text-green-700">已通过</span>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {editForm}
+        {regenResultBanner}
+        {actionButtons}
+      </div>
+    )
+  }
+
+  // 独立模式：完整卡片（用于词级维度等）
   return (
     <motion.div
       layout
@@ -818,7 +1202,6 @@ function ReviewDimensionCard({
         isResolved ? 'border-green-400 ring-2 ring-green-200' : isLoading ? 'border-blue-400 ring-1 ring-blue-200' : 'border-slate-200'
       }`}
     >
-      {/* 通过成功动画覆盖层 */}
       <AnimatePresence>
         {isResolved && (
           <motion.div
@@ -841,155 +1224,33 @@ function ReviewDimensionCard({
         )}
       </AnimatePresence>
 
-      {/* 维度标题 + retry */}
+      {/* 维度标题 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-bold rounded-lg border border-rose-100">
-            {dimLabel}
-          </span>
-          <span className={`text-[10px] font-bold ${atLimit ? 'text-rose-500' : 'text-slate-400'}`}>
-            {retryCount}/3
-          </span>
+          <span className="px-2 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-bold rounded-lg border border-rose-100">{dimLabel}</span>
+          <span className={`text-[10px] font-bold ${atLimit ? 'text-rose-500' : 'text-slate-400'}`}>{retryCount}/3</span>
         </div>
-        {issueMsg && (
-          <span className="flex items-center gap-1 text-[10px] text-rose-500">
-            <AlertCircle size={10} />
-            异常
-          </span>
-        )}
+        {issueMsg && <span className="flex items-center gap-1 text-[10px] text-rose-500"><AlertCircle size={10} /> 异常</span>}
       </div>
 
-      {/* 问题描述 */}
       {issueMsg && (
-        <p className="text-xs text-rose-600/80 bg-rose-50/50 px-3 py-2 rounded-xl border border-rose-100/50 leading-relaxed">
-          {issueMsg}
-        </p>
+        <p className="text-xs text-rose-600/80 bg-rose-50/50 px-3 py-2 rounded-xl border border-rose-100/50 leading-relaxed">{issueMsg}</p>
       )}
 
-      {/* 内容预览 / 编辑 */}
-      {isEditing ? (
-        isMnemonic ? (
-          /* 助记编辑: 三个独立 textarea */
-          <div className="space-y-2">
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase">核心公式</label>
-              <textarea value={editFormula} onChange={e => setEditFormula(e.target.value)} rows={2}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase">助记口诀</label>
-              <textarea value={editChant} onChange={e => setEditChant(e.target.value)} rows={2}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
-              <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={4}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-            </div>
-            {editResult && (
-              <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${
-                editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'
-              }`}>
-                {editResult.message}
-              </div>
-            )}
-            {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
-            <div className="flex items-center gap-2">
-              <button onClick={handleMnemonicSave} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                保存
-              </button>
-              <button onClick={onCancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">
-                取消
-              </button>
-            </div>
-          </div>
-        ) : (
-          /* 非助记编辑: 原有双 textarea */
-          <div className="space-y-2">
-            <textarea
-              value={editContent}
-              onChange={e => onEditContentChange(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none"
-            />
-            <textarea
-              value={editContentCn}
-              onChange={e => onEditContentCnChange(e.target.value)}
-              rows={2}
-              placeholder="中文翻译（可选）"
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400"
-            />
-            {editResult && (
-              <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${
-                editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'
-              }`}>
-                {editResult.message}
-              </div>
-            )}
-            {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
-            <div className="flex items-center gap-2">
-              <button onClick={onSaveEdit} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                保存
-              </button>
-              <button onClick={onCancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">
-                取消
-              </button>
-            </div>
-          </div>
-        )
-      ) : isMnemonic && mnemonicData ? (
-        /* 助记预览: 结构化三段 */
+      {/* 内容预览 */}
+      {!isEditing && (isMnemonic && mnemonicData ? (
         <div className="space-y-2 text-xs">
-          <div className="flex items-start gap-2">
-            <span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span>
-            <span className="text-slate-700">{mnemonicData.formula}</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span>
-            <span className="text-slate-700">{mnemonicData.chant}</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span>
-            <span className="text-slate-500 line-clamp-2">{mnemonicData.script}</span>
-          </div>
+          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span><span className="text-slate-700">{mnemonicData.formula}</span></div>
+          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span><span className="text-slate-700">{mnemonicData.chant}</span></div>
+          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span><span className="text-slate-500 line-clamp-2">{mnemonicData.script}</span></div>
         </div>
-      ) : (
+      ) : !isEditing && (
         <p className="text-xs text-slate-500 italic line-clamp-2">{content || '暂无内容'}</p>
-      )}
+      ))}
 
-      {/* 重新生成结果 */}
-      {regenResult && (
-        <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${
-          regenResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'
-        }`}>
-          {regenResult.message}
-        </div>
-      )}
-
-      {/* 操作按钮 */}
-      {!isEditing && (
-        <div className="flex items-center gap-2">
-          <button onClick={onApprove} className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-[11px] font-bold transition-all">
-            通过
-          </button>
-          {!atLimit && (
-            <button
-              onClick={onRegenerate}
-              disabled={isLoading}
-              className="py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 flex items-center gap-1"
-            >
-              {isLoading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-              AI 修复
-            </button>
-          )}
-          <button onClick={isMnemonic ? handleStartMnemonicEdit : onStartEdit} className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-xl text-[11px] font-bold transition-all">
-            <UserCog size={11} className="inline mr-1" />
-            手动编辑
-          </button>
-        </div>
-      )}
+      {editForm}
+      {regenResultBanner}
+      {actionButtons}
     </motion.div>
   )
 }
