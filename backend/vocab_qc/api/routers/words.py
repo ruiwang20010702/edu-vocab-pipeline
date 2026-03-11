@@ -155,6 +155,20 @@ def manual_edit_content_item(
     else:
         message = "已保存，但质检未通过"
 
+    # 查询最新质检失败问题
+    from vocab_qc.core.models.quality_layer import QcRuleResult
+    new_issues = []
+    if item.last_qc_run_id and not qc_passed:
+        failed_results = (
+            db.query(QcRuleResult)
+            .filter_by(content_item_id=item.id, run_id=item.last_qc_run_id, passed=False)
+            .all()
+        )
+        new_issues = [
+            {"rule_id": r.rule_id, "field": r.dimension, "message": r.detail or ""}
+            for r in failed_results
+        ]
+
     db.commit()
     return {
         "success": True,
@@ -162,4 +176,5 @@ def manual_edit_content_item(
         "message": message,
         "new_status": item.qc_status,
         "new_content": item.content,
+        "new_issues": new_issues,
     }

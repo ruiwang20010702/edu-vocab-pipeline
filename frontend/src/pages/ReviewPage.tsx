@@ -6,7 +6,7 @@ import {
   BookOpen, Layers, Volume2, Lightbulb, Ban,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
-import type { ReviewItem, ReviewBatch, BatchDetail, WordDetail } from '../types'
+import type { ReviewItem, ReviewBatch, BatchDetail, WordDetail, ContentItem } from '../types'
 
 interface Props {
   onBack: () => void
@@ -59,6 +59,25 @@ function groupByWord(items: ReviewItem[]): WordGroup[] {
   return Array.from(map.values())
 }
 
+/* ===== 质检结果展示 ===== */
+
+type QcIssue = { rule_id: string; field: string; message: string }
+
+function QcResultBanner({ passed, message, issues }: { passed: boolean; message: string; issues?: QcIssue[] }) {
+  return (
+    <div className={`text-xs px-3 py-2 rounded-xl font-medium ${passed ? 'bg-green-50 text-green-600 border border-green-200 text-center' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
+      <div className={passed ? '' : 'font-bold mb-1'}>{message}</div>
+      {!passed && issues && issues.length > 0 && (
+        <ul className="space-y-0.5 text-left">
+          {issues.map((iss, i) => (
+            <li key={i}>[{iss.rule_id}] {iss.message}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 /* ===== 主组件 ===== */
 
 export default function ReviewPage({ onBack }: Props) {
@@ -78,6 +97,9 @@ export default function ReviewPage({ onBack }: Props) {
 
   // 重新生成结果
   const [regenResult, setRegenResult] = useState<{ id: number; passed: boolean; message: string } | null>(null)
+
+  // 一键AI修复
+  const [batchFixing, setBatchFixing] = useState(false)
 
   // 已通过动画
   const [resolvedIds, setResolvedIds] = useState<Set<number>>(new Set())
@@ -323,17 +345,21 @@ export default function ReviewPage({ onBack }: Props) {
             </button>
           )}
 
-          {/* AI 修复按钮 */}
+          {/* 一键AI修复按钮 */}
           <button
-            onClick={() => {
+            onClick={async () => {
+              setBatchFixing(true)
               const canRetryItems = filtered.filter(i => (i.content_item?.retry_count ?? 0) < 3)
-              canRetryItems.forEach(item => handleRegenerate(item.id))
+              for (const item of canRetryItems) {
+                await handleRegenerate(item.id)
+              }
+              setBatchFixing(false)
             }}
-            disabled={counts.can_retry === 0 || actionLoading !== null}
+            disabled={counts.can_retry === 0 || actionLoading !== null || batchFixing}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all disabled:opacity-40 shadow-lg shadow-blue-600/20 hover:-translate-y-0.5 active:scale-95"
           >
-            <RefreshCw size={14} />
-            AI 修复 ({counts.can_retry})
+            {batchFixing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            一键AI修复 ({counts.can_retry})
           </button>
         </div>
       </div>
@@ -382,7 +408,7 @@ export default function ReviewPage({ onBack }: Props) {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 transition-opacity ${batchFixing ? 'opacity-50 pointer-events-none' : ''}`}>
           {wordGroups.map(group => (
             <WordGroupCard
               key={group.word_id}
@@ -472,7 +498,14 @@ function WordReviewModal({
   const [editContentCn, setEditContentCn] = useState('')
   const [saving, setSaving] = useState(false)
   const [editError, setEditError] = useState('')
-  const [editResult, setEditResult] = useState<{ passed: boolean; message: string } | null>(null)
+  const [editResult, setEditResult] = useState<{ passed: boolean; message: string; issues?: Array<{ rule_id: string; field: string; message: string }> } | null>(null)
+
+  // 直接编辑（非审核项，走 manual-edit API）
+  const [directEditId, setDirectEditId] = useState<number | null>(null)
+  const [directEditContent, setDirectEditContent] = useState('')
+  const [directEditContentCn, setDirectEditContentCn] = useState('')
+  const [directEditSaving, setDirectEditSaving] = useState(false)
+  const [directEditMsg, setDirectEditMsg] = useState<{ ok: boolean; text: string; issues?: Array<{ rule_id: string; field: string; message: string }> } | null>(null)
 
   useEffect(() => {
     setDetailLoading(true)
@@ -507,6 +540,43 @@ function WordReviewModal({
     setEditResult(null)
   }
 
+  const startDirectEdit = (contentItem: { id: number; content: string; content_cn?: string | null }) => {
+    setDirectEditId(contentItem.id)
+    setDirectEditContent(contentItem.content)
+    setDirectEditContentCn(contentItem.content_cn ?? '')
+    setDirectEditMsg(null)
+  }
+
+  const cancelDirectEdit = () => {
+    setDirectEditId(null)
+    setDirectEditMsg(null)
+  }
+
+  const handleDirectEditSave = async (contentItemId: number, body: { content: string; content_cn?: string }) => {
+    setDirectEditSaving(true)
+    setDirectEditMsg(null)
+    try {
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string; new_issues?: Array<{ rule_id: string; field: string; message: string }> }>(
+        `/words/content-items/${contentItemId}/manual-edit`, body,
+      )
+      setDirectEditMsg({ ok: res.qc_passed, text: res.message, issues: res.new_issues })
+      setTimeout(() => {
+        setDirectEditMsg(null)
+        cancelDirectEdit()
+        // 刷新 wordDetail
+        api.get<WordDetail>(`/words/${group.word_id}`)
+          .then(data => setWordDetail(data))
+          .catch(() => {})
+        onSaved()
+      }, 1500)
+    } catch {
+      setDirectEditMsg({ ok: false, text: '保存失败' })
+      setTimeout(() => setDirectEditMsg(null), 3000)
+    } finally {
+      setDirectEditSaving(false)
+    }
+  }
+
   const handleSaveEdit = async (reviewId: number) => {
     setSaving(true)
     setEditError('')
@@ -524,7 +594,7 @@ function WordReviewModal({
         setEditResult({ passed: true, message: res.message })
         setTimeout(() => { onSaved(); cancelEdit() }, 1500)
       } else {
-        setEditResult({ passed: false, message: res.message })
+        setEditResult({ passed: false, message: res.message, issues: res.new_issues })
         if (res.new_content !== null) setEditContent(res.new_content)
         if (res.new_content_cn !== null) setEditContentCn(res.new_content_cn)
         onSaved()
@@ -649,6 +719,16 @@ function WordReviewModal({
                     onStartEdit={startEdit}
                     onCancelEdit={cancelEdit}
                     onSaveEdit={handleSaveEdit}
+                    directEditId={directEditId}
+                    directEditContent={directEditContent}
+                    directEditContentCn={directEditContentCn}
+                    directEditSaving={directEditSaving}
+                    directEditMsg={directEditMsg}
+                    onStartDirectEdit={startDirectEdit}
+                    onCancelDirectEdit={cancelDirectEdit}
+                    onDirectEditContentChange={setDirectEditContent}
+                    onDirectEditContentCnChange={setDirectEditContentCn}
+                    onDirectEditSave={handleDirectEditSave}
                   />
                 )
               })()}
@@ -680,6 +760,16 @@ function WordReviewModal({
                     onStartEdit={startEdit}
                     onCancelEdit={cancelEdit}
                     onSaveEdit={handleSaveEdit}
+                    directEditId={directEditId}
+                    directEditContent={directEditContent}
+                    directEditContentCn={directEditContentCn}
+                    directEditSaving={directEditSaving}
+                    directEditMsg={directEditMsg}
+                    onStartDirectEdit={startDirectEdit}
+                    onCancelDirectEdit={cancelDirectEdit}
+                    onDirectEditContentChange={setDirectEditContent}
+                    onDirectEditContentCnChange={setDirectEditContentCn}
+                    onDirectEditSave={handleDirectEditSave}
                   />
                 )
               })()}
@@ -710,6 +800,14 @@ function WordReviewModal({
                       .then(data => setWordDetail(data))
                       .catch(() => {})
                   }}
+                  directEditId={directEditId}
+                  directEditContent={directEditContent}
+                  directEditSaving={directEditSaving}
+                  directEditMsg={directEditMsg}
+                  onStartDirectEdit={startDirectEdit}
+                  onCancelDirectEdit={cancelDirectEdit}
+                  onDirectEditContentChange={setDirectEditContent}
+                  onDirectEditSave={handleDirectEditSave}
                 />
               )}
 
@@ -769,6 +867,8 @@ function ContentDimensionCard({
   editingId, editContent, editContentCn, editResult, editError, saving,
   onEditContentChange, onEditContentCnChange,
   onApprove, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit,
+  directEditId, directEditContent, directEditContentCn, directEditSaving, directEditMsg,
+  onStartDirectEdit, onCancelDirectEdit, onDirectEditContentChange, onDirectEditContentCnChange, onDirectEditSave,
 }: {
   icon: React.ReactNode
   label: string
@@ -780,7 +880,7 @@ function ContentDimensionCard({
   editingId: number | null
   editContent: string
   editContentCn: string
-  editResult: { passed: boolean; message: string } | null
+  editResult: { passed: boolean; message: string; issues?: QcIssue[] } | null
   editError: string
   saving: boolean
   onEditContentChange: (v: string) => void
@@ -790,10 +890,21 @@ function ContentDimensionCard({
   onStartEdit: (item: ReviewItem) => void
   onCancelEdit: () => void
   onSaveEdit: (id: number) => void
+  directEditId: number | null
+  directEditContent: string
+  directEditContentCn: string
+  directEditSaving: boolean
+  directEditMsg: { ok: boolean; text: string; issues?: QcIssue[] } | null
+  onStartDirectEdit: (ci: { id: number; content: string; content_cn?: string | null }) => void
+  onCancelDirectEdit: () => void
+  onDirectEditContentChange: (v: string) => void
+  onDirectEditContentCnChange: (v: string) => void
+  onDirectEditSave: (id: number, body: { content: string; content_cn?: string }) => void
 }) {
   const status = content.qc_status ?? 'pending'
   const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending
   const hasIssue = !!reviewItem
+  const isDirectEditing = directEditId === content.id
 
   return (
     <div className={`rounded-2xl border p-4 space-y-2 ${hasIssue ? 'bg-white border-rose-200' : 'bg-slate-50 border-slate-100'}`}>
@@ -817,9 +928,28 @@ function ContentDimensionCard({
         </p>
       )}
 
-      {/* 内容 */}
-      {content.content && (
-        <div className="space-y-1">
+      {/* 内容 — 双击编辑 */}
+      {isDirectEditing ? (
+        <div className="space-y-2">
+          <textarea value={directEditContent} onChange={e => onDirectEditContentChange(e.target.value)} rows={2}
+            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+          <textarea value={directEditContentCn} onChange={e => onDirectEditContentCnChange(e.target.value)} rows={1} placeholder="中文翻译（可选）"
+            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400" />
+          {directEditMsg && <QcResultBanner passed={directEditMsg.ok} message={directEditMsg.text} issues={directEditMsg.issues} />}
+          <div className="flex items-center gap-2">
+            <button onClick={() => onDirectEditSave(content.id, { content: directEditContent, content_cn: directEditContentCn || undefined })} disabled={directEditSaving || !directEditContent.trim()}
+              className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+              {directEditSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存并质检
+            </button>
+            <button onClick={onCancelDirectEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
+          </div>
+        </div>
+      ) : content.content && (
+        <div
+          className="space-y-1 rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
+          onDoubleClick={() => onStartDirectEdit(content)}
+          title="双击编辑"
+        >
           <p className="text-sm text-slate-800">{content.content}</p>
           {content.content_cn && <p className="text-xs text-slate-500">{content.content_cn}</p>}
         </div>
@@ -865,6 +995,8 @@ function MnemonicReviewSection({
   onEditContentChange, onEditContentCnChange,
   onApprove, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit,
   onRegenerated,
+  directEditId, directEditContent, directEditSaving, directEditMsg,
+  onStartDirectEdit, onCancelDirectEdit, onDirectEditContentChange, onDirectEditSave,
 }: {
   mnemonics: any[]
   reviewItems: ReviewItem[]
@@ -874,7 +1006,7 @@ function MnemonicReviewSection({
   editingId: number | null
   editContent: string
   editContentCn: string
-  editResult: { passed: boolean; message: string } | null
+  editResult: { passed: boolean; message: string; issues?: QcIssue[] } | null
   editError: string
   saving: boolean
   onEditContentChange: (v: string) => void
@@ -885,6 +1017,14 @@ function MnemonicReviewSection({
   onCancelEdit: () => void
   onSaveEdit: (id: number) => void
   onRegenerated: () => void
+  directEditId: number | null
+  directEditContent: string
+  directEditSaving: boolean
+  directEditMsg: { ok: boolean; text: string; issues?: QcIssue[] } | null
+  onStartDirectEdit: (ci: { id: number; content: string; content_cn?: string | null }) => void
+  onCancelDirectEdit: () => void
+  onDirectEditContentChange: (v: string) => void
+  onDirectEditSave: (id: number, body: { content: string; content_cn?: string }) => void
 }) {
   const mnMap = new Map<string, any>()
   for (const mn of mnemonics) mnMap.set(mn.dimension, mn)
@@ -939,9 +1079,24 @@ function MnemonicReviewSection({
               </p>
             )}
 
-            {/* 助记内容 */}
-            {parsed ? (
-              <div className="space-y-2 text-xs">
+            {/* 助记内容 — 双击编辑 */}
+            {directEditId === mn.id ? (
+              <MnemonicDirectEditForm
+                mnId={mn.id}
+                initialContent={mn.content}
+                directEditContent={directEditContent}
+                directEditSaving={directEditSaving}
+                directEditMsg={directEditMsg}
+                onDirectEditContentChange={onDirectEditContentChange}
+                onDirectEditSave={onDirectEditSave}
+                onCancelDirectEdit={onCancelDirectEdit}
+              />
+            ) : parsed ? (
+              <div
+                className="space-y-2 text-xs rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
+                onDoubleClick={() => onStartDirectEdit(mn)}
+                title="双击编辑"
+              >
                 {parsed.formula && (
                   <div className="flex items-start gap-2">
                     <span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span>
@@ -962,7 +1117,11 @@ function MnemonicReviewSection({
                 )}
               </div>
             ) : (
-              <p className="text-xs text-slate-500 italic">{mn.content || '暂无内容'}</p>
+              <p
+                className="text-xs text-slate-500 italic rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
+                onDoubleClick={() => onStartDirectEdit(mn)}
+                title="双击编辑"
+              >{mn.content || '暂无内容'}</p>
             )}
 
             {/* 有审核项 → 审核按钮 */}
@@ -1037,7 +1196,7 @@ function ReviewDimensionCard({
   isEditing: boolean
   editContent: string
   editContentCn: string
-  editResult: { passed: boolean; message: string } | null
+  editResult: { passed: boolean; message: string; issues?: QcIssue[] } | null
   editError: string
   saving: boolean
   onEditContentChange: (v: string) => void
@@ -1101,11 +1260,7 @@ function ReviewDimensionCard({
           <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={4}
             className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
         </div>
-        {editResult && (
-          <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
-            {editResult.message}
-          </div>
-        )}
+        {editResult && <QcResultBanner passed={editResult.passed} message={editResult.message} issues={editResult.issues} />}
         {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
         <div className="flex items-center gap-2">
           <button onClick={handleMnemonicSave} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
@@ -1120,11 +1275,7 @@ function ReviewDimensionCard({
           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
         <textarea value={editContentCn} onChange={e => onEditContentCnChange(e.target.value)} rows={2} placeholder="中文翻译（可选）"
           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400" />
-        {editResult && (
-          <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${editResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
-            {editResult.message}
-          </div>
-        )}
+        {editResult && <QcResultBanner passed={editResult.passed} message={editResult.message} issues={editResult.issues} />}
         {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
         <div className="flex items-center gap-2">
           <button onClick={onSaveEdit} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
@@ -1255,11 +1406,65 @@ function ReviewDimensionCard({
   )
 }
 
+/* ===== 助记直接编辑表单 ===== */
+
+function MnemonicDirectEditForm({
+  mnId, initialContent, directEditContent, directEditSaving, directEditMsg,
+  onDirectEditContentChange, onDirectEditSave, onCancelDirectEdit,
+}: {
+  mnId: number
+  initialContent: string
+  directEditContent: string
+  directEditSaving: boolean
+  directEditMsg: { ok: boolean; text: string; issues?: QcIssue[] } | null
+  onDirectEditContentChange: (v: string) => void
+  onDirectEditSave: (id: number, body: { content: string }) => void
+  onCancelDirectEdit: () => void
+}) {
+  const parsed = parseMnemonicJson(initialContent)
+  const [formula, setFormula] = useState(parsed?.formula ?? '')
+  const [chant, setChant] = useState(parsed?.chant ?? '')
+  const [script, setScript] = useState(parsed?.script ?? '')
+
+  const handleSave = () => {
+    const content = buildMnemonicJson(formula, chant, script)
+    onDirectEditSave(mnId, { content })
+  }
+
+  return (
+    <div className="space-y-2">
+      <div>
+        <label className="text-[10px] font-bold text-slate-400 uppercase">核心公式</label>
+        <textarea value={formula} onChange={e => setFormula(e.target.value)} rows={2}
+          className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+      </div>
+      <div>
+        <label className="text-[10px] font-bold text-slate-400 uppercase">助记口诀</label>
+        <textarea value={chant} onChange={e => setChant(e.target.value)} rows={2}
+          className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+      </div>
+      <div>
+        <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
+        <textarea value={script} onChange={e => setScript(e.target.value)} rows={3}
+          className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+      </div>
+      {directEditMsg && <QcResultBanner passed={directEditMsg.ok} message={directEditMsg.text} issues={directEditMsg.issues} />}
+      <div className="flex items-center gap-2">
+        <button onClick={handleSave} disabled={directEditSaving || !formula.trim()}
+          className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+          {directEditSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存并质检
+        </button>
+        <button onClick={onCancelDirectEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
+      </div>
+    </div>
+  )
+}
+
 /* ===== 不适用助记维度区块 ===== */
 
 function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onRegenerated: () => void }) {
   const [regenLoading, setRegenLoading] = useState<number | null>(null)
-  const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string } | null>(null)
+  const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string; issues?: QcIssue[] } | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editFormula, setEditFormula] = useState('')
   const [editChant, setEditChant] = useState('')
@@ -1294,8 +1499,8 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
     setRegenMsg(null)
     try {
       const content = JSON.stringify({ formula: editFormula, chant: editChant, script: editScript })
-      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/manual-edit`, { content })
-      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message })
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string; new_issues?: QcIssue[] }>(`/words/content-items/${mn.id}/manual-edit`, { content })
+      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message, issues: res.new_issues })
       if (res.qc_passed) {
         setTimeout(() => { setRegenMsg(null); setEditingId(null); onRegenerated() }, 1500)
       } else {
@@ -1340,11 +1545,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
                 <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={3}
                   className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
               </div>
-              {regenMsg?.id === mn.id && (
-                <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${regenMsg.ok ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
-                  {regenMsg.msg}
-                </div>
-              )}
+              {regenMsg?.id === mn.id && <QcResultBanner passed={regenMsg.ok} message={regenMsg.msg} issues={regenMsg.issues} />}
               <div className="flex items-center gap-2">
                 <button onClick={() => handleSaveEdit(mn)} disabled={saving || !editFormula.trim()}
                   className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
