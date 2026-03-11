@@ -15,6 +15,7 @@ from vocab_qc.core.qc.layer2.ai_base import AiClient, AiRuleChecker
 from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
 from vocab_qc.core.qc.layer2.unified.mnemonic_unified import UnifiedMnemonicChecker
 from vocab_qc.core.qc.layer2.unified.sentence_unified import UnifiedSentenceChecker
+from vocab_qc.core.qc.layer2.unified.syllable_unified import UnifiedSyllableChecker
 from vocab_qc.core.qc.registry import RuleRegistry
 
 # 确保 Layer 2 规则被加载
@@ -31,6 +32,7 @@ class Layer2Runner:
         self._dimension_clients: dict[str, AiClient] = {}
         _mnemonic_checker = UnifiedMnemonicChecker()
         self._unified_checkers = {
+            "syllable": UnifiedSyllableChecker(),
             "sentence": UnifiedSentenceChecker(),
             "chunk": UnifiedChunkChecker(),
             "mnemonic_root_affix": _mnemonic_checker,
