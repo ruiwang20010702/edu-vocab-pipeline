@@ -179,7 +179,7 @@ class Layer2Runner:
         items: list[ContentItem],
         word_texts: dict[int, str],
         meaning_texts: dict[int, str],
-        strategy: AiStrategy = AiStrategy.PER_RULE,
+        strategy: AiStrategy = AiStrategy.UNIFIED,
         extra_kwargs: Optional[dict[int, dict]] = None,
     ) -> str:
         """异步执行 Layer 2 批量校验."""
@@ -219,7 +219,7 @@ class Layer2Runner:
         items: list[ContentItem],
         word_texts: dict[int, str],
         meaning_texts: dict[int, str],
-        strategy: AiStrategy = AiStrategy.PER_RULE,
+        strategy: AiStrategy = AiStrategy.UNIFIED,
         extra_kwargs: Optional[dict[int, dict]] = None,
     ) -> str:
         """同步桥接：AI 调用在独立线程/事件循环，DB 操作在主线程."""

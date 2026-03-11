@@ -18,17 +18,28 @@ class SyllableGenerator(ContentGenerator):
             '返回 JSON: {"content": "拆分结果"}'
         )
 
+    def _build_user_prompt(self, word: str) -> str:
+        return f"Input: {word}"
+
+    def _process_result(self, result: dict, word: str) -> dict:
+        if result and result.get("content"):
+            return {"content": result["content"], "content_cn": None}
+        return {"content": word, "content_cn": None}
+
     def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
         ai_config = self.resolve_ai_config(**kwargs)
-        user_prompt = f"Input: {word}"
-
+        user_prompt = self._build_user_prompt(word)
         result = self._call_ai(
             ai_config.system_prompt, user_prompt,
             model=ai_config.model, api_key=ai_config.api_key, base_url=ai_config.base_url,
         )
+        return self._process_result(result, word)
 
-        if result and result.get("content"):
-            return {"content": result["content"], "content_cn": None}
-
-        # 占位降级: 原样返回
-        return {"content": word, "content_cn": None}
+    async def generate_async(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+        ai_config = self.resolve_ai_config(**kwargs)
+        user_prompt = self._build_user_prompt(word)
+        result = await self._call_ai_async(
+            ai_config.system_prompt, user_prompt,
+            model=ai_config.model, api_key=ai_config.api_key, base_url=ai_config.base_url,
+        )
+        return self._process_result(result, word)

@@ -1,5 +1,6 @@
 """内容生成器基类."""
 
+import asyncio
 import json
 import logging
 import threading
@@ -20,6 +21,10 @@ _PROMPT_DIR = _PROJECT_ROOT / "docs" / "prompts" / "generation"
 _http_client: httpx.Client | None = None
 _http_client_lock = threading.Lock()
 
+# 异步 HTTP 客户端（按事件循环缓存）
+_async_http_client: httpx.AsyncClient | None = None
+_async_http_client_loop: asyncio.AbstractEventLoop | None = None
+
 
 def _get_http_client() -> httpx.Client:
     global _http_client
@@ -28,6 +33,22 @@ def _get_http_client() -> httpx.Client:
             if _http_client is None:
                 _http_client = httpx.Client(timeout=60.0)
     return _http_client
+
+
+def _get_async_http_client() -> httpx.AsyncClient:
+    """获取共享的异步 HTTP 客户端，事件循环变化时重建。"""
+    global _async_http_client, _async_http_client_loop
+    loop = asyncio.get_running_loop()
+    if _async_http_client is None or _async_http_client_loop is not loop:
+        _async_http_client = httpx.AsyncClient(
+            timeout=60.0,
+            limits=httpx.Limits(
+                max_connections=settings.ai_max_concurrency,
+                max_keepalive_connections=settings.ai_max_concurrency,
+            ),
+        )
+        _async_http_client_loop = loop
+    return _async_http_client
 
 
 def load_prompt_file(filename: str) -> Optional[str]:
@@ -117,6 +138,17 @@ class ContentGenerator:
         """
         raise NotImplementedError
 
+    async def generate_async(
+        self,
+        word: str,
+        meaning: Optional[str] = None,
+        pos: Optional[str] = None,
+        _preloaded_config: Optional["AiConfig"] = None,
+        **kwargs: Any,
+    ) -> dict:
+        """异步生成内容。默认委托给同步 generate（子类可覆盖用 _call_ai_async）。"""
+        return self.generate(word=word, meaning=meaning, pos=pos, _preloaded_config=_preloaded_config, **kwargs)
+
     def _call_ai(self, system_prompt: str, user_prompt: str, model: Optional[str] = None,
                  api_key: Optional[str] = None, base_url: Optional[str] = None) -> dict[str, Any]:
         """同步调用 AI API，返回 JSON 结果.
@@ -139,6 +171,52 @@ class ContentGenerator:
                 last_error = e
                 if attempt < settings.ai_max_retries - 1:
                     time.sleep(2**attempt)
+
+        raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")
+
+    async def _call_ai_async(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """异步调用 AI API，使用共享的 httpx.AsyncClient。"""
+        actual_key = api_key or settings.ai_api_key
+        actual_url = base_url or settings.ai_api_base_url
+        actual_model = model or settings.ai_model
+
+        if not actual_key or not actual_url:
+            return {}
+
+        self._validate_url(actual_url)
+
+        client = _get_async_http_client()
+        last_error = None
+        for attempt in range(settings.ai_max_retries):
+            try:
+                response = await client.post(
+                    f"{actual_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {actual_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": actual_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0.7,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                return json.loads(content)
+            except Exception as e:
+                last_error = e
+                if attempt < settings.ai_max_retries - 1:
+                    await asyncio.sleep(2**attempt)
 
         raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")
 

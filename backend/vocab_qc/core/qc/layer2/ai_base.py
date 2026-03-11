@@ -32,7 +32,7 @@ class AiClient:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        max_concurrency: int = 5,
+        max_concurrency: int = 20,
         max_retries: int = 3,
     ):
         self.api_key = api_key if api_key is not None else settings.ai_api_key

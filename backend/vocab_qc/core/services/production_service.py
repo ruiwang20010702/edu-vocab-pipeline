@@ -1,7 +1,7 @@
 """生产编排服务: 导入后触发 生成→质检→入队审核 全流程."""
 
+import asyncio
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -77,37 +77,29 @@ def step_generate(session: Session, package_id: int) -> int:
 
 
 def step_qc_layer1(session: Session, package_id: int, qc_service: Optional[QcService] = None) -> dict:
-    """Step 2: Layer 1 质检 + 失败项入队审核（独立事务）。"""
+    """Step 2: Layer 1 质检 + 失败项入队审核（批量，独立事务）。"""
     qc = qc_service or QcService()
     word_ids = _get_word_ids_for_package(session, package_id)
 
-    result = {"passed": 0, "failed": 0}
-    for word_id in word_ids:
-        r = qc.run_layer1(session, scope=f"word_id:{word_id}")
-        result["passed"] += r.get("passed", 0)
-        result["failed"] += r.get("failed", 0)
-        if r.get("run_id"):
-            qc.enqueue_failed_for_review(session, r["run_id"])
+    result = qc.run_layer1_batch(session, word_ids)
+    if result.get("run_id"):
+        qc.enqueue_failed_for_review(session, result["run_id"])
 
     session.flush()
-    return result
+    return {"passed": result["passed"], "failed": result["failed"]}
 
 
 def step_qc_layer2(session: Session, package_id: int, qc_service: Optional[QcService] = None) -> dict:
-    """Step 3: Layer 2 AI 质检 + 失败项入队审核（独立事务）。"""
+    """Step 3: Layer 2 AI 质检 + 失败项入队审核（批量，独立事务）。"""
     qc = qc_service or QcService()
     word_ids = _get_word_ids_for_package(session, package_id)
 
-    result = {"passed": 0, "failed": 0}
-    for word_id in word_ids:
-        r = qc.run_layer2(session, scope=f"word_id:{word_id}")
-        result["passed"] += r.get("passed", 0)
-        result["failed"] += r.get("failed", 0)
-        if r.get("run_id"):
-            qc.enqueue_layer2_failed_for_review(session, r["run_id"])
+    result = qc.run_layer2_batch(session, word_ids)
+    if result.get("run_id"):
+        qc.enqueue_layer2_failed_for_review(session, result["run_id"])
 
     session.flush()
-    return result
+    return {"passed": result["passed"], "failed": result["failed"]}
 
 
 def step_finalize(session: Session, package_id: int) -> None:
@@ -223,28 +215,16 @@ def run_production(
     generated = _generate_content(session, items)
     session.flush()
 
-    # Step 2: 运行 Layer 1 质检
-    qc_result = {"passed": 0, "failed": 0}
-    for word_id in word_ids_from_meanings:
-        result = qc.run_layer1(session, scope=f"word_id:{word_id}")
-        qc_result["passed"] += result.get("passed", 0)
-        qc_result["failed"] += result.get("failed", 0)
-
-        # 失败项入队审核
-        if result.get("run_id"):
-            qc.enqueue_failed_for_review(session, result["run_id"])
+    # Step 2: 运行 Layer 1 质检（批量）
+    qc_result = qc.run_layer1_batch(session, word_ids_from_meanings)
+    if qc_result.get("run_id"):
+        qc.enqueue_failed_for_review(session, qc_result["run_id"])
     session.flush()
 
-    # Step 3: 运行 Layer 2 AI 质检（仅针对 Layer 1 通过项）
-    l2_result = {"passed": 0, "failed": 0}
-    for word_id in word_ids_from_meanings:
-        result = qc.run_layer2(session, scope=f"word_id:{word_id}")
-        l2_result["passed"] += result.get("passed", 0)
-        l2_result["failed"] += result.get("failed", 0)
-
-        # Layer 2 失败项入队审核
-        if result.get("run_id"):
-            qc.enqueue_layer2_failed_for_review(session, result["run_id"])
+    # Step 3: 运行 Layer 2 AI 质检（批量，仅针对 Layer 1 通过项）
+    l2_result = qc.run_layer2_batch(session, word_ids_from_meanings)
+    if l2_result.get("run_id"):
+        qc.enqueue_layer2_failed_for_review(session, l2_result["run_id"])
 
     # Step 4: 自动批准通过全部质检的项目
     auto_approved = _auto_approve_passed(session, word_ids_from_meanings)
@@ -273,7 +253,7 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
     """为空的 ContentItem 并发调用 AI 生成器填充内容。
 
     Step A: 预加载数据 + AI config，构造纯参数任务列表
-    Step B: 线程池并发调用 AI（不涉及 DB session）
+    Step B: asyncio 并发调用 AI（不涉及 DB session）
     Step C: 主线程批量写入结果
     """
     if not items:
@@ -288,12 +268,12 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
         if meaning_ids else {}
     )
 
-    # 预加载每个维度的 AI config（避免线程内读 DB）
+    # 预加载每个维度的 AI config（避免异步调用内读 DB）
     ai_configs: dict[str, Any] = {}
     for dim, gen in _GENERATORS.items():
         ai_configs[dim] = gen.get_ai_config(session)
 
-    # 构造纯参数任务列表: (item_id, generator, word_text, meaning_text, pos, ai_config)
+    # 构造纯参数任务列表
     tasks: list[tuple[int, str, str, Optional[str], Optional[str]]] = []
     item_map: dict[int, ContentItem] = {}
     for item in items:
@@ -319,32 +299,45 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
     if not tasks:
         return 0
 
-    # --- Step B: 并发 AI 调用 ---
-    def _call_one(task: tuple) -> tuple[int, dict]:
-        item_id, dimension, word_text, meaning_text, pos = task
-        generator = _GENERATORS[dimension]
-        config = ai_configs[dimension]
-        # 直接调用 _call_ai，绕过 session
-        result = generator.generate(
-            word=word_text, meaning=meaning_text, pos=pos,
-            # 传入预加载的 config，不再读 DB
-            _preloaded_config=config,
+    # --- Step B: asyncio 并发 AI 调用 ---
+    async def _generate_all() -> dict[int, dict]:
+        semaphore = asyncio.Semaphore(settings.ai_max_concurrency)
+
+        async def _call_one(task: tuple) -> tuple[int, dict]:
+            item_id, dimension, word_text, meaning_text, pos = task
+            generator = _GENERATORS[dimension]
+            config = ai_configs[dimension]
+            async with semaphore:
+                result = await generator.generate_async(
+                    word=word_text, meaning=meaning_text, pos=pos,
+                    _preloaded_config=config,
+                )
+            return item_id, result
+
+        gathered = await asyncio.gather(
+            *[_call_one(t) for t in tasks],
+            return_exceptions=True,
         )
-        return item_id, result
 
-    workers = min(settings.ai_max_concurrency, len(tasks))
-    results: dict[int, dict] = {}
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_call_one, t): t[0] for t in tasks}
-        for future in as_completed(futures):
-            item_id = futures[future]
-            try:
-                _, result = future.result()
-                results[item_id] = result
-            except Exception:
-                logger.warning("生成失败 item_id=%s", item_id, exc_info=True)
+        results: dict[int, dict] = {}
+        for i, r in enumerate(gathered):
+            item_id = tasks[i][0]
+            if isinstance(r, Exception):
+                logger.warning("生成失败 item_id=%s: %s", item_id, r)
                 results[item_id] = {}
+            else:
+                results[r[0]] = r[1]
+        return results
+
+    # 同步桥接：在独立事件循环中运行异步任务
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        results = asyncio.run(_generate_all())
+    else:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            results = pool.submit(asyncio.run, _generate_all()).result()
 
     # --- Step C: 主线程批量写入 ---
     count = 0

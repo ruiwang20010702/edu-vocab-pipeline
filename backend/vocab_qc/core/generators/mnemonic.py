@@ -12,27 +12,19 @@ from vocab_qc.core.generators.base import ContentGenerator
 class _MnemonicBase(ContentGenerator):
     """助记生成器基类，统一处理 valid/false 逻辑."""
 
-    def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
-        ai_config = self.resolve_ai_config(**kwargs)
-        user_prompt = f"Word: {word} | POS: {pos or '未知'} | Meaning: {meaning or '未知'}"
+    def _build_user_prompt(self, word: str, pos: Optional[str], meaning: Optional[str]) -> str:
+        return f"Word: {word} | POS: {pos or '未知'} | Meaning: {meaning or '未知'}"
 
-        result = self._call_ai(
-            ai_config.system_prompt, user_prompt,
-            model=ai_config.model, api_key=ai_config.api_key, base_url=ai_config.base_url,
-        )
-
+    @staticmethod
+    def _process_result(result: dict) -> dict:
         if not result:
             return {"valid": False, "content": None, "content_cn": None}
-
-        # 模型返回 valid: false → 该类型不适用
         if result.get("valid") is False:
             return {"valid": False, "content": None, "content_cn": None}
 
-        # 组装结构化 JSON 内容
         formula = result.get("formula", "")
         chant = result.get("chant", "")
         script = result.get("script", "")
-
         content = json.dumps(
             {"formula": formula, "chant": chant, "script": script},
             ensure_ascii=False,
@@ -45,6 +37,24 @@ class _MnemonicBase(ContentGenerator):
             "chant": chant,
             "script": script,
         }
+
+    def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+        ai_config = self.resolve_ai_config(**kwargs)
+        user_prompt = self._build_user_prompt(word, pos, meaning)
+        result = self._call_ai(
+            ai_config.system_prompt, user_prompt,
+            model=ai_config.model, api_key=ai_config.api_key, base_url=ai_config.base_url,
+        )
+        return self._process_result(result)
+
+    async def generate_async(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+        ai_config = self.resolve_ai_config(**kwargs)
+        user_prompt = self._build_user_prompt(word, pos, meaning)
+        result = await self._call_ai_async(
+            ai_config.system_prompt, user_prompt,
+            model=ai_config.model, api_key=ai_config.api_key, base_url=ai_config.base_url,
+        )
+        return self._process_result(result)
 
     def _fallback_prompt(self) -> str:
         return (
