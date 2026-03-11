@@ -35,9 +35,9 @@ class AiClient:
         max_concurrency: int = 5,
         max_retries: int = 3,
     ):
-        self.api_key = api_key or settings.ai_api_key
-        self.base_url = base_url or settings.ai_api_base_url
-        self.model = model or settings.ai_model
+        self.api_key = api_key if api_key is not None else settings.ai_api_key
+        self.base_url = base_url if base_url is not None else settings.ai_api_base_url
+        self.model = model if model is not None else settings.ai_model
         self.max_retries = max_retries
         self._max_concurrency = max_concurrency
         self._semaphore: asyncio.Semaphore | None = None

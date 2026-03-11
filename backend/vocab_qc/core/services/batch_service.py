@@ -166,6 +166,32 @@ def update_batch_progress(session: Session, batch_id: int) -> None:
     session.flush()
 
 
+def release_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
+    """释放批次：将未处理的审核项释放回池中，批次标记为 ABANDONED。"""
+    batch = session.query(ReviewBatch).filter_by(id=batch_id).first()
+    if batch is None:
+        raise ValueError("批次不存在")
+    if batch.user_id != user_id:
+        raise ValueError("无权操作该批次")
+    if batch.status != BatchStatus.IN_PROGRESS.value:
+        raise ValueError("该批次不可释放")
+
+    # 释放所有 PENDING 状态的 ReviewItem
+    pending_items = (
+        session.query(ReviewItem)
+        .filter_by(batch_id=batch_id, status=ReviewStatus.PENDING.value)
+        .all()
+    )
+    for item in pending_items:
+        item.batch_id = None
+        item.assigned_to_id = None
+
+    batch.status = BatchStatus.ABANDONED.value
+    batch.completed_at = datetime.now(UTC)
+    session.flush()
+    return batch
+
+
 def get_stats(session: Session) -> dict:
     """审核进度统计。"""
     total_words = (

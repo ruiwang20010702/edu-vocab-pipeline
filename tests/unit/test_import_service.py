@@ -175,4 +175,4 @@ class TestParseUpload:
 
     def test_unsupported_format(self):
         with pytest.raises(ValueError, match="不支持"):
-            import_service.parse_upload(b"data", "test.xlsx")
+            import_service.parse_upload(b"data", "test.txt")

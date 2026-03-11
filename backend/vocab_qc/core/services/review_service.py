@@ -27,8 +27,13 @@ class ReviewService:
         """并发前置检查：状态 + 分配归属。"""
         if review.status != ReviewStatus.PENDING.value:
             raise ValueError("该审核项已被处理")
-        if review.assigned_to_id is not None and user_id is not None and review.assigned_to_id != user_id:
-            raise ValueError("该审核项已分配给其他审核员")
+        if user_id is not None:
+            # 已分配到批次的审核项，必须由批次所有者操作
+            if review.batch_id is not None and review.assigned_to_id != user_id:
+                raise ValueError("该审核项已分配给其他审核员")
+            # 未分配到批次但已指定给某人
+            if review.assigned_to_id is not None and review.assigned_to_id != user_id:
+                raise ValueError("该审核项已分配给其他审核员")
 
     def _lock_review_item(self, session: Session, review_id: int) -> ReviewItem:
         """查询并锁定审核项（PostgreSQL 用 FOR UPDATE，SQLite 跳过）。"""

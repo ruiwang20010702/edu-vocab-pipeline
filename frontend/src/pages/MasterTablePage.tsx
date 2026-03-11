@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import {
   Search, Download, ChevronLeft, ChevronRight, X, Loader2,
   CheckCircle2, AlertTriangle, MoreHorizontal, BookOpen, Lightbulb,
-  Layers, Volume2, GraduationCap, RefreshCw, Ban, UserCog, Save,
+  Layers, Volume2, GraduationCap, Ban,
   ChevronDown, AlertCircle,
 } from 'lucide-react'
 import { api } from '../lib/api'
@@ -368,7 +368,7 @@ export default function MasterTablePage() {
       {/* 详情弹窗 */}
       <AnimatePresence>
         {selectedWordId !== null && (
-          <WordDetailModal word={detailWord} loading={detailLoading} onClose={handleCloseDetail} setDetailWord={setDetailWord} />
+          <WordDetailModal word={detailWord} loading={detailLoading} onClose={handleCloseDetail} />
         )}
       </AnimatePresence>
     </div>
@@ -411,12 +411,8 @@ function groupIssuesByMeaning(
   return { meaningIssuesMap, wordLevelIssues }
 }
 
-function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: WordDetail | null; loading: boolean; onClose: () => void; setDetailWord: (w: WordDetail | null) => void }) {
+function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; loading: boolean; onClose: () => void }) {
   const [meaningIdx, setMeaningIdx] = useState(0)
-  const [editingSyllable, setEditingSyllable] = useState(false)
-  const [syllableVal, setSyllableVal] = useState('')
-  const [syllableSaving, setSyllableSaving] = useState(false)
-  const [syllableMsg, setSyllableMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const meanings = word?.meanings ?? []
   const currentMeaning = meanings[meaningIdx] ?? null
 
@@ -424,35 +420,6 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
   const { meaningIssuesMap, wordLevelIssues } = word
     ? groupIssuesByMeaning(word.issues ?? [], meanings, word.syllable)
     : { meaningIssuesMap: new Map(), wordLevelIssues: [] }
-
-  const refreshDetail = () => {
-    if (word) api.get<WordDetail>(`/words/${word.id}`).then(setDetailWord).catch(() => {})
-  }
-
-  const handleSyllableDblClick = () => {
-    if (!word?.syllable) return
-    setSyllableVal(word.syllable.content)
-    setEditingSyllable(true)
-    setSyllableMsg(null)
-  }
-
-  const handleSyllableSave = async () => {
-    if (!word?.syllable) return
-    setSyllableSaving(true)
-    setSyllableMsg(null)
-    try {
-      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(
-        `/words/content-items/${word.syllable.id}/manual-edit`, { content: syllableVal },
-      )
-      setSyllableMsg({ ok: res.qc_passed, text: res.message })
-      setTimeout(() => { setSyllableMsg(null); setEditingSyllable(false); refreshDetail() }, 1500)
-    } catch {
-      setSyllableMsg({ ok: false, text: '保存失败' })
-      setTimeout(() => setSyllableMsg(null), 3000)
-    } finally {
-      setSyllableSaving(false)
-    }
-  }
 
   return (
     <motion.div
@@ -488,31 +455,9 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
                       <>
                         <span className="font-mono text-sm text-blue-600">{word.phonetics[0].ipa}</span>
                         <span className="text-xs text-slate-400">·</span>
-                        {editingSyllable ? (
-                          <span className="flex items-center gap-1.5">
-                            <input
-                              value={syllableVal}
-                              onChange={e => setSyllableVal(e.target.value)}
-                              className="text-sm text-slate-900 bg-white border border-blue-300 rounded-lg px-2 py-0.5 focus:outline-none w-40"
-                              autoFocus
-                              onKeyDown={e => { if (e.key === 'Enter') handleSyllableSave(); if (e.key === 'Escape') setEditingSyllable(false) }}
-                            />
-                            <button onClick={handleSyllableSave} disabled={syllableSaving}
-                              className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg font-bold hover:bg-blue-100 disabled:opacity-50">
-                              {syllableSaving ? '...' : '保存'}
-                            </button>
-                            <button onClick={() => setEditingSyllable(false)} className="text-[10px] text-slate-400 hover:text-slate-600">取消</button>
-                            {syllableMsg && <span className={`text-[10px] font-medium ${syllableMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{syllableMsg.text}</span>}
-                          </span>
-                        ) : (
-                          <span
-                            className="text-sm text-slate-500 cursor-text hover:bg-blue-50/60 rounded px-1 -mx-1 transition-colors"
-                            onDoubleClick={handleSyllableDblClick}
-                            title="双击编辑"
-                          >
-                            {word.syllable?.content ?? word.phonetics[0].syllables}
-                          </span>
-                        )}
+                        <span className="text-sm text-slate-500">
+                          {word.syllable?.content ?? word.phonetics[0].syllables}
+                        </span>
                       </>
                     )}
                   </div>
@@ -569,35 +514,30 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
                       )}
 
                       {m.chunk && m.chunk.content && (
-                        <EditableContentItem
+                        <ReadOnlyContentItem
                           item={m.chunk}
                           label="核心语块"
                           icon={<Layers size={13} className="text-violet-400 mt-0.5 shrink-0" />}
                           contentClass="text-sm text-violet-700 italic font-medium"
                           hasCn
-                          onSaved={() => { if (word) api.get<WordDetail>(`/words/${word.id}`).then(setDetailWord).catch(() => {}) }}
+
                         />
                       )}
 
                       {m.sentence && m.sentence.content && (
-                        <EditableContentItem
+                        <ReadOnlyContentItem
                           item={m.sentence}
                           label="例句"
                           icon={<Volume2 size={13} className="text-emerald-400 mt-0.5 shrink-0" />}
                           contentClass="text-sm text-slate-800"
                           hasCn
-                          onSaved={() => { if (word) api.get<WordDetail>(`/words/${word.id}`).then(setDetailWord).catch(() => {}) }}
+
                         />
                       )}
 
                       {/* 该义项的助记 — 显示全部 4 种类型 */}
                       {m.mnemonics && m.mnemonics.length > 0 && (
-                        <MnemonicSection mnemonics={m.mnemonics} onRegenerated={() => {
-                          // 刷新详情
-                          if (word) {
-                            api.get<WordDetail>(`/words/${word.id}`).then(setDetailWord).catch(() => {})
-                          }
-                        }} />
+                        <MnemonicSection mnemonics={m.mnemonics} />
                       )}
 
                       {/* 该义项的质检问题 — 可折叠 */}
@@ -629,90 +569,19 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
 
 /* ===== 可编辑内容项（chunk / sentence） ===== */
 
-function EditableContentItem({
-  item, label, icon, contentClass, hasCn, onSaved,
+function ReadOnlyContentItem({
+  item, label, icon, contentClass, hasCn,
 }: {
   item: ContentItem
   label: string
   icon: React.ReactNode
   contentClass: string
   hasCn?: boolean
-  onSaved: () => void
 }) {
-  const [editing, setEditing] = useState(false)
-  const [content, setContent] = useState(item.content)
-  const [contentCn, setContentCn] = useState(item.content_cn ?? '')
-  const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-
-  const startEdit = () => {
-    setContent(item.content)
-    setContentCn(item.content_cn ?? '')
-    setEditing(true)
-    setMsg(null)
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    setMsg(null)
-    try {
-      const body: { content: string; content_cn?: string } = { content }
-      if (hasCn) body.content_cn = contentCn
-      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(
-        `/words/content-items/${item.id}/manual-edit`, body,
-      )
-      setMsg({ ok: res.qc_passed, text: res.message })
-      // 无论质检是否通过，内容都已保存到 DB，退出编辑并刷新
-      setTimeout(() => { setMsg(null); setEditing(false); onSaved() }, 1500)
-    } catch {
-      setMsg({ ok: false, text: '保存失败' })
-      setTimeout(() => setMsg(null), 3000)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (editing) {
-    return (
-      <div className="bg-white rounded-xl p-3 border border-blue-200 space-y-2">
-        <div className="flex items-center gap-2">
-          {icon}
-          <p className="text-[10px] font-bold text-slate-400 uppercase">{label}</p>
-        </div>
-        <textarea value={content} onChange={e => setContent(e.target.value)} rows={2}
-          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-        {hasCn && (
-          <>
-            <p className="text-[10px] font-bold text-slate-400 uppercase">{label}翻译</p>
-            <textarea value={contentCn} onChange={e => setContentCn(e.target.value)} rows={1}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-          </>
-        )}
-        {msg && (
-          <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${msg.ok ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
-            {msg.text}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <button onClick={handleSave} disabled={saving || !content.trim()}
-            className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
-            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-            保存并质检
-          </button>
-          <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex items-start gap-2">
       {icon}
-      <div
-        className="flex-1 rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
-        onDoubleClick={startEdit}
-        title="双击编辑"
-      >
+      <div className="flex-1">
         <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">{label}</p>
         <p className={contentClass}>{item.content}</p>
         {hasCn && item.content_cn && <p className="text-xs text-slate-500 mt-0.5">{item.content_cn}</p>}
@@ -761,62 +630,9 @@ function CollapsibleIssues({ issues, label }: { issues: WordDetail['issues']; la
 
 /* ===== 助记区块：显示全部 4 种类型 ===== */
 
-function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onRegenerated: () => void }) {
-  const [regenLoading, setRegenLoading] = useState<number | null>(null)
-  const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string } | null>(null)
-  const [regenCount, setRegenCount] = useState<Map<number, number>>(new Map())
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [editFormula, setEditFormula] = useState('')
-  const [editChant, setEditChant] = useState('')
-  const [editScript, setEditScript] = useState('')
-  const [saving, setSaving] = useState(false)
-
+function MnemonicSection({ mnemonics }: { mnemonics: any[] }) {
   const mnMap = new Map<string, any>()
   for (const mn of mnemonics) mnMap.set(mn.dimension, mn)
-
-  const handleRegenerate = async (mn: any) => {
-    setRegenLoading(mn.id)
-    setRegenMsg(null)
-    const count = (regenCount.get(mn.id) ?? 0) + 1
-    setRegenCount(new Map(regenCount).set(mn.id, count))
-    try {
-      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/regenerate`)
-      const msg = res.qc_passed ? res.message : `第 ${count} 次尝试：${res.message}`
-      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg })
-      setTimeout(() => { setRegenMsg(null); onRegenerated() }, 2000)
-    } catch {
-      setRegenMsg({ id: mn.id, ok: false, msg: `第 ${count} 次尝试：重新生成失败` })
-      setTimeout(() => setRegenMsg(null), 3000)
-    } finally {
-      setRegenLoading(null)
-    }
-  }
-
-  const startEdit = (mn: any) => {
-    const existing = mn.content ? parseMnemonic(mn.content) : { formula: '', chant: '', script: '' }
-    setEditingId(mn.id)
-    setEditFormula(existing.formula)
-    setEditChant(existing.chant)
-    setEditScript(existing.script)
-    setRegenMsg(null)
-  }
-
-  const handleSaveEdit = async (mn: any) => {
-    setSaving(true)
-    setRegenMsg(null)
-    try {
-      const content = JSON.stringify({ formula: editFormula, chant: editChant, script: editScript })
-      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/manual-edit`, { content })
-      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message })
-      // 无论质检是否通过，内容都已保存到 DB，退出编辑并刷新
-      setTimeout(() => { setRegenMsg(null); setEditingId(null); onRegenerated() }, 1500)
-    } catch {
-      setRegenMsg({ id: mn.id, ok: false, msg: '保存失败' })
-      setTimeout(() => setRegenMsg(null), 3000)
-    } finally {
-      setSaving(false)
-    }
-  }
 
   return (
     <div className="space-y-2 pt-2 border-t border-slate-200/60">
@@ -832,46 +648,6 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
 
         if (!mn) return null
 
-        // 编辑模式
-        if (editingId === mn.id) {
-          return (
-            <div key={dim} className="bg-white rounded-xl p-4 border border-blue-200 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-600 rounded-md font-bold">{typeLabel}</span>
-                <span className="text-[10px] text-slate-400">手动编辑</span>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase">核心公式</label>
-                <textarea value={editFormula} onChange={e => setEditFormula(e.target.value)} rows={2}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase">助记口诀</label>
-                <textarea value={editChant} onChange={e => setEditChant(e.target.value)} rows={2}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
-                <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={3}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-              </div>
-              {regenMsg?.id === mn.id && (
-                <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${regenMsg.ok ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
-                  {regenMsg.msg}
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <button onClick={() => handleSaveEdit(mn)} disabled={saving || !editFormula.trim()}
-                  className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
-                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                  保存并质检
-                </button>
-                <button onClick={() => setEditingId(null)} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
-              </div>
-            </div>
-          )
-        }
-
         if (isRejected || !hasContent) {
           return (
             <div key={dim} className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
@@ -880,26 +656,6 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
                 <span className="flex items-center gap-1 text-xs text-slate-400">
                   <Ban size={11} /> 不适用
                 </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {regenMsg?.id === mn.id && (
-                  <span className={`text-[10px] font-medium ${regenMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{regenMsg.msg}</span>
-                )}
-                <button
-                  onClick={() => handleRegenerate(mn)}
-                  disabled={regenLoading === mn.id}
-                  className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50"
-                >
-                  {regenLoading === mn.id ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
-                  重新生成
-                </button>
-                <button
-                  onClick={() => startEdit(mn)}
-                  className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-lg text-[10px] font-bold transition-all"
-                >
-                  <UserCog size={10} />
-                  手动编辑
-                </button>
               </div>
             </div>
           )
@@ -910,9 +666,7 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
         return (
           <div
             key={dim}
-            className="bg-yellow-50/60 rounded-xl p-3 space-y-2 border border-yellow-100 cursor-text hover:bg-yellow-50 transition-colors"
-            onDoubleClick={() => startEdit(mn)}
-            title="双击编辑"
+            className="bg-yellow-50/60 rounded-xl p-3 space-y-2 border border-yellow-100"
           >
             <div className="flex items-center justify-between">
               <span className="text-[10px] px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-md font-bold">{typeLabel}</span>

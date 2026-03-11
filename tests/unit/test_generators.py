@@ -18,7 +18,8 @@ class TestChunkGenerator:
     def test_fallback_without_api(self):
         """无 API 配置时应返回占位内容."""
         gen = ChunkGenerator()
-        result = gen.generate("apple", meaning="苹果", pos="n.")
+        with patch.object(gen, "_call_ai", return_value={}):
+            result = gen.generate("apple", meaning="苹果", pos="n.")
         assert "apple" in result["content"]
         assert isinstance(result["content"], str)
 
@@ -40,7 +41,8 @@ class TestChunkGenerator:
 class TestSentenceGenerator:
     def test_fallback_without_api(self):
         gen = SentenceGenerator()
-        result = gen.generate("book", meaning="书", pos="n.")
+        with patch.object(gen, "_call_ai", return_value={}):
+            result = gen.generate("book", meaning="书", pos="n.")
         assert "book" in result["content"]
         assert result["content_cn"] is not None
 
@@ -56,7 +58,8 @@ class TestSentenceGenerator:
 class TestSyllableGenerator:
     def test_fallback_without_api(self):
         gen = SyllableGenerator()
-        result = gen.generate("apple")
+        with patch.object(gen, "_call_ai", return_value={}):
+            result = gen.generate("apple")
         assert result["content"] == "apple"
 
     def test_ai_mode(self):
@@ -69,7 +72,8 @@ class TestSyllableGenerator:
 class TestRootAffixMnemonicGenerator:
     def test_fallback_without_api(self):
         gen = RootAffixMnemonicGenerator()
-        result = gen.generate("invisible", meaning="看不见的", pos="adj.")
+        with patch.object(gen, "_call_ai", return_value={}):
+            result = gen.generate("invisible", meaning="看不见的", pos="adj.")
         assert result["valid"] is False
         assert result["content"] is None
 

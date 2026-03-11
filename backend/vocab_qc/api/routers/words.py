@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from vocab_qc.api.deps import get_current_user, get_db
+from vocab_qc.api.deps import get_current_user, get_db, require_role
 from vocab_qc.api.schemas.word import PaginatedWordResponse, WordDetailResponse
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.enums import QcStatus, ReviewResolution, ReviewStatus
@@ -47,9 +47,10 @@ def get_word(
 def regenerate_content_item(
     content_item_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(require_role("admin")),
 ):
-    """直接对 ContentItem 重新生成 + 质检（用于 rejected 等非审核队列项）。"""
+    """直接对 ContentItem 重新生成 + 质检（仅管理员，用于 rejected 等非审核队列项）。"""
+    from vocab_qc.core.services.batch_service import update_batch_progress
     from vocab_qc.core.services.review_service import ReviewService
 
     item = db.query(ContentItem).filter_by(id=content_item_id).first()
@@ -73,6 +74,7 @@ def regenerate_content_item(
             review.status = ReviewStatus.RESOLVED.value
             review.resolution = ReviewResolution.REGENERATE.value
             review.resolved_at = datetime.now(UTC)
+            update_batch_progress(db, review.batch_id)
         db.commit()
         return {
             "success": True,
@@ -98,6 +100,7 @@ def regenerate_content_item(
             review.status = ReviewStatus.RESOLVED.value
             review.resolution = ReviewResolution.REGENERATE.value
             review.resolved_at = datetime.now(UTC)
+            update_batch_progress(db, review.batch_id)
         message = "重新生成成功，质检通过"
     else:
         message = "重新生成完成，但质检未通过"
@@ -122,9 +125,10 @@ def manual_edit_content_item(
     content_item_id: int,
     body: ManualEditRequest,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(require_role("admin")),
 ):
-    """手动编辑 ContentItem 内容 + 自动质检（用于 rejected 等非审核队列项）。"""
+    """手动编辑 ContentItem 内容 + 自动质检（仅管理员，用于 rejected 等非审核队列项）。"""
+    from vocab_qc.core.services.batch_service import update_batch_progress
     from vocab_qc.core.services.review_service import ReviewService
 
     item = db.query(ContentItem).filter_by(id=content_item_id).first()
@@ -151,6 +155,7 @@ def manual_edit_content_item(
             review.status = ReviewStatus.RESOLVED.value
             review.resolution = ReviewResolution.MANUAL_EDIT.value
             review.resolved_at = datetime.now(UTC)
+            update_batch_progress(db, review.batch_id)
         message = "保存成功，质检通过"
     else:
         message = "已保存，但质检未通过"

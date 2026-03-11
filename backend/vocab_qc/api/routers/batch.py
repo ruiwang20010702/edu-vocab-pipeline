@@ -197,6 +197,21 @@ def skip_word(
     return {"message": "已跳过"}
 
 
+@router.post("/{batch_id}/release")
+def release_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "reviewer")),
+):
+    """释放批次，将未处理的审核项回池。"""
+    try:
+        batch_service.release_batch(db, batch_id, user_id=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    return {"message": "批次已释放"}
+
+
 def _run_production_bg(batch_id: int) -> None:
     """后台执行生产流水线，每步使用独立 session 避免长事务占用连接。
 

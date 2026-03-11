@@ -118,6 +118,7 @@ class BatchStatus(str, enum.Enum):
 
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    ABANDONED = "abandoned"
 
 
 class PromptStatus(str, enum.Enum):

@@ -98,6 +98,9 @@ export default function ReviewPage({ onBack }: Props) {
   // 重新生成结果
   const [regenResult, setRegenResult] = useState<{ id: number; passed: boolean; message: string } | null>(null)
 
+  // 释放批次
+  const [releaseLoading, setReleaseLoading] = useState(false)
+
   // 一键AI修复
   const [batchFixing, setBatchFixing] = useState(false)
 
@@ -118,20 +121,21 @@ export default function ReviewPage({ onBack }: Props) {
   }, [])
 
   const loadItems = useCallback(async () => {
+    // 没有批次时不加载审核项
+    if (!batch) {
+      setItems([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
-      if (batch) {
-        const detail = await api.get<BatchDetail>(`/batches/${batch.id}/words`)
-        const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
-        const allReviews = res.items ?? []
-        const batchReviewIds = new Set(
-          detail.words.flatMap(w => w.items.map(i => i.review_id))
-        )
-        setItems(allReviews.filter(r => batchReviewIds.has(r.id)))
-      } else {
-        const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
-        setItems(res.items ?? [])
-      }
+      const detail = await api.get<BatchDetail>(`/batches/${batch.id}/words`)
+      const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
+      const allReviews = res.items ?? []
+      const batchReviewIds = new Set(
+        detail.words.flatMap(w => w.items.map(i => i.review_id))
+      )
+      setItems(allReviews.filter(r => batchReviewIds.has(r.id)))
     } catch (e) {
       console.error('加载审核列表失败', e)
       setItems([])
@@ -152,6 +156,19 @@ export default function ReviewPage({ onBack }: Props) {
       console.error('领取批次失败', e)
     } finally {
       setAssignLoading(false)
+    }
+  }
+
+  const handleReleaseBatch = async () => {
+    if (!batch) return
+    setReleaseLoading(true)
+    try {
+      await api.post(`/batches/${batch.id}/release`)
+      setBatch(null)
+    } catch (e) {
+      console.error('释放批次失败', e)
+    } finally {
+      setReleaseLoading(false)
     }
   }
 
@@ -330,8 +347,13 @@ export default function ReviewPage({ onBack }: Props) {
               <PackagePlus size={14} className="text-blue-600" />
               <span className="text-slate-600">批次 #{batch.id}</span>
               <span className="text-slate-400">{batch.reviewed_count}/{batch.word_count}</span>
-              <button onClick={() => { setBatch(null) }} className="text-slate-300 hover:text-slate-500 ml-1">
-                <X size={12} />
+              <button
+                onClick={handleReleaseBatch}
+                disabled={releaseLoading}
+                className="text-slate-300 hover:text-red-500 ml-1 transition-colors"
+                title="释放批次"
+              >
+                {releaseLoading ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
               </button>
             </div>
           ) : (
@@ -355,7 +377,7 @@ export default function ReviewPage({ onBack }: Props) {
               }
               setBatchFixing(false)
             }}
-            disabled={counts.can_retry === 0 || actionLoading !== null || batchFixing}
+            disabled={!batch || counts.can_retry === 0 || actionLoading !== null || batchFixing}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all disabled:opacity-40 shadow-lg shadow-blue-600/20 hover:-translate-y-0.5 active:scale-95"
           >
             {batchFixing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
@@ -389,6 +411,22 @@ export default function ReviewPage({ onBack }: Props) {
       {loading ? (
         <div className="flex items-center justify-center h-40">
           <Loader2 size={32} className="animate-spin text-blue-600" />
+        </div>
+      ) : !batch ? (
+        <div className="text-center py-20 space-y-4">
+          <div className="w-20 h-20 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto">
+            <PackagePlus size={40} />
+          </div>
+          <h3 className="text-2xl font-bold text-white">请先领取批次</h3>
+          <p className="text-white/60">领取一批待审核的单词后即可开始审核</p>
+          <button
+            onClick={handleAssign}
+            disabled={assignLoading}
+            className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all disabled:opacity-50 shadow-lg shadow-blue-600/20"
+          >
+            {assignLoading ? <Loader2 size={14} className="animate-spin inline mr-1.5" /> : <PackagePlus size={14} className="inline mr-1.5" />}
+            领取批次
+          </button>
         </div>
       ) : wordGroups.length === 0 ? (
         <div className="text-center py-20 space-y-4">
