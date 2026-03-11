@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import {
   Search, Download, ChevronLeft, ChevronRight, X, Loader2,
   CheckCircle2, AlertTriangle, MoreHorizontal, BookOpen, Lightbulb,
-  Layers, Volume2, GraduationCap, RefreshCw, Ban,
+  Layers, Volume2, GraduationCap, RefreshCw, Ban, UserCog, Save,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { WordDetail, PaginatedResponse, ContentItem } from '../types'
@@ -224,7 +224,7 @@ export default function MasterTablePage() {
                   const meanings = w.meanings ?? []
                   const rowCount = Math.max(meanings.length, 1)
                   const ipa = w.phonetics?.[0]?.ipa ?? ''
-                  const syllables = w.phonetics?.[0]?.syllables ?? ''
+                  const syllables = w.syllable?.content ?? ''
 
                   if (meanings.length === 0) {
                     return (
@@ -415,7 +415,7 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
                       <>
                         <span className="font-mono text-sm text-blue-600">{word.phonetics[0].ipa}</span>
                         <span className="text-xs text-slate-400">·</span>
-                        <span className="text-sm text-slate-500">{word.phonetics[0].syllables}</span>
+                        <span className="text-sm text-slate-500">{word.syllable?.content ?? word.phonetics[0].syllables}</span>
                       </>
                     )}
                   </div>
@@ -540,6 +540,11 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
 function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onRegenerated: () => void }) {
   const [regenLoading, setRegenLoading] = useState<number | null>(null)
   const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string } | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editFormula, setEditFormula] = useState('')
+  const [editChant, setEditChant] = useState('')
+  const [editScript, setEditScript] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const mnMap = new Map<string, any>()
   for (const mn of mnemonics) mnMap.set(mn.dimension, mn)
@@ -559,6 +564,34 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
     }
   }
 
+  const startEdit = (mn: any) => {
+    setEditingId(mn.id)
+    setEditFormula('')
+    setEditChant('')
+    setEditScript('')
+    setRegenMsg(null)
+  }
+
+  const handleSaveEdit = async (mn: any) => {
+    setSaving(true)
+    setRegenMsg(null)
+    try {
+      const content = JSON.stringify({ formula: editFormula, chant: editChant, script: editScript })
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/manual-edit`, { content })
+      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message })
+      if (res.qc_passed) {
+        setTimeout(() => { setRegenMsg(null); setEditingId(null); onRegenerated() }, 1500)
+      } else {
+        setTimeout(() => setRegenMsg(null), 3000)
+      }
+    } catch {
+      setRegenMsg({ id: mn.id, ok: false, msg: '保存失败' })
+      setTimeout(() => setRegenMsg(null), 3000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-2 pt-2 border-t border-slate-200/60">
       <div className="flex items-center gap-1.5">
@@ -571,10 +604,49 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
         const isRejected = mn?.qc_status === 'rejected'
         const hasContent = mn?.content
 
-        if (!mn) return null // 没有该维度记录
+        if (!mn) return null
+
+        // 编辑模式
+        if (editingId === mn.id) {
+          return (
+            <div key={dim} className="bg-white rounded-xl p-4 border border-blue-200 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-600 rounded-md font-bold">{typeLabel}</span>
+                <span className="text-[10px] text-slate-400">手动编辑</span>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">核心公式</label>
+                <textarea value={editFormula} onChange={e => setEditFormula(e.target.value)} rows={2}
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">助记口诀</label>
+                <textarea value={editChant} onChange={e => setEditChant(e.target.value)} rows={2}
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
+                <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={3}
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+              </div>
+              {regenMsg?.id === mn.id && (
+                <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${regenMsg.ok ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
+                  {regenMsg.msg}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <button onClick={() => handleSaveEdit(mn)} disabled={saving || !editFormula.trim()}
+                  className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                  保存并质检
+                </button>
+                <button onClick={() => setEditingId(null)} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
+              </div>
+            </div>
+          )
+        }
 
         if (isRejected || !hasContent) {
-          // 不适用 / 空内容
           return (
             <div key={dim} className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -583,17 +655,26 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
                   <Ban size={11} /> 不适用
                 </span>
               </div>
-              <button
-                onClick={() => handleRegenerate(mn)}
-                disabled={regenLoading === mn.id}
-                className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50"
-              >
-                {regenLoading === mn.id ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
-                重新生成
-              </button>
-              {regenMsg?.id === mn.id && (
-                <span className={`text-[10px] font-medium ${regenMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{regenMsg.msg}</span>
-              )}
+              <div className="flex items-center gap-2">
+                {regenMsg?.id === mn.id && (
+                  <span className={`text-[10px] font-medium ${regenMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{regenMsg.msg}</span>
+                )}
+                <button
+                  onClick={() => handleRegenerate(mn)}
+                  disabled={regenLoading === mn.id}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50"
+                >
+                  {regenLoading === mn.id ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+                  重新生成
+                </button>
+                <button
+                  onClick={() => startEdit(mn)}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-lg text-[10px] font-bold transition-all"
+                >
+                  <UserCog size={10} />
+                  手动编辑
+                </button>
+              </div>
             </div>
           )
         }

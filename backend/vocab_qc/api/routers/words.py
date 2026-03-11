@@ -3,6 +3,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db
@@ -83,6 +84,51 @@ def regenerate_content_item(
         message = "重新生成成功，质检通过"
     else:
         message = "重新生成完成，但质检未通过"
+
+    db.commit()
+    return {
+        "success": True,
+        "qc_passed": qc_passed,
+        "message": message,
+        "new_status": item.qc_status,
+        "new_content": item.content,
+    }
+
+
+class ManualEditRequest(BaseModel):
+    content: str
+    content_cn: Optional[str] = None
+
+
+@router.post("/content-items/{content_item_id}/manual-edit")
+def manual_edit_content_item(
+    content_item_id: int,
+    body: ManualEditRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """手动编辑 ContentItem 内容 + 自动质检（用于 rejected 等非审核队列项）。"""
+    from vocab_qc.core.services.review_service import ReviewService
+
+    item = db.query(ContentItem).filter_by(id=content_item_id).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="内容项不存在")
+
+    # 写入用户提供的内容
+    item.content = body.content
+    if body.content_cn is not None:
+        item.content_cn = body.content_cn
+    item.qc_status = QcStatus.PENDING.value
+    db.flush()
+
+    # 运行质检
+    qc_passed = ReviewService._run_qc_for_item(db, item)
+
+    if qc_passed:
+        item.qc_status = QcStatus.APPROVED.value
+        message = "保存成功，质检通过"
+    else:
+        message = "已保存，但质检未通过"
 
     db.commit()
     return {

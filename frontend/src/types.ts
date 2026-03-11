@@ -112,6 +112,7 @@ export interface BatchDetail {
 
 export interface WordDetail extends Word {
   phonetics: Phonetic[]
+  syllable?: ContentItem
   meanings: (Meaning & {
     chunk?: ContentItem
     sentence?: ContentItem

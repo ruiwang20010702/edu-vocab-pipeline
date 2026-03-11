@@ -119,12 +119,16 @@ def _build_word_detail_from_loaded(word: Word, issues: list[QcRuleResult]) -> di
             "mnemonics": mnemonics_by_meaning.get(m.id, []),
         })
 
+    # 词级维度: syllable（meaning_id=None）
+    syllable_item = content_by_key.get((None, "syllable"))
+
     return {
         "id": word.id,
         "word": word.word,
         "created_at": word.created_at,
         "updated_at": word.updated_at,
         "phonetics": word.phonetics,
+        "syllable": syllable_item,
         "meanings": meanings_data,
         "issues": [
             {

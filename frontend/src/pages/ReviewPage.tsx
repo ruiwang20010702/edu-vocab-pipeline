@@ -79,6 +79,9 @@ export default function ReviewPage({ onBack }: Props) {
   // 重新生成结果
   const [regenResult, setRegenResult] = useState<{ id: number; passed: boolean; message: string } | null>(null)
 
+  // 已通过动画
+  const [resolvedIds, setResolvedIds] = useState<Set<number>>(new Set())
+
   const loadBatch = useCallback(async () => {
     setBatchLoading(true)
     try {
@@ -134,9 +137,17 @@ export default function ReviewPage({ onBack }: Props) {
     setActionLoading(id)
     try {
       await api.post(`/reviews/${id}/approve`)
-      setItems(prev => prev.filter(i => i.id !== id))
-    } catch (e) { console.error('审核通过失败', e) }
-    finally { setActionLoading(null) }
+      // 先标记为 resolved 播放动画，延迟后移除
+      setResolvedIds(prev => new Set(prev).add(id))
+      setActionLoading(null)
+      setTimeout(() => {
+        setItems(prev => prev.filter(i => i.id !== id))
+        setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+      }, 1200)
+    } catch (e) {
+      console.error('审核通过失败', e)
+      setActionLoading(null)
+    }
   }
 
   const handleRegenerate = async (id: number) => {
@@ -150,8 +161,10 @@ export default function ReviewPage({ onBack }: Props) {
       }>(`/reviews/${id}/regenerate`)
       if (res.qc_passed) {
         setRegenResult({ id, passed: true, message: res.message })
+        setResolvedIds(prev => new Set(prev).add(id))
         setTimeout(() => {
           setItems(prev => prev.filter(i => i.id !== id))
+          setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
           setRegenResult(null)
         }, 1500)
       } else {
@@ -391,6 +404,7 @@ export default function ReviewPage({ onBack }: Props) {
             onSaved={() => { loadItems(); }}
             actionLoading={actionLoading}
             regenResult={regenResult}
+            resolvedIds={resolvedIds}
           />
         )}
       </AnimatePresence>
@@ -437,7 +451,7 @@ function WordGroupCard({ group, onOpen }: { group: WordGroup; onOpen: () => void
 /* ===== 单词审核弹窗 ===== */
 
 function WordReviewModal({
-  group, onClose, onApprove, onRegenerate, onSaved, actionLoading, regenResult,
+  group, onClose, onApprove, onRegenerate, onSaved, actionLoading, regenResult, resolvedIds,
 }: {
   group: WordGroup
   onClose: () => void
@@ -446,6 +460,7 @@ function WordReviewModal({
   onSaved: () => void
   actionLoading: number | null
   regenResult: { id: number; passed: boolean; message: string } | null
+  resolvedIds: Set<number>
 }) {
   const [wordDetail, setWordDetail] = useState<WordDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(true)
@@ -551,10 +566,10 @@ function WordReviewModal({
                   {wordDetail?.phonetics?.[0] && (
                     <div className="flex items-center gap-3 mt-2">
                       <span className="font-mono text-sm text-blue-600">{wordDetail.phonetics[0].ipa}</span>
-                      {wordDetail.phonetics[0].syllables && (
+                      {(wordDetail.syllable?.content || wordDetail.phonetics[0].syllables) && (
                         <>
                           <span className="text-xs text-slate-400">·</span>
-                          <span className="text-sm text-slate-500">{wordDetail.phonetics[0].syllables}</span>
+                          <span className="text-sm text-slate-500">{wordDetail.syllable?.content ?? wordDetail.phonetics[0].syllables}</span>
                         </>
                       )}
                     </div>
@@ -627,11 +642,13 @@ function WordReviewModal({
               {currentItems.length > 0 ? (
                 <div className="space-y-3">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">待修复维度</p>
+                  <AnimatePresence>
                   {currentItems.map(item => (
                     <ReviewDimensionCard
                       key={item.id}
                       item={item}
                       isLoading={actionLoading === item.id}
+                      isResolved={resolvedIds.has(item.id)}
                       regenResult={regenResult?.id === item.id ? regenResult : null}
                       isEditing={editingId === item.id}
                       editContent={editContent}
@@ -648,6 +665,7 @@ function WordReviewModal({
                       onSaveEdit={() => handleSaveEdit(item.id)}
                     />
                   ))}
+                  </AnimatePresence>
                 </div>
               ) : (
                 <div className="text-center py-8 text-slate-400 text-sm">
@@ -678,11 +696,13 @@ function WordReviewModal({
               {wordLevelItems.length > 0 && meaningIdx === 0 && (
                 <div className="space-y-3 pt-2 border-t border-slate-100">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">词级维度</p>
+                  <AnimatePresence>
                   {wordLevelItems.map(item => (
                     <ReviewDimensionCard
                       key={item.id}
                       item={item}
                       isLoading={actionLoading === item.id}
+                      isResolved={resolvedIds.has(item.id)}
                       regenResult={regenResult?.id === item.id ? regenResult : null}
                       isEditing={editingId === item.id}
                       editContent={editContent}
@@ -699,6 +719,7 @@ function WordReviewModal({
                       onSaveEdit={() => handleSaveEdit(item.id)}
                     />
                   ))}
+                  </AnimatePresence>
                 </div>
               )}
             </div>
@@ -733,13 +754,14 @@ function buildMnemonicJson(formula: string, chant: string, script: string): stri
 }
 
 function ReviewDimensionCard({
-  item, isLoading, regenResult, isEditing,
+  item, isLoading, isResolved, regenResult, isEditing,
   editContent, editContentCn, editResult, editError, saving,
   onEditContentChange, onEditContentCnChange,
   onApprove, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit,
 }: {
   item: ReviewItem
   isLoading: boolean
+  isResolved: boolean
   regenResult: { passed: boolean; message: string } | null
   isEditing: boolean
   editContent: string
@@ -789,9 +811,36 @@ function ReviewDimensionCard({
   }
 
   return (
-    <div className={`bg-white rounded-2xl border p-4 space-y-3 transition-all ${
-      isLoading ? 'border-blue-400 ring-1 ring-blue-200' : 'border-slate-200'
-    }`}>
+    <motion.div
+      layout
+      exit={{ opacity: 0, scale: 0.9, y: -10, transition: { duration: 0.4 } }}
+      className={`relative bg-white rounded-2xl border p-4 space-y-3 transition-all overflow-hidden ${
+        isResolved ? 'border-green-400 ring-2 ring-green-200' : isLoading ? 'border-blue-400 ring-1 ring-blue-200' : 'border-slate-200'
+      }`}
+    >
+      {/* 通过成功动画覆盖层 */}
+      <AnimatePresence>
+        {isResolved && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="absolute inset-0 z-10 bg-gradient-to-br from-green-50/95 to-emerald-50/95 backdrop-blur-[2px] flex items-center justify-center"
+          >
+            <motion.div
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+              className="flex flex-col items-center gap-2"
+            >
+              <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center shadow-lg shadow-green-200">
+                <CheckCircle2 size={28} className="text-white" />
+              </div>
+              <span className="text-sm font-bold text-green-700">已通过</span>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 维度标题 + retry */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -941,7 +990,7 @@ function ReviewDimensionCard({
           </button>
         </div>
       )}
-    </div>
+    </motion.div>
   )
 }
 
@@ -950,6 +999,11 @@ function ReviewDimensionCard({
 function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onRegenerated: () => void }) {
   const [regenLoading, setRegenLoading] = useState<number | null>(null)
   const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string } | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editFormula, setEditFormula] = useState('')
+  const [editChant, setEditChant] = useState('')
+  const [editScript, setEditScript] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const handleRegenerate = async (mn: any) => {
     setRegenLoading(mn.id)
@@ -966,6 +1020,34 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
     }
   }
 
+  const startEdit = (mn: any) => {
+    setEditingId(mn.id)
+    setEditFormula('')
+    setEditChant('')
+    setEditScript('')
+    setRegenMsg(null)
+  }
+
+  const handleSaveEdit = async (mn: any) => {
+    setSaving(true)
+    setRegenMsg(null)
+    try {
+      const content = JSON.stringify({ formula: editFormula, chant: editChant, script: editScript })
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/manual-edit`, { content })
+      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message })
+      if (res.qc_passed) {
+        setTimeout(() => { setRegenMsg(null); setEditingId(null); onRegenerated() }, 1500)
+      } else {
+        setTimeout(() => setRegenMsg(null), 3000)
+      }
+    } catch {
+      setRegenMsg({ id: mn.id, ok: false, msg: '保存失败' })
+      setTimeout(() => setRegenMsg(null), 3000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-2 pt-2 border-t border-slate-100">
       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
@@ -973,6 +1055,47 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
       </p>
       {mnemonics.map((mn: any) => {
         const typeLabel = DIMENSION_LABELS[mn.dimension] ?? mn.dimension
+        const isEditing = editingId === mn.id
+
+        if (isEditing) {
+          return (
+            <div key={mn.id} className="bg-white rounded-2xl p-4 border border-blue-200 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-600 rounded-md font-bold">{typeLabel}</span>
+                <span className="text-[10px] text-slate-400">手动编辑</span>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">核心公式</label>
+                <textarea value={editFormula} onChange={e => setEditFormula(e.target.value)} rows={2}
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">助记口诀</label>
+                <textarea value={editChant} onChange={e => setEditChant(e.target.value)} rows={2}
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
+                <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={3}
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+              </div>
+              {regenMsg?.id === mn.id && (
+                <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${regenMsg.ok ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
+                  {regenMsg.msg}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <button onClick={() => handleSaveEdit(mn)} disabled={saving || !editFormula.trim()}
+                  className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                  保存并质检
+                </button>
+                <button onClick={() => setEditingId(null)} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
+              </div>
+            </div>
+          )
+        }
+
         return (
           <div key={mn.id} className="bg-slate-50 rounded-2xl p-3 border border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -992,6 +1115,13 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
               >
                 {regenLoading === mn.id ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
                 重新生成
+              </button>
+              <button
+                onClick={() => startEdit(mn)}
+                className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-lg text-[10px] font-bold transition-all"
+              >
+                <UserCog size={10} />
+                手动编辑
               </button>
             </div>
           </div>

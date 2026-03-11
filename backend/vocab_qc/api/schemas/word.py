@@ -35,6 +35,7 @@ class MeaningDetailResponse(BaseModel):
     sources: list[SourceResponse]
     chunk: Optional[ContentItemResponse] = None
     sentence: Optional[ContentItemResponse] = None
+    mnemonics: list[ContentItemResponse] = []
 
 
 class PhoneticResponse(BaseModel):
@@ -61,8 +62,8 @@ class WordDetailResponse(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     phonetics: list[PhoneticResponse]
+    syllable: Optional[ContentItemResponse] = None
     meanings: list[MeaningDetailResponse]
-    mnemonics: list[ContentItemResponse] = []
     issues: list[QualityIssueResponse] = []
 
 
