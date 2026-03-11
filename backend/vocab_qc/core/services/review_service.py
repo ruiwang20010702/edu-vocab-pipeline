@@ -376,11 +376,15 @@ class ReviewService:
         if content_item.qc_status != QcStatus.LAYER1_PASSED.value:
             return False
 
-        # Layer 2
+        # Layer 2（仅对有 Layer 2 规则的维度执行）
         l2_runner = Layer2Runner()
-        l2_runner.run(session, [content_item], word_texts, meaning_texts, extra_kwargs=extra_kwargs)
+        has_l2 = content_item.dimension in l2_runner._unified_checkers
+        if has_l2:
+            l2_runner.run(session, [content_item], word_texts, meaning_texts, extra_kwargs=extra_kwargs)
+            return content_item.qc_status == QcStatus.LAYER2_PASSED.value
 
-        return content_item.qc_status == QcStatus.LAYER2_PASSED.value
+        # 无 Layer 2 规则的维度（如 syllable），Layer 1 通过即算通过
+        return True
 
     def _get_or_create_counter(self, session: Session, content_item: ContentItem) -> RetryCounter:
         """获取或创建重试计数器."""
