@@ -137,27 +137,38 @@ class S4SingleSyllableNoSplit(_RuleCheckerBase):
     dimension = "syllable"
     description = "单音节不切分校验"
 
+    # 英文元音簇正则：连续元音字母算一个簇，silent-e 不单独算
+    _VOWEL_GROUP_RE = re.compile(r"[aeiouy]+", re.IGNORECASE)
+
+    @staticmethod
+    def _count_vowel_groups(word: str) -> int:
+        """根据拼写估算音节数：统计元音簇，末尾 silent-e 不算。"""
+        w = word.lower().strip()
+        groups = re.findall(r"[aeiouy]+", w)
+        count = len(groups)
+        # 末尾 silent-e（如 cake, name），但不包括只有一个元音簇的词（如 me, be）
+        if count > 1 and w.endswith("e") and not w.endswith("le"):
+            count -= 1
+        return max(count, 1)
+
     def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
         syllables_str = content
         if not syllables_str:
             return RuleResult(rule_id=self.rule_id, passed=False, detail="缺少音节数据")
 
-        # 判断是否为单音节词（ipa 来自 Phonetic 表，用于交叉验证）
-        ipa = kwargs.get("ipa", "")
         parts = syllables_str.split("·")
 
         # 如果只有一个切分块，通过
         if len(parts) == 1:
             return RuleResult(rule_id=self.rule_id, passed=True)
 
-        # 如果音标中没有分隔符（单音节），但切分块有多个，则失败
-        if ipa:
-            ipa_inner = ipa.strip("/")
-            if "·" not in ipa_inner and len(parts) > 1:
-                return RuleResult(
-                    rule_id=self.rule_id,
-                    passed=False,
-                    detail=f"单音节词被错误切分: {syllables_str!r}",
-                )
+        # 根据拼写判断：如果元音簇只有 1 个（单音节词），不应有切分
+        vowel_count = self._count_vowel_groups(word)
+        if vowel_count == 1 and len(parts) > 1:
+            return RuleResult(
+                rule_id=self.rule_id,
+                passed=False,
+                detail=f"单音节词被错误切分: {syllables_str!r}",
+            )
 
         return RuleResult(rule_id=self.rule_id, passed=True)
