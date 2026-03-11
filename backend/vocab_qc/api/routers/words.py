@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.schemas.word import PaginatedWordResponse, WordDetailResponse
 from vocab_qc.core.models.content_layer import ContentItem
-from vocab_qc.core.models.enums import QcStatus
+from vocab_qc.core.models.enums import QcStatus, ReviewResolution, ReviewStatus
+from vocab_qc.core.models.quality_layer import ReviewItem
+from datetime import datetime, UTC
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import word_service
 
@@ -62,8 +64,15 @@ def regenerate_content_item(
     # 调用生成器
     ReviewService._do_regenerate(db, item)
 
-    # 如果生成器标记为 rejected（类型不适用），直接返回
+    # 如果生成器标记为 rejected（类型不适用），resolve 关联 review 并返回
     if item.qc_status == QcStatus.REJECTED.value:
+        review = db.query(ReviewItem).filter_by(
+            content_item_id=item.id, status=ReviewStatus.PENDING.value
+        ).first()
+        if review:
+            review.status = ReviewStatus.RESOLVED.value
+            review.resolution = ReviewResolution.REGENERATE.value
+            review.resolved_at = datetime.now(UTC)
         db.commit()
         return {
             "success": True,
@@ -81,6 +90,14 @@ def regenerate_content_item(
 
     if qc_passed:
         item.qc_status = QcStatus.APPROVED.value
+        # resolve 关联的 pending review_item
+        review = db.query(ReviewItem).filter_by(
+            content_item_id=item.id, status=ReviewStatus.PENDING.value
+        ).first()
+        if review:
+            review.status = ReviewStatus.RESOLVED.value
+            review.resolution = ReviewResolution.REGENERATE.value
+            review.resolved_at = datetime.now(UTC)
         message = "重新生成成功，质检通过"
     else:
         message = "重新生成完成，但质检未通过"
@@ -126,6 +143,14 @@ def manual_edit_content_item(
 
     if qc_passed:
         item.qc_status = QcStatus.APPROVED.value
+        # resolve 关联的 pending review_item
+        review = db.query(ReviewItem).filter_by(
+            content_item_id=item.id, status=ReviewStatus.PENDING.value
+        ).first()
+        if review:
+            review.status = ReviewStatus.RESOLVED.value
+            review.resolution = ReviewResolution.MANUAL_EDIT.value
+            review.resolved_at = datetime.now(UTC)
         message = "保存成功，质检通过"
     else:
         message = "已保存，但质检未通过"
