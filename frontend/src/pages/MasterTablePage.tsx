@@ -764,6 +764,7 @@ function CollapsibleIssues({ issues, label }: { issues: WordDetail['issues']; la
 function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onRegenerated: () => void }) {
   const [regenLoading, setRegenLoading] = useState<number | null>(null)
   const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string } | null>(null)
+  const [regenCount, setRegenCount] = useState<Map<number, number>>(new Map())
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editFormula, setEditFormula] = useState('')
   const [editChant, setEditChant] = useState('')
@@ -776,12 +777,15 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
   const handleRegenerate = async (mn: any) => {
     setRegenLoading(mn.id)
     setRegenMsg(null)
+    const count = (regenCount.get(mn.id) ?? 0) + 1
+    setRegenCount(new Map(regenCount).set(mn.id, count))
     try {
       const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/regenerate`)
-      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message })
+      const msg = res.qc_passed ? res.message : `第 ${count} 次尝试：${res.message}`
+      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg })
       setTimeout(() => { setRegenMsg(null); onRegenerated() }, 2000)
     } catch {
-      setRegenMsg({ id: mn.id, ok: false, msg: '重新生成失败' })
+      setRegenMsg({ id: mn.id, ok: false, msg: `第 ${count} 次尝试：重新生成失败` })
       setTimeout(() => setRegenMsg(null), 3000)
     } finally {
       setRegenLoading(null)
