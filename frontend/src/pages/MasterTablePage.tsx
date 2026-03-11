@@ -4,6 +4,7 @@ import {
   Search, Download, ChevronLeft, ChevronRight, X, Loader2,
   CheckCircle2, AlertTriangle, MoreHorizontal, BookOpen, Lightbulb,
   Layers, Volume2, GraduationCap, RefreshCw, Ban, UserCog, Save,
+  ChevronDown, AlertCircle,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { WordDetail, PaginatedResponse, ContentItem } from '../types'
@@ -376,10 +377,82 @@ export default function MasterTablePage() {
 
 /* ===== 详情弹窗 ===== */
 
+/** 将质检问题按 content_item_id 归类到义项 */
+function groupIssuesByMeaning(
+  issues: WordDetail['issues'],
+  meanings: WordDetail['meanings'],
+  syllable?: ContentItem,
+) {
+  // 收集每个义项拥有的 content_item_id
+  const meaningIssuesMap = new Map<number, typeof issues>() // meaningIdx → issues
+  const wordLevelIssues: typeof issues = []
+  const syllableId = syllable?.id
+
+  // 建立 content_item_id → meaningIdx 的映射
+  const itemToMeaning = new Map<number, number>()
+  meanings.forEach((m, idx) => {
+    if (m.chunk?.id) itemToMeaning.set(m.chunk.id, idx)
+    if (m.sentence?.id) itemToMeaning.set(m.sentence.id, idx)
+    for (const mn of (m.mnemonics ?? [])) {
+      if (mn.id) itemToMeaning.set(mn.id, idx)
+    }
+  })
+
+  for (const issue of issues) {
+    const mIdx = itemToMeaning.get(issue.content_item_id)
+    if (mIdx !== undefined) {
+      const arr = meaningIssuesMap.get(mIdx) ?? []
+      arr.push(issue)
+      meaningIssuesMap.set(mIdx, arr)
+    } else {
+      wordLevelIssues.push(issue)
+    }
+  }
+  return { meaningIssuesMap, wordLevelIssues }
+}
+
 function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: WordDetail | null; loading: boolean; onClose: () => void; setDetailWord: (w: WordDetail | null) => void }) {
   const [meaningIdx, setMeaningIdx] = useState(0)
+  const [editingSyllable, setEditingSyllable] = useState(false)
+  const [syllableVal, setSyllableVal] = useState('')
+  const [syllableSaving, setSyllableSaving] = useState(false)
+  const [syllableMsg, setSyllableMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const meanings = word?.meanings ?? []
   const currentMeaning = meanings[meaningIdx] ?? null
+
+  // 质检问题按义项归类
+  const { meaningIssuesMap, wordLevelIssues } = word
+    ? groupIssuesByMeaning(word.issues ?? [], meanings, word.syllable)
+    : { meaningIssuesMap: new Map(), wordLevelIssues: [] }
+
+  const refreshDetail = () => {
+    if (word) api.get<WordDetail>(`/words/${word.id}`).then(setDetailWord).catch(() => {})
+  }
+
+  const handleSyllableDblClick = () => {
+    if (!word?.syllable) return
+    setSyllableVal(word.syllable.content)
+    setEditingSyllable(true)
+    setSyllableMsg(null)
+  }
+
+  const handleSyllableSave = async () => {
+    if (!word?.syllable) return
+    setSyllableSaving(true)
+    setSyllableMsg(null)
+    try {
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(
+        `/words/content-items/${word.syllable.id}/manual-edit`, { content: syllableVal },
+      )
+      setSyllableMsg({ ok: res.qc_passed, text: res.message })
+      setTimeout(() => { setSyllableMsg(null); setEditingSyllable(false); refreshDetail() }, 1500)
+    } catch {
+      setSyllableMsg({ ok: false, text: '保存失败' })
+      setTimeout(() => setSyllableMsg(null), 3000)
+    } finally {
+      setSyllableSaving(false)
+    }
+  }
 
   return (
     <motion.div
@@ -415,7 +488,31 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
                       <>
                         <span className="font-mono text-sm text-blue-600">{word.phonetics[0].ipa}</span>
                         <span className="text-xs text-slate-400">·</span>
-                        <span className="text-sm text-slate-500">{word.syllable?.content ?? word.phonetics[0].syllables}</span>
+                        {editingSyllable ? (
+                          <span className="flex items-center gap-1.5">
+                            <input
+                              value={syllableVal}
+                              onChange={e => setSyllableVal(e.target.value)}
+                              className="text-sm text-slate-900 bg-white border border-blue-300 rounded-lg px-2 py-0.5 focus:outline-none w-40"
+                              autoFocus
+                              onKeyDown={e => { if (e.key === 'Enter') handleSyllableSave(); if (e.key === 'Escape') setEditingSyllable(false) }}
+                            />
+                            <button onClick={handleSyllableSave} disabled={syllableSaving}
+                              className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg font-bold hover:bg-blue-100 disabled:opacity-50">
+                              {syllableSaving ? '...' : '保存'}
+                            </button>
+                            <button onClick={() => setEditingSyllable(false)} className="text-[10px] text-slate-400 hover:text-slate-600">取消</button>
+                            {syllableMsg && <span className={`text-[10px] font-medium ${syllableMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{syllableMsg.text}</span>}
+                          </span>
+                        ) : (
+                          <span
+                            className="text-sm text-slate-500 cursor-text hover:bg-blue-50/60 rounded px-1 -mx-1 transition-colors"
+                            onDoubleClick={handleSyllableDblClick}
+                            title="双击编辑"
+                          >
+                            {word.syllable?.content ?? word.phonetics[0].syllables}
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
@@ -472,25 +569,25 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
                       )}
 
                       {m.chunk && m.chunk.content && (
-                        <div className="flex items-start gap-2">
-                          <Layers size={13} className="text-violet-400 mt-0.5 shrink-0" />
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">核心语块</p>
-                            <p className="text-sm text-violet-700 italic font-medium">{m.chunk.content}</p>
-                            {m.chunk.content_cn && <p className="text-xs text-slate-500 mt-0.5">{m.chunk.content_cn}</p>}
-                          </div>
-                        </div>
+                        <EditableContentItem
+                          item={m.chunk}
+                          label="核心语块"
+                          icon={<Layers size={13} className="text-violet-400 mt-0.5 shrink-0" />}
+                          contentClass="text-sm text-violet-700 italic font-medium"
+                          hasCn
+                          onSaved={() => { if (word) api.get<WordDetail>(`/words/${word.id}`).then(setDetailWord).catch(() => {}) }}
+                        />
                       )}
 
                       {m.sentence && m.sentence.content && (
-                        <div className="flex items-start gap-2">
-                          <Volume2 size={13} className="text-emerald-400 mt-0.5 shrink-0" />
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">例句</p>
-                            <p className="text-sm text-slate-800">{m.sentence.content}</p>
-                            {m.sentence.content_cn && <p className="text-xs text-slate-500 mt-1">{m.sentence.content_cn}</p>}
-                          </div>
-                        </div>
+                        <EditableContentItem
+                          item={m.sentence}
+                          label="例句"
+                          icon={<Volume2 size={13} className="text-emerald-400 mt-0.5 shrink-0" />}
+                          contentClass="text-sm text-slate-800"
+                          hasCn
+                          onSaved={() => { if (word) api.get<WordDetail>(`/words/${word.id}`).then(setDetailWord).catch(() => {}) }}
+                        />
                       )}
 
                       {/* 该义项的助记 — 显示全部 4 种类型 */}
@@ -502,24 +599,19 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
                           }
                         }} />
                       )}
+
+                      {/* 该义项的质检问题 — 可折叠 */}
+                      {(meaningIssuesMap.get(meaningIdx) ?? []).length > 0 && (
+                        <CollapsibleIssues issues={meaningIssuesMap.get(meaningIdx)!} label={`义项 ${meaningIdx + 1} 质检问题`} />
+                      )}
                     </div>
                   </div>
                 )
               })()}
 
-              {/* 质检问题 */}
-              {word.issues && word.issues.length > 0 && (
-                <div>
-                  <p className="text-sm text-slate-500 mb-2">质检问题 ({word.issues.length})</p>
-                  <div className="space-y-1">
-                    {word.issues.map((issue, i) => (
-                      <div key={i} className="text-sm bg-red-50 text-red-600 border border-red-100 px-3 py-2 rounded-xl">
-                        <span className="font-mono text-xs text-red-500 mr-2">[{issue.rule_id}]</span>
-                        {issue.message}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+              {/* 词级质检问题（音节等不属于具体义项的） */}
+              {wordLevelIssues.length > 0 && (
+                <CollapsibleIssues issues={wordLevelIssues} label="词级质检问题" />
               )}
 
               {/* 元信息 */}
@@ -532,6 +624,138 @@ function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: Word
         )}
       </motion.div>
     </motion.div>
+  )
+}
+
+/* ===== 可编辑内容项（chunk / sentence） ===== */
+
+function EditableContentItem({
+  item, label, icon, contentClass, hasCn, onSaved,
+}: {
+  item: ContentItem
+  label: string
+  icon: React.ReactNode
+  contentClass: string
+  hasCn?: boolean
+  onSaved: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [content, setContent] = useState(item.content)
+  const [contentCn, setContentCn] = useState(item.content_cn ?? '')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const startEdit = () => {
+    setContent(item.content)
+    setContentCn(item.content_cn ?? '')
+    setEditing(true)
+    setMsg(null)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setMsg(null)
+    try {
+      const body: { content: string; content_cn?: string } = { content }
+      if (hasCn) body.content_cn = contentCn
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(
+        `/words/content-items/${item.id}/manual-edit`, body,
+      )
+      setMsg({ ok: res.qc_passed, text: res.message })
+      // 无论质检是否通过，内容都已保存到 DB，退出编辑并刷新
+      setTimeout(() => { setMsg(null); setEditing(false); onSaved() }, 1500)
+    } catch {
+      setMsg({ ok: false, text: '保存失败' })
+      setTimeout(() => setMsg(null), 3000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="bg-white rounded-xl p-3 border border-blue-200 space-y-2">
+        <div className="flex items-center gap-2">
+          {icon}
+          <p className="text-[10px] font-bold text-slate-400 uppercase">{label}</p>
+        </div>
+        <textarea value={content} onChange={e => setContent(e.target.value)} rows={2}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+        {hasCn && (
+          <>
+            <p className="text-[10px] font-bold text-slate-400 uppercase">{label}翻译</p>
+            <textarea value={contentCn} onChange={e => setContentCn(e.target.value)} rows={1}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
+          </>
+        )}
+        {msg && (
+          <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${msg.ok ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
+            {msg.text}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <button onClick={handleSave} disabled={saving || !content.trim()}
+            className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+            保存并质检
+          </button>
+          <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-start gap-2">
+      {icon}
+      <div
+        className="flex-1 rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
+        onDoubleClick={startEdit}
+        title="双击编辑"
+      >
+        <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">{label}</p>
+        <p className={contentClass}>{item.content}</p>
+        {hasCn && item.content_cn && <p className="text-xs text-slate-500 mt-0.5">{item.content_cn}</p>}
+      </div>
+    </div>
+  )
+}
+
+/* ===== 可折叠质检问题 ===== */
+
+function CollapsibleIssues({ issues, label }: { issues: WordDetail['issues']; label: string }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="pt-2 border-t border-slate-200/60">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-2 w-full text-left group"
+      >
+        <AlertCircle size={13} className="text-red-400 shrink-0" />
+        <span className="text-[10px] font-bold text-red-400 uppercase">{label} ({issues.length})</span>
+        <ChevronDown size={13} className={`text-slate-400 ml-auto transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-1 mt-2">
+              {issues.map((issue, i) => (
+                <div key={i} className="text-sm bg-red-50 text-red-600 border border-red-100 px-3 py-2 rounded-xl">
+                  <span className="font-mono text-xs text-red-500 mr-2">[{issue.rule_id}]</span>
+                  {issue.message}
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
 
@@ -565,10 +789,11 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
   }
 
   const startEdit = (mn: any) => {
+    const existing = mn.content ? parseMnemonic(mn.content) : { formula: '', chant: '', script: '' }
     setEditingId(mn.id)
-    setEditFormula('')
-    setEditChant('')
-    setEditScript('')
+    setEditFormula(existing.formula)
+    setEditChant(existing.chant)
+    setEditScript(existing.script)
     setRegenMsg(null)
   }
 
@@ -579,11 +804,8 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
       const content = JSON.stringify({ formula: editFormula, chant: editChant, script: editScript })
       const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/manual-edit`, { content })
       setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message })
-      if (res.qc_passed) {
-        setTimeout(() => { setRegenMsg(null); setEditingId(null); onRegenerated() }, 1500)
-      } else {
-        setTimeout(() => setRegenMsg(null), 3000)
-      }
+      // 无论质检是否通过，内容都已保存到 DB，退出编辑并刷新
+      setTimeout(() => { setRegenMsg(null); setEditingId(null); onRegenerated() }, 1500)
     } catch {
       setRegenMsg({ id: mn.id, ok: false, msg: '保存失败' })
       setTimeout(() => setRegenMsg(null), 3000)
@@ -682,7 +904,12 @@ function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onReg
         // 有内容的助记
         const parsed = parseMnemonic(mn.content)
         return (
-          <div key={dim} className="bg-yellow-50/60 rounded-xl p-3 space-y-2 border border-yellow-100">
+          <div
+            key={dim}
+            className="bg-yellow-50/60 rounded-xl p-3 space-y-2 border border-yellow-100 cursor-text hover:bg-yellow-50 transition-colors"
+            onDoubleClick={() => startEdit(mn)}
+            title="双击编辑"
+          >
             <div className="flex items-center justify-between">
               <span className="text-[10px] px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-md font-bold">{typeLabel}</span>
               <span className="text-[9px] text-emerald-500 font-bold flex items-center gap-1">
