@@ -1,0 +1,47 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    env_file: .env
+    environment:
+      - VOCAB_QC_DATABASE_URL_SYNC=postgresql://vocab:${DB_PASSWORD:?请设置 DB_PASSWORD 环境变量}@db:5432/vocab_qc
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn vocab_qc.api.main:app --host 0.0.0.0 --port 8000
+      "
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vocab_qc
+      POSTGRES_USER: vocab
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请设置 DB_PASSWORD 环境变量}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vocab -d vocab_qc"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

@@ -117,6 +117,6 @@ def send_email(to: str, code: str) -> None:
     msg["From"] = settings.smtp_from_email
     msg["To"] = to
 
-    with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port) as server:
+    with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10) as server:
         server.login(settings.smtp_user, settings.smtp_password)
         server.sendmail(settings.smtp_from_email, [to], msg.as_string())

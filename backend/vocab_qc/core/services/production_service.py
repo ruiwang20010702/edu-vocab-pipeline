@@ -314,10 +314,18 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
                 )
             return item_id, result
 
-        gathered = await asyncio.gather(
-            *[_call_one(t) for t in tasks],
-            return_exceptions=True,
-        )
+        async_tasks = [asyncio.create_task(_call_one(t)) for t in tasks]
+        try:
+            gathered = await asyncio.wait_for(
+                asyncio.gather(*async_tasks, return_exceptions=True),
+                timeout=300,  # 5 分钟总超时，防止永久挂起
+            )
+        except asyncio.TimeoutError:
+            for t in async_tasks:
+                t.cancel()
+            # 等待取消完成，忽略 CancelledError
+            await asyncio.gather(*async_tasks, return_exceptions=True)
+            raise
 
         results: dict[int, dict] = {}
         for i, r in enumerate(gathered):

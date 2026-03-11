@@ -23,6 +23,8 @@ def _create_engine():
         common["max_overflow"] = 10
         common["pool_pre_ping"] = True
         common["pool_recycle"] = 1800
+        common["pool_timeout"] = 30
+        common["connect_args"] = {"connect_timeout": 10}
     return create_engine(url, **common)
 
 

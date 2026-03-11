@@ -22,8 +22,22 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 
 
+def _key_by_email(request: Request) -> str:
+    """按邮箱限速：解析请求体中的 email 字段。"""
+    import json as _json
+    try:
+        raw = getattr(request, "_body", None) or b""
+        if not raw:
+            return get_remote_address(request)
+        body = _json.loads(raw)
+        return body.get("email", get_remote_address(request))
+    except Exception:
+        return get_remote_address(request)
+
+
 @router.post("/send-code")
 @limiter.limit("3/minute")
+@limiter.limit("3/minute", key_func=_key_by_email)
 def send_code(request: Request, body: SendCodeRequest, db: Session = Depends(get_db)):
     """发送验证码。"""
     if not auth_service.validate_email_domain(body.email):
@@ -48,6 +62,7 @@ def send_code(request: Request, body: SendCodeRequest, db: Session = Depends(get
 
 @router.post("/verify", response_model=TokenResponse)
 @limiter.limit("5/minute")
+@limiter.limit("5/minute", key_func=_key_by_email)
 def verify(request: Request, body: VerifyRequest, db: Session = Depends(get_db)):
     """验证码登录。"""
     if not auth_service.verify_code(db, body.email, body.code):
@@ -55,12 +70,10 @@ def verify(request: Request, body: VerifyRequest, db: Session = Depends(get_db))
 
     user = user_service.get_user_by_email(db, body.email)
     if user is None:
-        # 首次登录自动注册；如果系统无用户则为 admin，否则为 reviewer
-        has_any_user = db.query(User).first() is not None
-        role = "reviewer" if has_any_user else "admin"
+        # 首次登录自动注册为 reviewer；admin 须通过 CLI `vocab create-admin` 创建
         name = body.email.split("@")[0]
-        user = user_service.create_user(db, email=body.email, name=name, role=role)
-        logger.info("自动注册新用户: %s (角色: %s)", body.email, role)
+        user = user_service.create_user(db, email=body.email, name=name, role="reviewer")
+        logger.info("自动注册新用户: %s (角色: reviewer)", body.email)
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账号已停用")
 

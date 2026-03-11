@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import random
 import threading
 import time
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ def _get_async_http_client() -> httpx.AsyncClient:
     global _async_http_client, _async_http_client_loop
     loop = asyncio.get_running_loop()
     if _async_http_client is None or _async_http_client_loop is not loop:
+        old = _async_http_client
         _async_http_client = httpx.AsyncClient(
             timeout=60.0,
             limits=httpx.Limits(
@@ -48,7 +50,23 @@ def _get_async_http_client() -> httpx.AsyncClient:
             ),
         )
         _async_http_client_loop = loop
+        # 在当前循环中异步关闭旧客户端
+        if old is not None:
+            loop.create_task(old.aclose())
     return _async_http_client
+
+
+async def close_http_clients() -> None:
+    """关闭共享的 HTTP 客户端，在应用关闭时调用。"""
+    global _http_client, _async_http_client
+    if _async_http_client is not None:
+        await _async_http_client.aclose()
+        _async_http_client = None
+    if _http_client is not None:
+        loop = asyncio.get_running_loop()
+        client = _http_client
+        _http_client = None
+        await loop.run_in_executor(None, client.close)
 
 
 def load_prompt_file(filename: str) -> Optional[str]:
@@ -78,14 +96,14 @@ class ContentGenerator:
     def get_ai_config(self, session: Any = None) -> AiConfig:
         """获取完整 AI 配置：Prompt 内容 + 模型/密钥/地址。
 
-        优先级: DB Prompt 配置 → 全局 settings。
+        密钥和地址始终从环境变量读取（安全），仅 Prompt 文本和模型名称可从 DB 覆盖。
         """
         system_prompt = ""
         model = settings.ai_model
         api_key = settings.ai_api_key
         base_url = settings.ai_api_base_url
 
-        # 1. 尝试从 DB 获取 Prompt 及其 AI 配置
+        # 从 DB 获取 Prompt 文本和模型名称（不读取密钥）
         if session:
             try:
                 from vocab_qc.core.services.prompt_service import get_active_prompt
@@ -96,14 +114,10 @@ class ContentGenerator:
                         system_prompt = prompt.content
                     if prompt.model:
                         model = prompt.model
-                    if prompt.ai_api_key:
-                        api_key = prompt.ai_api_key
-                    if prompt.ai_api_base_url:
-                        base_url = prompt.ai_api_base_url
             except Exception:
                 logging.getLogger(__name__).warning("从数据库获取 Prompt 配置失败", exc_info=True)
 
-        # 2. Prompt 文本 fallback: 文件 → 硬编码
+        # Prompt 文本 fallback: 文件 → 硬编码
         if not system_prompt:
             if self.prompt_filename:
                 file_prompt = load_prompt_file(self.prompt_filename)
@@ -170,7 +184,7 @@ class ContentGenerator:
             except Exception as e:
                 last_error = e
                 if attempt < settings.ai_max_retries - 1:
-                    time.sleep(2**attempt)
+                    time.sleep(2**attempt + random.uniform(0, 1))
 
         raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")
 
@@ -216,7 +230,7 @@ class ContentGenerator:
             except Exception as e:
                 last_error = e
                 if attempt < settings.ai_max_retries - 1:
-                    await asyncio.sleep(2**attempt)
+                    await asyncio.sleep(2**attempt + random.uniform(0, 1))
 
         raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")
 
