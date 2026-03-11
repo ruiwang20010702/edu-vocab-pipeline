@@ -13,9 +13,10 @@ def get_dashboard_stats(session: Session) -> dict:
     """聚合统计：总词数、已通过、待审核、未通过、通过率、Bad Case 分类。"""
     total_words = session.query(func.count()).select_from(Word).scalar() or 0
 
+    # approved + rejected（不适用）均视为已完成
     approved_count = (
         session.query(func.count(func.distinct(ContentItem.word_id)))
-        .filter(ContentItem.qc_status == QcStatus.APPROVED.value)
+        .filter(ContentItem.qc_status.in_([QcStatus.APPROVED.value, QcStatus.REJECTED.value]))
         .scalar()
         or 0
     )
@@ -39,7 +40,6 @@ def get_dashboard_stats(session: Session) -> dict:
             ContentItem.qc_status.in_([
                 QcStatus.LAYER1_FAILED.value,
                 QcStatus.LAYER2_FAILED.value,
-                QcStatus.REJECTED.value,
             ])
         )
         .scalar()

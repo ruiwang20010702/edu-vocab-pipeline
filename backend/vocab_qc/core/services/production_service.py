@@ -111,15 +111,60 @@ def step_qc_layer2(session: Session, package_id: int, qc_service: Optional[QcSer
 
 
 def step_finalize(session: Session, package_id: int) -> None:
-    """标记 Package 为 completed，更新 processed_words。"""
+    """标记 Package 为 completed，更新 processed_words，自动批准通过项。"""
     pkg = session.query(Package).filter_by(id=package_id).first()
     if pkg is None:
         return
 
     word_ids = _get_word_ids_for_package(session, package_id)
+    _auto_approve_passed(session, word_ids)
     pkg.processed_words = len(word_ids)
     pkg.status = "completed"
     session.flush()
+
+
+def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
+    """将通过全部质检的 ContentItem 自动提升为 approved。
+
+    - layer2_passed → approved（通过了 L1 + L2）
+    - layer1_passed 且该维度无 L2 规则 → approved（L2 不适用）
+    """
+    if not word_ids:
+        return 0
+
+    # L2 有规则的维度
+    _L2_DIMENSIONS = {"sentence", "chunk", "mnemonic_root_affix",
+                      "mnemonic_word_in_word", "mnemonic_sound_meaning",
+                      "mnemonic_exam_app"}
+
+    count = 0
+
+    # 1. layer2_passed → approved
+    l2_passed = (
+        session.query(ContentItem)
+        .filter(ContentItem.word_id.in_(word_ids))
+        .filter_by(qc_status=QcStatus.LAYER2_PASSED.value)
+        .all()
+    )
+    for item in l2_passed:
+        item.qc_status = QcStatus.APPROVED.value
+        count += 1
+
+    # 2. layer1_passed 且无 L2 规则（如 syllable）→ approved
+    l1_passed = (
+        session.query(ContentItem)
+        .filter(ContentItem.word_id.in_(word_ids))
+        .filter_by(qc_status=QcStatus.LAYER1_PASSED.value)
+        .all()
+    )
+    for item in l1_passed:
+        if item.dimension not in _L2_DIMENSIONS:
+            item.qc_status = QcStatus.APPROVED.value
+            count += 1
+
+    if count:
+        session.flush()
+    return count
 
 
 def run_production(
@@ -201,6 +246,9 @@ def run_production(
         if result.get("run_id"):
             qc.enqueue_layer2_failed_for_review(session, result["run_id"])
 
+    # Step 4: 自动批准通过全部质检的项目
+    auto_approved = _auto_approve_passed(session, word_ids_from_meanings)
+
     # 更新 Package 状态
     pkg.processed_words = len(word_ids_from_meanings)
     pkg.status = "completed"
@@ -214,6 +262,7 @@ def run_production(
         "l2_passed": l2_result["passed"],
         "l2_failed": l2_result["failed"],
         "enqueued": enqueued,
+        "auto_approved": auto_approved,
     }
 
 

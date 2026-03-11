@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import {
   Search, RefreshCw, CheckCircle2, Loader2, X, PackagePlus,
   ArrowLeft, AlertCircle, Filter, ChevronDown, UserCog, Save,
-  BookOpen, Layers, Volume2, Lightbulb,
+  BookOpen, Layers, Volume2, Lightbulb, Ban,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import type { ReviewItem, ReviewBatch, BatchDetail, WordDetail } from '../types'
@@ -655,6 +655,25 @@ function WordReviewModal({
                 </div>
               )}
 
+              {/* 不适用的助记维度（rejected） */}
+              {currentMeaning && (() => {
+                const rejectedMnemonics = (currentMeaning.mnemonics ?? []).filter(
+                  (mn: any) => mn.qc_status === 'rejected' || (!mn.content && mn.dimension?.startsWith('mnemonic_'))
+                )
+                if (rejectedMnemonics.length === 0) return null
+                return (
+                  <RejectedMnemonicsSection
+                    mnemonics={rejectedMnemonics}
+                    onRegenerated={() => {
+                      // 刷新 wordDetail
+                      api.get<WordDetail>(`/words/${group.word_id}`)
+                        .then(data => setWordDetail(data))
+                        .catch(() => {})
+                    }}
+                  />
+                )
+              })()}
+
               {/* 词级维度（音标等） */}
               {wordLevelItems.length > 0 && meaningIdx === 0 && (
                 <div className="space-y-3 pt-2 border-t border-slate-100">
@@ -922,6 +941,62 @@ function ReviewDimensionCard({
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ===== 不适用助记维度区块 ===== */
+
+function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onRegenerated: () => void }) {
+  const [regenLoading, setRegenLoading] = useState<number | null>(null)
+  const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string } | null>(null)
+
+  const handleRegenerate = async (mn: any) => {
+    setRegenLoading(mn.id)
+    setRegenMsg(null)
+    try {
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/regenerate`)
+      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message })
+      setTimeout(() => { setRegenMsg(null); onRegenerated() }, 2000)
+    } catch {
+      setRegenMsg({ id: mn.id, ok: false, msg: '重新生成失败' })
+      setTimeout(() => setRegenMsg(null), 3000)
+    } finally {
+      setRegenLoading(null)
+    }
+  }
+
+  return (
+    <div className="space-y-2 pt-2 border-t border-slate-100">
+      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+        <Lightbulb size={11} /> 助记维度（不适用）
+      </p>
+      {mnemonics.map((mn: any) => {
+        const typeLabel = DIMENSION_LABELS[mn.dimension] ?? mn.dimension
+        return (
+          <div key={mn.id} className="bg-slate-50 rounded-2xl p-3 border border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] px-2 py-0.5 bg-slate-200 text-slate-500 rounded-md font-bold">{typeLabel}</span>
+              <span className="flex items-center gap-1 text-xs text-slate-400">
+                <Ban size={11} /> 不适用
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {regenMsg?.id === mn.id && (
+                <span className={`text-[10px] font-medium ${regenMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{regenMsg.msg}</span>
+              )}
+              <button
+                onClick={() => handleRegenerate(mn)}
+                disabled={regenLoading === mn.id}
+                className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50"
+              >
+                {regenLoading === mn.id ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+                重新生成
+              </button>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

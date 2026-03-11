@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.schemas.word import PaginatedWordResponse, WordDetailResponse
+from vocab_qc.core.models.content_layer import ContentItem
+from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import word_service
 
@@ -36,3 +38,57 @@ def get_word(
     if result is None:
         raise HTTPException(status_code=404, detail="单词不存在")
     return result
+
+
+@router.post("/content-items/{content_item_id}/regenerate")
+def regenerate_content_item(
+    content_item_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """直接对 ContentItem 重新生成 + 质检（用于 rejected 等非审核队列项）。"""
+    from vocab_qc.core.services.review_service import ReviewService
+
+    item = db.query(ContentItem).filter_by(id=content_item_id).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="内容项不存在")
+
+    # 重置状态为 pending，触发生成
+    item.qc_status = QcStatus.PENDING.value
+    item.content = ""
+    db.flush()
+
+    # 调用生成器
+    ReviewService._do_regenerate(db, item)
+
+    # 如果生成器标记为 rejected（类型不适用），直接返回
+    if item.qc_status == QcStatus.REJECTED.value:
+        db.commit()
+        return {
+            "success": True,
+            "qc_passed": False,
+            "message": "该助记类型不适用，已标记为不适用",
+            "new_status": "rejected",
+            "new_content": "",
+        }
+
+    # 重置为 pending 再跑质检
+    item.qc_status = QcStatus.PENDING.value
+    db.flush()
+
+    qc_passed = ReviewService._run_qc_for_item(db, item)
+
+    if qc_passed:
+        item.qc_status = QcStatus.APPROVED.value
+        message = "重新生成成功，质检通过"
+    else:
+        message = "重新生成完成，但质检未通过"
+
+    db.commit()
+    return {
+        "success": True,
+        "qc_passed": qc_passed,
+        "message": message,
+        "new_status": item.qc_status,
+        "new_content": item.content,
+    }

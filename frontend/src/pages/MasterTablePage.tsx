@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import {
   Search, Download, ChevronLeft, ChevronRight, X, Loader2,
   CheckCircle2, AlertTriangle, MoreHorizontal, BookOpen, Lightbulb,
-  Layers, Volume2, GraduationCap,
+  Layers, Volume2, GraduationCap, RefreshCw, Ban,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { WordDetail, PaginatedResponse, ContentItem } from '../types'
@@ -17,7 +17,21 @@ const MNEMONIC_TYPE_LABELS: Record<string, string> = {
   mnemonic_exam_app: '考试应用',
 }
 
+const ALL_MNEMONIC_DIMS = [
+  'mnemonic_root_affix', 'mnemonic_word_in_word',
+  'mnemonic_sound_meaning', 'mnemonic_exam_app',
+] as const
+
 function parseMnemonic(content: string): { formula: string; chant: string; script: string } {
+  if (!content) return { formula: '', chant: '', script: '' }
+  // JSON 格式优先
+  try {
+    const data = JSON.parse(content)
+    if (data && typeof data === 'object' && 'formula' in data) {
+      return { formula: data.formula ?? '', chant: data.chant ?? '', script: data.script ?? '' }
+    }
+  } catch { /* fallback to regex */ }
+  // 旧格式兼容
   const formulaMatch = content.match(/\[核心公式\]\s*([\s\S]*?)(?=\[助记口诀\]|$)/)
   const chantMatch = content.match(/\[助记口诀\]\s*([\s\S]*?)(?=\[老师话术\]|$)/)
   const scriptMatch = content.match(/\[老师话术\]\s*([\s\S]*?)$/)
@@ -232,10 +246,24 @@ export default function MasterTablePage() {
                   }
 
                   return meanings.map((m: any, mi: number) => {
-                    // 每个义项的第一条有效助记
-                    const firstMn = m.mnemonics?.find((mn: any) => mn.content) ?? null
+                    // 收集该义项下所有助记维度（包括 rejected）
+                    const mnemonicsMap = new Map<string, any>()
+                    for (const mn of (m.mnemonics ?? [])) {
+                      mnemonicsMap.set(mn.dimension, mn)
+                    }
+                    // 选择第一条有效助记显示在主行
+                    const firstMn = ALL_MNEMONIC_DIMS.map(d => mnemonicsMap.get(d)).find(mn => mn?.content) ?? null
                     const mnData = firstMn ? parseMnemonic(firstMn.content) : null
                     const mnType = firstMn ? (MNEMONIC_TYPE_LABELS[firstMn.dimension] ?? firstMn.dimension) : ''
+                    // 统计不适用数
+                    const rejectedCount = ALL_MNEMONIC_DIMS.filter(d => {
+                      const mn = mnemonicsMap.get(d)
+                      return mn && mn.qc_status === 'rejected'
+                    }).length
+                    const validCount = ALL_MNEMONIC_DIMS.filter(d => {
+                      const mn = mnemonicsMap.get(d)
+                      return mn && mn.content
+                    }).length
 
                     return (
                       <tr key={`${w.id}-${mi}`} className={`hover:bg-blue-50/30 transition-colors group ${mi > 0 ? 'border-t border-dashed border-slate-100' : ''}`}>
@@ -261,9 +289,14 @@ export default function MasterTablePage() {
                         <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[130px]">{m.chunk?.content_cn ?? ''}</span></td>
                         <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[180px]">{m.sentence?.content ?? ''}</span></td>
                         <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[180px]">{m.sentence?.content_cn ?? ''}</span></td>
-                        {/* 助记列 — 每个义项独立 */}
+                        {/* 助记列 — 显示有效类型 + 不适用数 */}
                         <td className="px-5 py-2">
-                          {mnType && <span className="px-2 py-0.5 bg-yellow-50 text-yellow-700 text-[10px] font-bold rounded border border-yellow-200 whitespace-nowrap">{mnType}</span>}
+                          <div className="flex flex-col gap-1">
+                            {mnType && <span className="px-2 py-0.5 bg-yellow-50 text-yellow-700 text-[10px] font-bold rounded border border-yellow-200 whitespace-nowrap w-fit">{mnType}</span>}
+                            {rejectedCount > 0 && (
+                              <span className="text-[9px] text-slate-400">{validCount} 适用 / {rejectedCount} 不适用</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-5 py-2"><span className="text-xs font-mono text-blue-600 line-clamp-2 max-w-[140px]">{mnData?.formula}</span></td>
                         <td className="px-5 py-2"><span className="text-xs text-slate-500 line-clamp-2 max-w-[140px]">{mnData?.chant}</span></td>
@@ -334,7 +367,7 @@ export default function MasterTablePage() {
       {/* 详情弹窗 */}
       <AnimatePresence>
         {selectedWordId !== null && (
-          <WordDetailModal word={detailWord} loading={detailLoading} onClose={handleCloseDetail} />
+          <WordDetailModal word={detailWord} loading={detailLoading} onClose={handleCloseDetail} setDetailWord={setDetailWord} />
         )}
       </AnimatePresence>
     </div>
@@ -343,7 +376,7 @@ export default function MasterTablePage() {
 
 /* ===== 详情弹窗 ===== */
 
-function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; loading: boolean; onClose: () => void }) {
+function WordDetailModal({ word, loading, onClose, setDetailWord }: { word: WordDetail | null; loading: boolean; onClose: () => void; setDetailWord: (w: WordDetail | null) => void }) {
   const [meaningIdx, setMeaningIdx] = useState(0)
   const meanings = word?.meanings ?? []
   const currentMeaning = meanings[meaningIdx] ?? null
@@ -460,41 +493,14 @@ function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; 
                         </div>
                       )}
 
-                      {/* 该义项的助记 */}
-                      {m.mnemonics && m.mnemonics.filter((mn: any) => mn.content).length > 0 && (
-                        <div className="space-y-2 pt-2 border-t border-slate-200/60">
-                          <div className="flex items-center gap-1.5">
-                            <Lightbulb size={13} className="text-yellow-500 shrink-0" />
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">助记（{m.mnemonics.filter((mn: any) => mn.content).length} 种）</span>
-                          </div>
-                          {m.mnemonics.filter((mn: any) => mn.content).map((mn: any) => {
-                            const parsed = parseMnemonic(mn.content)
-                            const typeLabel = MNEMONIC_TYPE_LABELS[mn.dimension] ?? mn.dimension
-                            return (
-                              <div key={mn.id} className="bg-yellow-50/60 rounded-xl p-3 space-y-2 border border-yellow-100">
-                                <span className="text-[10px] px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-md font-bold">{typeLabel}</span>
-                                {parsed.formula && (
-                                  <div>
-                                    <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">核心公式</p>
-                                    <p className="text-sm font-mono font-bold text-yellow-800">{parsed.formula}</p>
-                                  </div>
-                                )}
-                                {parsed.chant && (
-                                  <div>
-                                    <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">助记口诀</p>
-                                    <p className="text-sm text-yellow-700">{parsed.chant}</p>
-                                  </div>
-                                )}
-                                {parsed.script && (
-                                  <div className="pt-2 border-t border-yellow-200/60">
-                                    <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">老师话术</p>
-                                    <p className="text-xs text-yellow-800/80 leading-relaxed">{parsed.script}</p>
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
+                      {/* 该义项的助记 — 显示全部 4 种类型 */}
+                      {m.mnemonics && m.mnemonics.length > 0 && (
+                        <MnemonicSection mnemonics={m.mnemonics} onRegenerated={() => {
+                          // 刷新详情
+                          if (word) {
+                            api.get<WordDetail>(`/words/${word.id}`).then(setDetailWord).catch(() => {})
+                          }
+                        }} />
                       )}
                     </div>
                   </div>
@@ -526,5 +532,103 @@ function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; 
         )}
       </motion.div>
     </motion.div>
+  )
+}
+
+/* ===== 助记区块：显示全部 4 种类型 ===== */
+
+function MnemonicSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onRegenerated: () => void }) {
+  const [regenLoading, setRegenLoading] = useState<number | null>(null)
+  const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string } | null>(null)
+
+  const mnMap = new Map<string, any>()
+  for (const mn of mnemonics) mnMap.set(mn.dimension, mn)
+
+  const handleRegenerate = async (mn: any) => {
+    setRegenLoading(mn.id)
+    setRegenMsg(null)
+    try {
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string }>(`/words/content-items/${mn.id}/regenerate`)
+      setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message })
+      setTimeout(() => { setRegenMsg(null); onRegenerated() }, 2000)
+    } catch {
+      setRegenMsg({ id: mn.id, ok: false, msg: '重新生成失败' })
+      setTimeout(() => setRegenMsg(null), 3000)
+    } finally {
+      setRegenLoading(null)
+    }
+  }
+
+  return (
+    <div className="space-y-2 pt-2 border-t border-slate-200/60">
+      <div className="flex items-center gap-1.5">
+        <Lightbulb size={13} className="text-yellow-500 shrink-0" />
+        <span className="text-[10px] font-bold text-slate-400 uppercase">助记（4 种类型）</span>
+      </div>
+      {ALL_MNEMONIC_DIMS.map(dim => {
+        const mn = mnMap.get(dim)
+        const typeLabel = MNEMONIC_TYPE_LABELS[dim] ?? dim
+        const isRejected = mn?.qc_status === 'rejected'
+        const hasContent = mn?.content
+
+        if (!mn) return null // 没有该维度记录
+
+        if (isRejected || !hasContent) {
+          // 不适用 / 空内容
+          return (
+            <div key={dim} className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] px-2 py-0.5 bg-slate-200 text-slate-500 rounded-md font-bold">{typeLabel}</span>
+                <span className="flex items-center gap-1 text-xs text-slate-400">
+                  <Ban size={11} /> 不适用
+                </span>
+              </div>
+              <button
+                onClick={() => handleRegenerate(mn)}
+                disabled={regenLoading === mn.id}
+                className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50"
+              >
+                {regenLoading === mn.id ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+                重新生成
+              </button>
+              {regenMsg?.id === mn.id && (
+                <span className={`text-[10px] font-medium ${regenMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{regenMsg.msg}</span>
+              )}
+            </div>
+          )
+        }
+
+        // 有内容的助记
+        const parsed = parseMnemonic(mn.content)
+        return (
+          <div key={dim} className="bg-yellow-50/60 rounded-xl p-3 space-y-2 border border-yellow-100">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-md font-bold">{typeLabel}</span>
+              <span className="text-[9px] text-emerald-500 font-bold flex items-center gap-1">
+                <CheckCircle2 size={10} /> 已通过
+              </span>
+            </div>
+            {parsed.formula && (
+              <div>
+                <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">核心公式</p>
+                <p className="text-sm font-mono font-bold text-yellow-800">{parsed.formula}</p>
+              </div>
+            )}
+            {parsed.chant && (
+              <div>
+                <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">助记口诀</p>
+                <p className="text-sm text-yellow-700">{parsed.chant}</p>
+              </div>
+            )}
+            {parsed.script && (
+              <div className="pt-2 border-t border-yellow-200/60">
+                <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">老师话术</p>
+                <p className="text-xs text-yellow-800/80 leading-relaxed">{parsed.script}</p>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
