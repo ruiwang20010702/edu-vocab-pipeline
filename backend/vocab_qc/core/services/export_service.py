@@ -1,12 +1,22 @@
 """导出服务: 仅导出已通过审核的内容."""
 
+import io
 import json
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
 from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+
+
+_MNEMONIC_TYPE_LABELS: dict[str, str] = {
+    "mnemonic_root_affix": "词根词缀",
+    "mnemonic_word_in_word": "词中词",
+    "mnemonic_sound_meaning": "音义联想",
+    "mnemonic_exam_app": "考试应用",
+}
 
 
 def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
@@ -23,6 +33,26 @@ def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
     return base
 
 
+def _parse_mnemonic_fields(content: str) -> dict[str, str]:
+    """从助记 content 中提取 formula/chant/script。"""
+    if not content:
+        return {"formula": "", "chant": "", "script": ""}
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict) and "formula" in data:
+            return {k: data.get(k, "") for k in ("formula", "chant", "script")}
+    except (json.JSONDecodeError, TypeError):
+        pass
+    formula = re.search(r"\[核心公式\]\s*([\s\S]*?)(?=\[助记口诀\]|$)", content)
+    chant = re.search(r"\[助记口诀\]\s*([\s\S]*?)(?=\[老师话术\]|$)", content)
+    script = re.search(r"\[老师话术\]\s*([\s\S]*?)$", content)
+    return {
+        "formula": (formula.group(1).strip() if formula else ""),
+        "chant": (chant.group(1).strip() if chant else ""),
+        "script": (script.group(1).strip() if script else ""),
+    }
+
+
 class ExportService:
     """导出服务: 门禁 + 格式化输出."""
 
@@ -35,10 +65,21 @@ class ExportService:
         phonetic = session.query(Phonetic).filter_by(word_id=word.id).first()
         meanings = session.query(Meaning).filter_by(word_id=word.id).all()
 
+        # 音节优先用 syllable ContentItem，fallback 到 Phonetic 表
+        syllable_item = (
+            session.query(ContentItem)
+            .filter_by(word_id=word.id, dimension="syllable", qc_status=QcStatus.APPROVED.value)
+            .first()
+        )
+        syllables = (
+            syllable_item.content if syllable_item
+            else (phonetic.syllables if phonetic else "")
+        )
+
         result = {
             "id": word.id,
             "word": word.word,
-            "syllables": phonetic.syllables if phonetic else "",
+            "syllables": syllables,
             "ipa": phonetic.ipa if phonetic else "",
             "meanings": [],
         }
@@ -145,10 +186,16 @@ class ExportService:
                 continue
 
             phonetic = phonetics.get(word_id)
+            # 音节优先用 syllable ContentItem，fallback 到 Phonetic 表
+            syllable_item = content_index.get((word_id, None, "syllable"))
+            syllables = (
+                syllable_item.content if syllable_item
+                else (phonetic.syllables if phonetic else "")
+            )
             result: dict[str, Any] = {
                 "id": word.id,
                 "word": word.word,
-                "syllables": phonetic.syllables if phonetic else "",
+                "syllables": syllables,
                 "ipa": phonetic.ipa if phonetic else "",
                 "meanings": [],
             }
@@ -182,6 +229,109 @@ class ExportService:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return len(data)
+
+    def export_to_excel(self, session: Session) -> io.BytesIO:
+        """导出已通过词汇数据为 Excel，每个义项一行，4 种助记各占 3 列。"""
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+
+        data = self.export_all_approved(session)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "词表导出"
+
+        # 4 种助记类型，每种 3 列（公式/口诀/话术）
+        mnemonic_types = [
+            ("mnemonic_root_affix", "词根词缀"),
+            ("mnemonic_word_in_word", "词中词"),
+            ("mnemonic_sound_meaning", "谐音联想"),
+            ("mnemonic_exam_app", "考试应用"),
+        ]
+
+        base_headers = [
+            "单词", "音标", "音节", "词性", "释义", "教材来源",
+            "语块", "语块翻译", "例句", "例句翻译",
+        ]
+        mn_headers = []
+        for _, label in mnemonic_types:
+            mn_headers += [f"{label}·公式", f"{label}·口诀", f"{label}·话术"]
+        headers = base_headers + mn_headers
+
+        # 表头样式
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_fill = PatternFill(start_color="3B82F6", end_color="3B82F6", fill_type="solid")
+        wrap_align = Alignment(wrap_text=True, vertical="top")
+
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = wrap_align
+
+        row = 2
+        for word_data in data:
+            word = word_data["word"]
+            ipa = word_data.get("ipa", "")
+            syllables = word_data.get("syllables", "")
+            meanings = word_data.get("meanings", [])
+
+            if not meanings:
+                ws.cell(row=row, column=1, value=word)
+                ws.cell(row=row, column=2, value=ipa)
+                ws.cell(row=row, column=3, value=syllables)
+                row += 1
+                continue
+
+            for m in meanings:
+                ws.cell(row=row, column=1, value=word)
+                ws.cell(row=row, column=2, value=ipa)
+                ws.cell(row=row, column=3, value=syllables)
+                ws.cell(row=row, column=4, value=m.get("pos", ""))
+                ws.cell(row=row, column=5, value=m.get("def", ""))
+                sources = m.get("sources", [])
+                ws.cell(row=row, column=6, value="; ".join(sources) if sources else "")
+                ws.cell(row=row, column=7, value=m.get("chunk") or "")
+                ws.cell(row=row, column=8, value=m.get("chunk_cn") or "")
+                ws.cell(row=row, column=9, value=m.get("sentence") or "")
+                ws.cell(row=row, column=10, value=m.get("sentence_cn") or "")
+
+                # 助记：按 type 建索引
+                mn_by_type: dict[str, dict[str, str]] = {}
+                for mn in m.get("mnemonics", []):
+                    mn_by_type[mn["type"]] = _parse_mnemonic_fields(mn.get("content", ""))
+
+                # 4 种类型各写 3 列，缺失填 false
+                col_offset = len(base_headers) + 1
+                for mn_key, _ in mnemonic_types:
+                    fields = mn_by_type.get(mn_key)
+                    if fields:
+                        ws.cell(row=row, column=col_offset, value=fields["formula"])
+                        ws.cell(row=row, column=col_offset + 1, value=fields["chant"])
+                        ws.cell(row=row, column=col_offset + 2, value=fields["script"])
+                    else:
+                        ws.cell(row=row, column=col_offset, value="false")
+                        ws.cell(row=row, column=col_offset + 1, value="false")
+                        ws.cell(row=row, column=col_offset + 2, value="false")
+                    col_offset += 3
+
+                for c in range(1, len(headers) + 1):
+                    ws.cell(row=row, column=c).alignment = wrap_align
+
+                row += 1
+
+        # 列宽
+        base_widths = [12, 18, 14, 8, 24, 18, 24, 24, 36, 36]
+        mn_widths = [22, 22, 30] * 4
+        for i, w in enumerate(base_widths + mn_widths, 1):
+            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+
+        ws.freeze_panes = "A2"
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
 
     def get_export_readiness(self, session: Session) -> dict:
         """检查导出就绪状态."""

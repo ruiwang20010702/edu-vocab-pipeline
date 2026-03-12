@@ -19,13 +19,27 @@ const DIMENSION_LABELS: Record<string, string> = {
   meaning: '语义 Meaning',
   chunk: '语境 Context',
   sentence: '语境 Context',
-  mnemonic_root_affix: '助记 Mnemonic',
-  mnemonic_word_in_word: '助记 Mnemonic',
-  mnemonic_sound_meaning: '助记 Mnemonic',
-  mnemonic_exam_app: '助记 Mnemonic',
+  mnemonic_root_affix: '助记·词根词缀',
+  mnemonic_word_in_word: '助记·词中词',
+  mnemonic_sound_meaning: '助记·谐音联想',
+  mnemonic_exam_app: '助记·考试应用',
 }
 
-const ALL_DIMENSIONS = ['语音 Sound', '语义 Meaning', '音节 Syllables', '语境 Context', '助记 Mnemonic']
+const ALL_DIMENSIONS = [
+  '语音 Sound', '释义 Definition', '音节 Syllables',
+  '语块 Chunk', '例句 Sentence',
+  '助记·词根词缀', '助记·词中词', '助记·谐音联想', '助记·考试应用',
+]
+
+const MNEMONIC_RULES = [
+  { field: 'N1', label: '助记类型校验' },
+  { field: 'N2', label: '助记结构完整性校验' },
+  { field: 'N3', label: '公式符号校验' },
+  { field: 'N4', label: '口诀字数校验' },
+  { field: 'N5', label: '话术字数校验' },
+  { field: 'N5_AI', label: '话术完整性（AI）' },
+  { field: 'N6', label: '逻辑合理性（AI）' },
+]
 
 // 每个维度的完整规则列表 + 人类可读标签（field 与后端 rule_id 一一对应）
 const DIMENSION_RULES: Record<string, { field: string; label: string }[]> = {
@@ -33,7 +47,7 @@ const DIMENSION_RULES: Record<string, { field: string; label: string }[]> = {
     { field: 'P1', label: 'IPA 格式校验' },
     { field: 'P2', label: '音标-音节对齐校验' },
   ],
-  '语义 Meaning': [
+  '释义 Definition': [
     { field: 'M3', label: '词性标签格式校验' },
     { field: 'M4', label: '词性换行分隔校验' },
     { field: 'M5', label: '义项分号分隔校验' },
@@ -45,13 +59,22 @@ const DIMENSION_RULES: Record<string, { field: string; label: string }[]> = {
     { field: 'S2', label: '音节分隔符校验' },
     { field: 'S3', label: '原子单位完整性校验' },
     { field: 'S4', label: '单音节不切分校验' },
+    { field: 'SA1', label: '单音节准确性（AI）' },
+    { field: 'SA2', label: '元音锚点完整性（AI）' },
+    { field: 'SA3', label: '原子单位保护（AI）' },
+    { field: 'SA4', label: '静音字母处理（AI）' },
+    { field: 'SA5', label: '辅音切分位置（AI）' },
+    { field: 'SA6', label: '前缀完整性（AI）' },
+    { field: 'SA7', label: '分隔符格式（AI）' },
   ],
-  '语境 Context': [
+  '语块 Chunk': [
     { field: 'C1', label: '语块含目标词校验' },
     { field: 'C2', label: '语块长度校验' },
     { field: 'C3', label: '搭配合理性（AI）' },
     { field: 'C4', label: '语块禁止括号校验' },
     { field: 'C5', label: '中文独立成行校验' },
+  ],
+  '例句 Sentence': [
     { field: 'E6', label: '例句含目标词校验' },
     { field: 'E7', label: '例句长度校验' },
     { field: 'E8', label: '中文翻译非空校验' },
@@ -65,23 +88,30 @@ const DIMENSION_RULES: Record<string, { field: string; label: string }[]> = {
     { field: 'E10', label: '语言地道性（AI）' },
     { field: 'E11', label: '内容安全性（AI）' },
   ],
-  '助记 Mnemonic': [
-    { field: 'N1', label: '助记类型校验' },
-    { field: 'N2', label: '助记结构完整性校验' },
-    { field: 'N3', label: '公式符号校验' },
-    { field: 'N4', label: '口诀字数校验' },
-    { field: 'N5', label: '话术字数校验' },
-    { field: 'N5_AI', label: '话术完整性（AI）' },
-    { field: 'N6', label: '逻辑合理性（AI）' },
-  ],
+  '助记·词根词缀': MNEMONIC_RULES,
+  '助记·词中词': MNEMONIC_RULES,
+  '助记·谐音联想': MNEMONIC_RULES,
+  '助记·考试应用': MNEMONIC_RULES,
+}
+
+// 助记维度 → 后端 dimension 值（用于构建复合聚合键）
+const DIMENSION_BACKEND_KEY: Record<string, string | null> = {
+  '助记·词根词缀': 'mnemonic_root_affix',
+  '助记·词中词': 'mnemonic_word_in_word',
+  '助记·谐音联想': 'mnemonic_sound_meaning',
+  '助记·考试应用': 'mnemonic_exam_app',
 }
 
 const DIMENSION_COLORS: Record<string, { bar: string; bg: string; text: string }> = {
   '语音 Sound': { bar: 'bg-blue-400', bg: 'bg-blue-50', text: 'text-blue-600' },
-  '语义 Meaning': { bar: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-600' },
+  '释义 Definition': { bar: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-600' },
   '音节 Syllables': { bar: 'bg-purple-500', bg: 'bg-purple-50', text: 'text-purple-600' },
-  '语境 Context': { bar: 'bg-blue-600', bg: 'bg-blue-50', text: 'text-blue-700' },
-  '助记 Mnemonic': { bar: 'bg-yellow-500', bg: 'bg-yellow-50', text: 'text-yellow-700' },
+  '语块 Chunk': { bar: 'bg-blue-600', bg: 'bg-blue-50', text: 'text-blue-700' },
+  '例句 Sentence': { bar: 'bg-indigo-500', bg: 'bg-indigo-50', text: 'text-indigo-700' },
+  '助记·词根词缀': { bar: 'bg-yellow-500', bg: 'bg-yellow-50', text: 'text-yellow-700' },
+  '助记·词中词': { bar: 'bg-yellow-400', bg: 'bg-yellow-50', text: 'text-yellow-600' },
+  '助记·谐音联想': { bar: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
+  '助记·考试应用': { bar: 'bg-orange-400', bg: 'bg-orange-50', text: 'text-orange-600' },
 }
 
 export default function DashboardPage({ onViewBatch }: Props) {
@@ -125,19 +155,23 @@ export default function DashboardPage({ onViewBatch }: Props) {
     { label: '整体合格率', value: `${(stats?.pass_rate ?? 0).toFixed(1)}%`, icon: TrendingUp, iconBg: 'bg-yellow-50 text-yellow-600', valueColor: 'text-yellow-700' },
   ]
 
-  // 聚合 Bad Case 分类：按 field(rule_id) 索引
-  const issueByField: Record<string, number> = {}
+  // 聚合 Bad Case 分类：助记类按 dimension:rule_id 复合键，其他按 rule_id
+  const issueByKey: Record<string, number> = {}
   for (const issue of stats?.issues ?? []) {
-    issueByField[issue.field] = (issueByField[issue.field] ?? 0) + issue.count
+    const key = issue.dimension?.startsWith('mnemonic_')
+      ? `${issue.dimension}:${issue.field}`
+      : issue.field
+    issueByKey[key] = (issueByKey[key] ?? 0) + issue.count
   }
 
   const badCases = ALL_DIMENSIONS.map(dim => {
     const rules = DIMENSION_RULES[dim] ?? []
     const colors = DIMENSION_COLORS[dim] ?? DIMENSION_COLORS['语音 Sound']
+    const backendKey = DIMENSION_BACKEND_KEY[dim] ?? null
     const fields = rules.map(r => ({
       field: r.field,
       label: r.label,
-      count: issueByField[r.field] ?? 0,
+      count: issueByKey[backendKey ? `${backendKey}:${r.field}` : r.field] ?? 0,
     }))
     return {
       label: dim,
@@ -317,7 +351,6 @@ export default function DashboardPage({ onViewBatch }: Props) {
                           <p className={`text-xs leading-snug ${field.count > 0 ? 'text-slate-800 font-medium' : 'text-slate-400'}`}>
                             {field.label}
                           </p>
-                          <p className="text-[10px] text-slate-400 mt-0.5 font-mono">{field.field}</p>
                         </div>
                       </div>
                       <div className={`shrink-0 ml-3 px-2.5 py-1 rounded-lg ${

@@ -7,7 +7,7 @@ export function QcResultBanner({ passed, message, issues }: { passed: boolean; m
       {!passed && issues && issues.length > 0 && (
         <ul className="space-y-0.5 text-left">
           {issues.map((iss, i) => (
-            <li key={i}>[{iss.rule_id}] {iss.message}</li>
+            <li key={i}>{iss.message}</li>
           ))}
         </ul>
       )}

@@ -84,7 +84,9 @@ class TestStatsEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_words"] == 1
-        assert data["approved_count"] >= 1
+        # happy 有 pending 项 → 非全终态 → approved=0, pending=1
+        assert data["approved_count"] == 0
+        assert data["pending_count"] == 1
         assert "pass_rate" in data
 
     def test_stats_requires_auth(self):

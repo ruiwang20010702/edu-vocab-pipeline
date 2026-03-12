@@ -84,10 +84,10 @@ export default function App() {
       >
         <div className="p-6 flex items-center gap-3">
           <div className="w-12 h-12 bg-white/30 backdrop-blur-md rounded-2xl flex items-center justify-center text-white font-extrabold text-xl shadow-lg cursor-pointer hover:scale-110 transition-transform hover:bg-white/40 border border-white/30">
-            V
+            S9
           </div>
           {isSidebarOpen && (
-            <span className="font-bold text-lg tracking-tight text-white drop-shadow-sm">教育词汇系统</span>
+            <span className="font-bold text-lg tracking-tight text-white drop-shadow-sm">词汇生产质检平台</span>
           )}
         </div>
 

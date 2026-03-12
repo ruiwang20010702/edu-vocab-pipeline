@@ -1,6 +1,6 @@
 """仪表板统计服务."""
 
-from sqlalchemy import func
+from sqlalchemy import func, and_, not_
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models.content_layer import ContentItem
@@ -8,31 +8,43 @@ from vocab_qc.core.models.data_layer import Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.quality_layer import QcRuleResult
 
+# 终态集合：approved 或 rejected
+_TERMINAL_STATUSES = [QcStatus.APPROVED.value, QcStatus.REJECTED.value]
+
 
 def get_dashboard_stats(session: Session) -> dict:
-    """聚合统计：总词数、已通过、待审核、未通过、通过率、Bad Case 分类。"""
+    """聚合统计：总词数、已入库、待处理、未通过、通过率、Bad Case 分类。
+
+    定义对齐总表：
+    - 已入库(approved_count) = 所有 ContentItem 均为终态的词数
+    - 待处理(pending_count) = total_words - approved_count（存在非终态项的词数）
+    - 未通过(rejected_count) = 存在 layer1/2_failed 项的词数（信息性统计）
+    """
     total_words = session.query(func.count()).select_from(Word).scalar() or 0
 
-    # approved + rejected（不适用）均视为已完成
+    # 已入库 = 有 ContentItem 且全部为终态的词数
+    # 子查询：存在非终态 ContentItem 的 word_id
+    has_non_terminal = (
+        session.query(ContentItem.word_id)
+        .filter(not_(ContentItem.qc_status.in_(_TERMINAL_STATUSES)))
+        .distinct()
+        .subquery()
+    )
+    # 有 ContentItem 的词
+    has_content = (
+        session.query(ContentItem.word_id)
+        .distinct()
+        .subquery()
+    )
+    # 已入库 = 有内容 且 不在非终态集合中
     approved_count = (
-        session.query(func.count(func.distinct(ContentItem.word_id)))
-        .filter(ContentItem.qc_status.in_([QcStatus.APPROVED.value, QcStatus.REJECTED.value]))
+        session.query(func.count(has_content.c.word_id))
+        .filter(has_content.c.word_id.notin_(session.query(has_non_terminal.c.word_id)))
         .scalar()
         or 0
     )
 
-    pending_count = (
-        session.query(func.count(func.distinct(ContentItem.word_id)))
-        .filter(
-            ContentItem.qc_status.in_([
-                QcStatus.PENDING.value,
-                QcStatus.LAYER1_PASSED.value,
-                QcStatus.LAYER2_PASSED.value,
-            ])
-        )
-        .scalar()
-        or 0
-    )
+    pending_count = total_words - approved_count
 
     rejected_count = (
         session.query(func.count(func.distinct(ContentItem.word_id)))
