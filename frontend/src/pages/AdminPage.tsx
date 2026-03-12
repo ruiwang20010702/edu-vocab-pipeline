@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'motion/react'
 import { UserPlus, Loader2, Shield, Eye, ShieldCheck, Pencil, Check, X, Ban, UserCheck } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useToast } from '../components/Toast'
 
 interface User {
   id: number
@@ -28,13 +29,15 @@ export default function AdminPage() {
   const [error, setError] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editData, setEditData] = useState({ name: '', role: '', is_active: true })
+  const { showToast } = useToast()
 
   const loadUsers = async () => {
     setLoading(true)
     try {
       const data = await api.get<User[]>('/admin/users')
       setUsers(data)
-    } catch {
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '加载用户列表失败')
       setUsers([])
     } finally {
       setLoading(false)
@@ -70,12 +73,21 @@ export default function AdminPage() {
   const cancelEdit = () => setEditingId(null)
 
   const handleSaveEdit = async (userId: number) => {
+    if (!editData.name.trim()) {
+      showToast('error', '姓名不能为空')
+      return
+    }
+    if (!['admin', 'reviewer', 'viewer'].includes(editData.role)) {
+      showToast('error', '无效的角色')
+      return
+    }
     try {
       const updated = await api.patch<User>(`/admin/users/${userId}`, editData)
       setUsers(prev => prev.map(u => u.id === userId ? updated : u))
       setEditingId(null)
+      showToast('success', '用户信息已更新')
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : '更新失败')
+      showToast('error', e instanceof ApiError ? e.detail : '更新失败')
     }
   }
 
@@ -83,8 +95,9 @@ export default function AdminPage() {
     try {
       const updated = await api.patch<User>(`/admin/users/${u.id}`, { is_active: !u.is_active })
       setUsers(prev => prev.map(x => x.id === u.id ? updated : x))
+      showToast('success', u.is_active ? '已停用' : '已启用')
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : '操作失败')
+      showToast('error', e instanceof ApiError ? e.detail : '操作失败')
     }
   }
 

@@ -44,9 +44,15 @@ def update_user(
     user_id: int,
     request: UpdateUserRequest,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin")),
 ):
     """编辑用户（仅管理员）。"""
+    # S-H1: 禁止 admin 修改自身角色或停用自身，防止系统锁死
+    if user_id == current_user.id:
+        if request.role is not None and request.role != current_user.role:
+            raise HTTPException(status_code=403, detail="不能修改自己的角色")
+        if request.is_active is not None and not request.is_active:
+            raise HTTPException(status_code=403, detail="不能停用自己的账号")
     try:
         user = user_service.update_user(
             db,

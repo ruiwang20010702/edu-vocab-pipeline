@@ -4,7 +4,8 @@ import {
   Search, RefreshCw, CheckCircle2, Loader2, X, PackagePlus,
   ArrowLeft, Filter, ChevronDown,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
+import { useToast } from '../components/Toast'
 import type { ReviewItem, ReviewBatch, BatchDetail } from '../types'
 import type { Tab } from './review/types'
 import { DIMENSION_LABELS, FILTER_GROUPS } from './review/constants'
@@ -45,6 +46,7 @@ export default function ReviewPage({ onBack }: Props) {
 
   // 已通过动画
   const [resolvedIds, setResolvedIds] = useState<Set<number>>(new Set())
+  const { showToast } = useToast()
 
   // setTimeout 清理
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
@@ -66,7 +68,7 @@ export default function ReviewPage({ onBack }: Props) {
       const data = await api.get<ReviewBatch | null>('/batches/current')
       setBatch(data)
     } catch (e) {
-      console.error('加载批次信息失败', e)
+      showToast('error', '加载批次信息失败')
       setBatch(null)
     } finally {
       setBatchLoading(false)
@@ -90,7 +92,7 @@ export default function ReviewPage({ onBack }: Props) {
       )
       setItems(allReviews.filter(r => batchReviewIds.has(r.id)))
     } catch (e) {
-      console.error('加载审核列表失败', e)
+      showToast('error', '加载审核列表失败')
       setItems([])
     } finally {
       setLoading(false)
@@ -110,7 +112,7 @@ export default function ReviewPage({ onBack }: Props) {
         setBatch(null)
       }
     } catch (e) {
-      console.error('领取批次失败', e)
+      showToast('error', e instanceof ApiError ? e.detail : '领取批次失败')
     } finally {
       setAssignLoading(false)
     }
@@ -124,7 +126,7 @@ export default function ReviewPage({ onBack }: Props) {
       setBatch(null)
       setItems([])
     } catch (e) {
-      console.error('释放批次失败', e)
+      showToast('error', e instanceof ApiError ? e.detail : '释放批次失败')
     } finally {
       setReleaseLoading(false)
     }
@@ -143,12 +145,14 @@ export default function ReviewPage({ onBack }: Props) {
         setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
       }, 1200)
     } catch (e) {
-      console.error('审核通过失败', e)
+      showToast('error', e instanceof ApiError ? e.detail : '审核通过失败')
       setActionLoading(null)
     }
   }
 
   const handleRegenerate = async (id: number) => {
+    // F-H2: 防止重复提交 — actionLoading 非 null 时拒绝新请求
+    if (actionLoading !== null) return
     setActionLoading(id)
     setRegenResult(null)
     try {
@@ -171,7 +175,7 @@ export default function ReviewPage({ onBack }: Props) {
         await loadItems()
         safeTimeout(() => setRegenResult(null), 3000)
       }
-    } catch (e) { console.error('重新生成失败', e) }
+    } catch (e) { showToast('error', e instanceof ApiError ? e.detail : '重新生成失败') }
     finally { setActionLoading(null) }
   }
 
@@ -426,7 +430,7 @@ export default function ReviewPage({ onBack }: Props) {
                     await loadBatch()
                   }
                 } catch (e) {
-                  console.error('领取批次失败', e)
+                  showToast('error', e instanceof ApiError ? e.detail : '领取批次失败')
                 } finally {
                   setAssignLoading(false)
                 }

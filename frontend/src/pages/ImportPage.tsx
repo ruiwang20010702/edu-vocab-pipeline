@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { FileUp, X, Loader2, ArrowRight, History } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useToast } from '../components/Toast'
 import BatchHistoryModal from '../components/BatchHistoryModal'
 
 interface Props {
@@ -27,6 +28,7 @@ export default function ImportPage({ onStartProduction }: Props) {
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([])
   const [previewTotal, setPreviewTotal] = useState(0)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const { showToast } = useToast()
 
   const loadPreview = async (f: File) => {
     setPreviewLoading(true)
@@ -36,7 +38,8 @@ export default function ImportPage({ onStartProduction }: Props) {
       const res = await api.upload<{ rows: PreviewRow[]; total_count: number }>('/import/preview', fd)
       setPreviewRows(res.rows)
       setPreviewTotal(res.total_count)
-    } catch {
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '文件预览失败')
       setPreviewRows([])
       setPreviewTotal(0)
     } finally {

@@ -2,7 +2,7 @@
 
 将人教版中小学英语教材词表整合为标准化词库，为每个词生成音标、释义、语块、例句、助记五个维度的学习内容。最终用户是中小学生，系统的核心设计目标：**学生拿到的每一条数据都必须是对的**。
 
-> 当前状态：前后端均已实现，527 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署配置就绪。
+> 当前状态：前后端均已实现，545 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署配置就绪。已完成两轮安全与性能审计。
 
 ---
 
@@ -132,7 +132,7 @@ VocabularyDataCleaning1.0/
 │   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt
 │   │   │   └── schemas/         ← Pydantic 响应模型
 │   │   └── cli/                 ← Typer CLI 命令
-│   └── alembic/                 ← 数据库迁移脚本（8 个版本）
+│   └── alembic/                 ← 数据库迁移脚本（9 个版本）
 │
 ├── frontend/                    ← React 19 + TypeScript + Tailwind CSS v4
 │   ├── src/
@@ -143,7 +143,7 @@ VocabularyDataCleaning1.0/
 │   │   └── pages/               ← 6 个页面（Dashboard/总表/导入/审核/词包/Prompt管理）
 │   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
 │
-├── tests/                       ← 527 个测试
+├── tests/                       ← 545 个测试
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
 │   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
 │   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
@@ -265,9 +265,26 @@ PYTHONPATH=backend vocab review edit <id> "new content" # 人工修改
 
 ---
 
+## 11. 安全加固
+
+已完成两轮安全与性能审计，主要措施：
+
+- JWT 4h 过期 + 邮箱域名白名单 + slowapi 60/min 全局限速
+- Admin 禁止降级自身角色/停用自身（防系统锁死）
+- Prompt 管理 API 限 admin-only
+- 文件上传 magic bytes 校验（xlsx/xls 内容验证）
+- Docker 网络隔离 + 资源限制 + 依赖层缓存
+- CSP + SecurityHeaders + 生产关闭 /docs
+- 前端全局 Toast 错误提示（替代静默 catch）
+
+详见 `docs/pending-fixes-v2.md` 了解剩余优化项。
+
+---
+
 ## 相关文档
 
 - `docs/design/PRD.md` — 产品需求文档
 - `docs/design/单词2.0--内容生产与质检工作流程.md` — 内容生产与质检 SOP
 - `docs/design/output-schema.md` — 输出数据 Schema
 - `docs/prompts/` — AI Prompt 模板（生产 + 质检）
+- `docs/pending-fixes-v2.md` — 第二轮审计未修复项清单

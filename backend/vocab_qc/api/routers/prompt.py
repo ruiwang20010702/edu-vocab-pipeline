@@ -16,9 +16,9 @@ def list_prompts(
     category: str | None = Query(default=None),
     is_active: bool | None = Query(default=None),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(require_role("admin")),
 ):
-    """获取 Prompt 列表."""
+    """获取 Prompt 列表（仅管理员）."""
     return prompt_service.list_prompts(db, category=category, is_active=is_active)
 
 
@@ -26,9 +26,9 @@ def list_prompts(
 def get_prompt(
     prompt_id: int,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(require_role("admin")),
 ):
-    """获取单个 Prompt."""
+    """获取单个 Prompt（仅管理员）."""
     prompt = prompt_service.get_prompt(db, prompt_id)
     if prompt is None:
         raise HTTPException(status_code=404, detail="Prompt 不存在")

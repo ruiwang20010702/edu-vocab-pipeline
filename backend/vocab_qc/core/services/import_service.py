@@ -175,8 +175,32 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
     return list(entries.values())
 
 
+# S-H2: Magic bytes 校验映射
+_MAGIC_BYTES = {
+    ".xlsx": [b"PK\x03\x04"],  # ZIP (OOXML)
+    ".xls": [b"\xd0\xcf\x11\xe0"],  # OLE2
+    ".json": [],  # JSON 靠解析校验
+    ".csv": [],   # CSV 靠解析校验
+}
+
+
+def _validate_magic_bytes(file_content: bytes, filename: str) -> None:
+    """校验文件 magic bytes 与扩展名一致，防止恶意文件伪装。"""
+    lower = filename.lower()
+    for ext, signatures in _MAGIC_BYTES.items():
+        if lower.endswith(ext):
+            if not signatures:
+                return  # JSON/CSV 无固定 magic bytes
+            for sig in signatures:
+                if file_content[:len(sig)] == sig:
+                    return
+            raise ValueError(f"文件内容与 {ext} 格式不匹配，请确认文件完整性")
+    raise ValueError(f"不支持的文件格式: {filename}")
+
+
 def parse_upload(file_content: bytes, filename: str) -> list[dict[str, Any]]:
     """根据文件扩展名解析上传内容。"""
+    _validate_magic_bytes(file_content, filename)
     lower = filename.lower()
     if lower.endswith(".json"):
         data = json.loads(file_content.decode("utf-8"))

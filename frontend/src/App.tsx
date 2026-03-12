@@ -14,6 +14,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { getAuth, clearAuth, isAuthenticated } from './lib/auth'
 
+import { ToastProvider } from './components/Toast'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import ImportPage from './pages/ImportPage'
@@ -75,6 +76,7 @@ export default function App() {
   }
 
   return (
+    <ToastProvider>
     <div className="flex h-screen w-full p-5 gap-5 overflow-hidden font-sans text-slate-900 relative z-10">
       {/* 侧边栏 */}
       <aside
@@ -152,5 +154,6 @@ export default function App() {
         </div>
       </main>
     </div>
+    </ToastProvider>
   )
 }

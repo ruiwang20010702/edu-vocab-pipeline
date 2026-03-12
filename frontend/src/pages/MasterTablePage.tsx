@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   Search, Download, ChevronLeft, ChevronRight, Loader2, MoreHorizontal,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
+import { useToast } from '../components/Toast'
 import type { WordDetail, PaginatedResponse, StatusCounts } from '../types'
 import WordDetailModal from './mastertable/WordDetailModal'
 import { ALL_MNEMONIC_DIMS, MNEMONIC_TYPE_LABELS } from './review/constants'
@@ -23,7 +24,15 @@ export default function MasterTablePage() {
   const [exportLoading, setExportLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'approved' | 'in_progress' | null>('approved')
   const [statusCounts, setStatusCounts] = useState<StatusCounts>({ approved: 0, in_progress: 0, total: 0 })
+  const { showToast } = useToast()
   const limit = 50
+
+  // F-M1: 翻页防抖，避免快速连点触发多次请求
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debouncedLoadWords = useCallback((fn: () => void) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(fn, 300)
+  }, [])
 
   const loadWords = async () => {
     setLoading(true)
@@ -35,7 +44,8 @@ export default function MasterTablePage() {
       setWords(res.items)
       setTotal(res.total)
       if (res.status_counts) setStatusCounts(res.status_counts)
-    } catch {
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '加载数据失败')
       setWords([])
       setTotal(0)
     } finally {
@@ -43,7 +53,7 @@ export default function MasterTablePage() {
     }
   }
 
-  useEffect(() => { loadWords() }, [page, statusFilter])
+  useEffect(() => { debouncedLoadWords(loadWords) }, [page, statusFilter])
 
   const handleSearch = () => { setPage(1); loadWords() }
 
@@ -60,7 +70,8 @@ export default function MasterTablePage() {
     try {
       const data = await api.get<WordDetail>(`/words/${wordId}`)
       setDetailWord(data)
-    } catch {
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '加载详情失败')
       setDetailWord(null)
     } finally {
       setDetailLoading(false)

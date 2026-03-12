@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-前后端均已实现，527 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。
+前后端均已实现，545 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。已完成两轮安全与性能审计。
 
 ```
 VocabularyDataCleaning1.0/
@@ -26,7 +26,7 @@ VocabularyDataCleaning1.0/
 │   │   │   ├── models/          ← ORM 模型（17 张表）
 │   │   │   ├── qc/              ← 质检引擎（Layer 1 算法 + Layer 2 AI）
 │   │   │   ├── services/        ← 业务服务层
-│   │   │   └── generators/      ← 内容生成器（chunk/sentence/mnemonic）
+│   │   │   └── generators/      ← 内容生成器（chunk/sentence/syllable/mnemonic）
 │   │   ├── api/
 │   │   │   ├── main.py          ← FastAPI 入口（CORS + 10 个 router）
 │   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt
@@ -43,7 +43,7 @@ VocabularyDataCleaning1.0/
 │   │   └── pages/               ← 6 个页面
 │   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
 │
-├── tests/                       ← 527 个测试
+├── tests/                       ← 545 个测试
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
 │   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
 │   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
@@ -75,7 +75,7 @@ PYTHONPATH=backend vocab review list
 ## 关键业务规则
 
 1. **释义合并**：释义文本完全一致 → 合并来源；释义文本不同 → 保留为独立义项
-2. **内容按义项挂载**：语块和例句按义项生成（防止多义词张冠李戴），助记按单词生成（面向拼写/发音，与义项无关）
+2. **内容按义项挂载**：语块、例句、助记均按义项生成（防止多义词张冠李戴），音节按单词生成
 3. **质量门禁**：未审核通过的内容不会出现在最终产出中
 4. **人工审核拥有重试权**：人工审核环节有 3 次重新生成未通过部分的机会，3 次后需人工手动修改
 
@@ -86,3 +86,12 @@ PYTHONPATH=backend vocab review list
 - **单一职责**：每个维度独立生成、独立校验
 - **质量门禁**：fail-safe，未审核不放行
 - **审计可追溯**：每次操作可追溯
+
+## 安全加固（两轮审计）
+
+- JWT 4h 过期 + 邮箱域名白名单 + slowapi 60/min 全局限速
+- Admin 禁止降级自身角色/停用自身 + Prompt API 限 admin-only
+- 文件上传 magic bytes 校验 + HTML 过滤 + SSRF 防护
+- Docker 网络隔离 + 安全头（CSP/HSTS/X-Frame-Options）
+- 前端全局 Toast 组件（替代静默 catch）+ regenerate 防重复提交
+- 剩余优化项见 `docs/pending-fixes-v2.md`
