@@ -37,6 +37,9 @@ export default function ReviewPage({ onBack }: Props) {
   // 释放批次
   const [releaseLoading, setReleaseLoading] = useState(false)
 
+  // 提示
+  const [noBatchMsg, setNoBatchMsg] = useState('')
+
   // 一键AI修复
   const [batchFixing, setBatchFixing] = useState(false)
 
@@ -101,7 +104,11 @@ export default function ReviewPage({ onBack }: Props) {
     setAssignLoading(true)
     try {
       const data = await api.post<ReviewBatch | null>('/batches/assign')
-      setBatch(data)
+      if (data) {
+        await loadBatch()
+      } else {
+        setBatch(null)
+      }
     } catch (e) {
       console.error('领取批次失败', e)
     } finally {
@@ -115,6 +122,7 @@ export default function ReviewPage({ onBack }: Props) {
     try {
       await api.post(`/batches/${batch.id}/release`)
       setBatch(null)
+      setItems([])
     } catch (e) {
       console.error('释放批次失败', e)
     } finally {
@@ -129,6 +137,7 @@ export default function ReviewPage({ onBack }: Props) {
       // 先标记为 resolved 播放动画，延迟后移除
       setResolvedIds(prev => new Set(prev).add(id))
       setActionLoading(null)
+      loadBatch()
       safeTimeout(() => {
         setItems(prev => prev.filter(i => i.id !== id))
         setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
@@ -151,6 +160,7 @@ export default function ReviewPage({ onBack }: Props) {
       if (res.qc_passed) {
         setRegenResult({ id, passed: true, message: res.message })
         setResolvedIds(prev => new Set(prev).add(id))
+        loadBatch()
         safeTimeout(() => {
           setItems(prev => prev.filter(i => i.id !== id))
           setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
@@ -378,6 +388,9 @@ export default function ReviewPage({ onBack }: Props) {
             {assignLoading ? <Loader2 size={14} className="animate-spin inline mr-1.5" /> : <PackagePlus size={14} className="inline mr-1.5" />}
             领取批次
           </button>
+          {noBatchMsg && (
+            <p className="text-sm text-yellow-200 mt-2">{noBatchMsg}</p>
+          )}
         </div>
       ) : wordGroups.length === 0 ? (
         <div className="text-center py-20 space-y-4">
@@ -390,10 +403,43 @@ export default function ReviewPage({ onBack }: Props) {
           <p className="text-white/60">
             {filterDim ? '尝试切换其他错误类型查看' : '所有内容已通过质检。'}
           </p>
-          {filterDim && (
+          {filterDim ? (
             <button onClick={() => setFilterDim('')} className="px-4 py-2 bg-white/20 text-white rounded-xl text-sm font-medium hover:bg-white/30 transition-all">
               清除筛选
             </button>
+          ) : (
+            <button
+              onClick={async () => {
+                setAssignLoading(true)
+                setNoBatchMsg('')
+                try {
+                  // 释放当前批次（可能已自动完成，忽略错误），不提前清空 batch 避免 UI 闪跳
+                  if (batch) {
+                    try { await api.post(`/batches/${batch.id}/release`) } catch {}
+                  }
+                  const data = await api.post<ReviewBatch | null>('/batches/assign')
+                  if (!data) {
+                    setBatch(null)
+                    setNoBatchMsg('暂无新的待审核批次')
+                    safeTimeout(() => setNoBatchMsg(''), 3000)
+                  } else {
+                    await loadBatch()
+                  }
+                } catch (e) {
+                  console.error('领取批次失败', e)
+                } finally {
+                  setAssignLoading(false)
+                }
+              }}
+              disabled={assignLoading}
+              className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all disabled:opacity-50 shadow-lg shadow-blue-600/20"
+            >
+              {assignLoading ? <Loader2 size={14} className="animate-spin inline mr-1.5" /> : <PackagePlus size={14} className="inline mr-1.5" />}
+              领取下一批次
+            </button>
+          )}
+          {noBatchMsg && (
+            <p className="text-sm text-yellow-200 mt-2">{noBatchMsg}</p>
           )}
         </div>
       ) : (

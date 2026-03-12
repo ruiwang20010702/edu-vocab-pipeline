@@ -330,7 +330,7 @@ export default function MasterTablePage() {
       {/* 详情弹窗 */}
       <AnimatePresence>
         {selectedWordId !== null && (
-          <WordDetailModal word={detailWord} loading={detailLoading} onClose={handleCloseDetail} />
+          <WordDetailModal word={detailWord} loading={detailLoading} onClose={handleCloseDetail} onWordUpdate={setDetailWord} />
         )}
       </AnimatePresence>
     </div>

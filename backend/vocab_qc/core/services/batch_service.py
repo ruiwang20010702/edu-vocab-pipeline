@@ -24,7 +24,19 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
         .first()
     )
     if existing is not None:
-        return existing
+        # 检查是否还有待审核项
+        pending_count = (
+            session.query(func.count())
+            .select_from(ReviewItem)
+            .filter_by(batch_id=existing.id, status=ReviewStatus.PENDING.value)
+            .scalar()
+        )
+        if pending_count > 0:
+            return existing
+        # 无待审核项 → 自动完结该批次
+        existing.status = BatchStatus.COMPLETED.value
+        existing.completed_at = datetime.now(UTC)
+        session.flush()
 
     # Step 1: 查 word_ids（不加锁，DISTINCT 不兼容 FOR UPDATE）
     word_ids = [
@@ -86,7 +98,9 @@ def get_batch_words(session: Session, batch_id: int) -> dict:
 
     返回: {"batch": ReviewBatch, "words": {word_id: [ReviewItem, ...]}}
     """
-    batch = session.query(ReviewBatch).filter_by(id=batch_id).one()
+    batch = session.query(ReviewBatch).filter_by(id=batch_id).first()
+    if batch is None:
+        raise ValueError("批次不存在")
     items = session.query(ReviewItem).filter_by(batch_id=batch_id).all()
 
     words: dict[int, list[ReviewItem]] = {}
@@ -114,8 +128,8 @@ def skip_word(session: Session, batch_id: int, word_id: int, user_id: int) -> No
         item.batch_id = None
         item.assigned_to_id = None
 
-    batch.word_count -= 1
     session.flush()
+    update_batch_progress(session, batch_id)
 
 
 def complete_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
@@ -156,6 +170,7 @@ def update_batch_progress(session: Session, batch_id: int) -> None:
     )
     reviewed_count = sum(1 for wid in all_word_ids if wid not in pending_counts)
 
+    batch.word_count = len(all_word_ids)
     batch.reviewed_count = reviewed_count
 
     # 全部审完 → 自动完成
@@ -167,7 +182,7 @@ def update_batch_progress(session: Session, batch_id: int) -> None:
 
 
 def release_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
-    """释放批次：将未处理的审核项释放回池中，批次标记为 ABANDONED。"""
+    """释放批次：将未处理的审核项释放回池中，批次标记为完成。"""
     batch = session.query(ReviewBatch).filter_by(id=batch_id).first()
     if batch is None:
         raise ValueError("批次不存在")
@@ -186,7 +201,7 @@ def release_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
         item.batch_id = None
         item.assigned_to_id = None
 
-    batch.status = BatchStatus.ABANDONED.value
+    batch.status = BatchStatus.COMPLETED.value
     batch.completed_at = datetime.now(UTC)
     session.flush()
     return batch

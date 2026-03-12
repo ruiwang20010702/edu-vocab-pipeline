@@ -52,7 +52,7 @@ class QcRuleResult(Base):
     __table_args__ = (UniqueConstraint("content_item_id", "rule_id", "run_id", name="uq_item_rule_run"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id"), nullable=False, index=True)
+    content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
     word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
     meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id"), nullable=True, index=True)
     dimension: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -119,7 +119,7 @@ class ReviewItem(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id"), nullable=False, index=True)
+    content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
     word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
     meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id"), nullable=True)
     dimension: Mapped[str] = mapped_column(String(50), nullable=False)

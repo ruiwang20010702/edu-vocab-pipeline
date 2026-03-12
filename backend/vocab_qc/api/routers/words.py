@@ -125,9 +125,9 @@ def manual_edit_content_item(
     content_item_id: int,
     body: ManualEditRequest,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role("admin")),
+    _current_user: User = Depends(require_role("admin", "reviewer")),
 ):
-    """手动编辑 ContentItem 内容 + 自动质检（仅管理员，用于 rejected 等非审核队列项）。"""
+    """手动编辑 ContentItem 内容 + 自动质检（管理员或审核员）。"""
     from vocab_qc.core.services.batch_service import update_batch_progress
     from vocab_qc.core.services.review_service import ReviewService
 

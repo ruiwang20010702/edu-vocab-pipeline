@@ -11,6 +11,7 @@ from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Phonetic, Source, Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageMeaning
+from vocab_qc.core.models.quality_layer import RetryCounter, ReviewItem
 
 
 def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: str, *, force: bool = False) -> dict:
@@ -246,25 +247,50 @@ def _clean_package_data(session: Session, pkg: Package) -> None:
             if word_meaning_ids <= exclusive_meaning_ids:
                 exclusive_word_ids.add(wid)
 
-    # 4. 删除独占义项的 pending chunk/sentence/mnemonic
+    # 4. 收集要删除的 ContentItem IDs，先删关联的 ReviewItem 再删 ContentItem
+    ci_ids_to_delete: list[int] = []
     if exclusive_meaning_ids:
-        session.query(ContentItem).filter(
-            ContentItem.meaning_id.in_(exclusive_meaning_ids),
-            ContentItem.dimension.in_(("chunk", "sentence", *MNEMONIC_DIMENSIONS)),
-            ContentItem.qc_status == QcStatus.PENDING.value,
-            ContentItem.content == "",
-        ).delete(synchronize_session=False)
+        ci_ids_to_delete.extend(
+            row[0] for row in session.query(ContentItem.id).filter(
+                ContentItem.meaning_id.in_(exclusive_meaning_ids),
+                ContentItem.dimension.in_(("chunk", "sentence", *MNEMONIC_DIMENSIONS)),
+                ContentItem.qc_status == QcStatus.PENDING.value,
+                ContentItem.content == "",
+            ).all()
+        )
 
-    # 5. 删除独占词的 pending syllable（词级维度）
+    # 5. 收集独占词的 pending syllable IDs
     if exclusive_word_ids:
+        ci_ids_to_delete.extend(
+            row[0] for row in session.query(ContentItem.id).filter(
+                ContentItem.word_id.in_(exclusive_word_ids),
+                ContentItem.dimension == "syllable",
+                ContentItem.qc_status == QcStatus.PENDING.value,
+                ContentItem.content == "",
+            ).all()
+        )
+
+    # 6. 先删关联的 ReviewItem，再删 ContentItem（防止孤儿 ReviewItem）
+    if ci_ids_to_delete:
+        session.query(ReviewItem).filter(
+            ReviewItem.content_item_id.in_(ci_ids_to_delete),
+        ).delete(synchronize_session=False)
         session.query(ContentItem).filter(
-            ContentItem.word_id.in_(exclusive_word_ids),
-            ContentItem.dimension == "syllable",
-            ContentItem.qc_status == QcStatus.PENDING.value,
-            ContentItem.content == "",
+            ContentItem.id.in_(ci_ids_to_delete),
         ).delete(synchronize_session=False)
 
-    # 6. 删除 PackageMeaning 映射
+    # 7. 删除独占义项/词的 RetryCounter
+    if exclusive_meaning_ids:
+        session.query(RetryCounter).filter(
+            RetryCounter.meaning_id.in_(exclusive_meaning_ids),
+        ).delete(synchronize_session=False)
+    if exclusive_word_ids:
+        session.query(RetryCounter).filter(
+            RetryCounter.word_id.in_(exclusive_word_ids),
+            RetryCounter.meaning_id.is_(None),
+        ).delete(synchronize_session=False)
+
+    # 8. 删除 PackageMeaning 映射
     session.query(PackageMeaning).filter_by(package_id=pkg.id).delete(synchronize_session=False)
     session.flush()
 

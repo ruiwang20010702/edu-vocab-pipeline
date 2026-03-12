@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   X, Loader2, CheckCircle2, BookOpen, Lightbulb,
   Layers, Volume2, GraduationCap, Ban,
-  ChevronDown, AlertCircle,
+  ChevronDown, AlertCircle, Save, XCircle,
 } from 'lucide-react'
 import type { WordDetail, ContentItem } from '../../types'
+import { api } from '../../lib/api'
 import { ALL_MNEMONIC_DIMS, MNEMONIC_TYPE_LABELS } from '../review/constants'
 import { parseMnemonic } from '../review/utils'
 
@@ -159,7 +160,77 @@ function MnemonicSection({ mnemonics }: { mnemonics: any[] }) {
   )
 }
 
-export default function WordDetailModal({ word, loading, onClose }: { word: WordDetail | null; loading: boolean; onClose: () => void }) {
+function SyllableInlineEditor({ syllable, onSaved }: { syllable: { id: number; content: string }; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(syllable.content)
+  const [saving, setSaving] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { setValue(syllable.content) }, [syllable.content])
+  useEffect(() => { if (editing) inputRef.current?.focus() }, [editing])
+
+  const cancel = () => { setValue(syllable.content); setEditing(false); setResult(null) }
+
+  const save = async () => {
+    if (!value.trim()) return
+    setSaving(true)
+    setResult(null)
+    try {
+      const res = await api.post<{ qc_passed: boolean; message: string }>(
+        `/words/content-items/${syllable.id}/manual-edit`, { content: value.trim() },
+      )
+      setResult({ ok: res.qc_passed, text: res.message })
+      setTimeout(() => {
+        setEditing(false)
+        setResult(null)
+        onSaved()
+      }, 1500)
+    } catch (err: any) {
+      setResult({ ok: false, text: err?.message ?? '保存失败' })
+    } finally { setSaving(false) }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel() }}
+          disabled={saving}
+          className="text-sm text-slate-700 bg-white border border-blue-300 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-blue-400 w-32"
+        />
+        <button
+          onClick={save}
+          disabled={saving || !value.trim()}
+          className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-lg text-xs font-bold disabled:opacity-50"
+        >
+          {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} 保存并质检
+        </button>
+        <button onClick={cancel} className="text-xs text-slate-400 hover:text-slate-600 font-bold">取消</button>
+        {result && (
+          <span className={`flex items-center gap-1 text-xs font-bold ${result.ok ? 'text-emerald-600' : 'text-rose-500'}`}>
+            {result.ok ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {result.text}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <span
+      onDoubleClick={() => setEditing(true)}
+      className="text-sm text-slate-500 cursor-pointer hover:text-blue-600 hover:bg-blue-50 px-1 rounded transition-colors"
+      title="双击编辑音节"
+    >
+      {syllable.content}
+    </span>
+  )
+}
+
+export default function WordDetailModal({ word, loading, onClose, onWordUpdate }: { word: WordDetail | null; loading: boolean; onClose: () => void; onWordUpdate?: (w: WordDetail) => void }) {
   const [meaningIdx, setMeaningIdx] = useState(0)
   const meanings = word?.meanings ?? []
   const currentMeaning = meanings[meaningIdx] ?? null
@@ -202,9 +273,18 @@ export default function WordDetailModal({ word, loading, onClose }: { word: Word
                       <>
                         <span className="font-mono text-sm text-blue-600">{word.phonetics[0].ipa}</span>
                         <span className="text-xs text-slate-400">·</span>
-                        <span className="text-sm text-slate-500">
-                          {word.syllable?.content ?? word.phonetics[0].syllables}
-                        </span>
+                        {word.syllable?.id ? (
+                          <SyllableInlineEditor
+                            syllable={{ id: word.syllable.id, content: word.syllable.content }}
+                            onSaved={() => {
+                              api.get<WordDetail>(`/words/${word.id}`)
+                                .then(data => onWordUpdate?.(data))
+                                .catch(() => {})
+                            }}
+                          />
+                        ) : (
+                          <span className="text-sm text-slate-500">{word.phonetics[0].syllables}</span>
+                        )}
                       </>
                     )}
                   </div>
