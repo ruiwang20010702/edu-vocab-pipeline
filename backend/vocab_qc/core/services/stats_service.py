@@ -23,25 +23,25 @@ def get_dashboard_stats(session: Session) -> dict:
     total_words = session.query(func.count()).select_from(Word).scalar() or 0
 
     # 已入库 = 有 ContentItem 且全部为终态的词数
-    # 子查询：存在非终态 ContentItem 的 word_id
-    has_non_terminal = (
-        session.query(ContentItem.word_id)
-        .filter(not_(ContentItem.qc_status.in_(_TERMINAL_STATUSES)))
-        .distinct()
-        .subquery()
+    # NOT EXISTS 比 NOT IN 更高效（避免子查询物化 + NULL 安全）
+    from sqlalchemy import exists, alias
+
+    ci1 = alias(ContentItem.__table__, name="ci1")
+    ci2 = alias(ContentItem.__table__, name="ci2")
+
+    # 有内容的 word_id（去重）
+    has_content_q = session.query(ci1.c.word_id.distinct())
+    # 存在非终态项的子查询
+    non_terminal_exists = (
+        session.query(ci2.c.id)
+        .filter(
+            ci2.c.word_id == ci1.c.word_id,
+            ~ci2.c.qc_status.in_(_TERMINAL_STATUSES),
+        )
+        .exists()
     )
-    # 有 ContentItem 的词
-    has_content = (
-        session.query(ContentItem.word_id)
-        .distinct()
-        .subquery()
-    )
-    # 已入库 = 有内容 且 不在非终态集合中
     approved_count = (
-        session.query(func.count(has_content.c.word_id))
-        .filter(has_content.c.word_id.notin_(session.query(has_non_terminal.c.word_id)))
-        .scalar()
-        or 0
+        has_content_q.filter(~non_terminal_exists).count()
     )
 
     pending_count = total_words - approved_count

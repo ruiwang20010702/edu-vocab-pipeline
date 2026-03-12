@@ -43,13 +43,29 @@ def list_words(
 
     total = query.count()
 
-    # status_counts：基于同一 q 筛选条件，统计各状态数量
-    base_query = session.query(Word)
-    if q:
-        escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        base_query = base_query.filter(Word.word.ilike(f"%{escaped_q}%", escape="\\"))
-    total_all = base_query.count()
-    approved_count = base_query.filter(~non_terminal_exists).count()
+    # status_counts：利用已有 query 推导，避免重复 COUNT
+    # base_query = 只带 q 筛选、不带 status 筛选的查询
+    if status is None:
+        # 无 status 筛选 → total 就是 total_all，只需额外查 approved
+        total_all = total
+        approved_count = query.filter(~non_terminal_exists).count()
+    elif status == "approved":
+        # approved 筛选 → total 就是 approved_count
+        approved_count = total
+        base_query = session.query(Word)
+        if q:
+            escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            base_query = base_query.filter(Word.word.ilike(f"%{escaped_q}%", escape="\\"))
+        total_all = base_query.count()
+    else:
+        # in_progress 筛选 → approved = total_all - total
+        base_query = session.query(Word)
+        if q:
+            escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            base_query = base_query.filter(Word.word.ilike(f"%{escaped_q}%", escape="\\"))
+        total_all = base_query.count()
+        approved_count = total_all - total
+
     status_counts = {
         "approved": approved_count,
         "in_progress": total_all - approved_count,

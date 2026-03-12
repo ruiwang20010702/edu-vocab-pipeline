@@ -147,8 +147,12 @@ def manual_edit_content_item(
 
     old_content = item.content
 
+    # 基本 HTML 标签过滤（防止 XSS 存储攻击）
+    import re
+    clean_content = re.sub(r"<[^>]+>", "", body.content)
+
     # 写入用户提供的内容
-    item.content = body.content
+    item.content = clean_content
     if body.content_cn is not None:
         item.content_cn = body.content_cn
     item.qc_status = QcStatus.PENDING.value

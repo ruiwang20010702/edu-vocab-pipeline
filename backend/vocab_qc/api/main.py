@@ -42,11 +42,17 @@ async def lifespan(app: FastAPI):
         logger.warning("关闭 HTTP 客户端失败", exc_info=True)
 
 
-app = FastAPI(title="词汇质检系统 V2.0", version="0.1.0", lifespan=lifespan)
+_docs_kwargs = (
+    {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    if settings.env == "production"
+    else {}
+)
+app = FastAPI(title="词汇质检系统 V2.0", version="0.1.0", lifespan=lifespan, **_docs_kwargs)
 
-# 速率限制
+# 速率限制（全局 + 路由级）
 app.state.limiter = auth.limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -55,7 +61,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         return response
@@ -89,6 +95,5 @@ def health(db: Session = Depends(get_db)):
     try:
         db.execute(text("SELECT 1"))
         return {"status": "ok"}
-    except Exception as e:
-        logger.warning("健康检查 DB 探测失败: %s", e)
-        return {"status": "degraded", "db": "unreachable"}
+    except Exception:
+        return {"status": "degraded"}

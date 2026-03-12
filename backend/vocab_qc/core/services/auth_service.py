@@ -94,7 +94,6 @@ def create_jwt(user: User) -> str:
     payload: dict[str, Any] = {
         "sub": user.email,
         "user_id": user.id,
-        "role": user.role,
         "exp": expire,
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)

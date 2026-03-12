@@ -20,6 +20,7 @@ class ContentItem(Base):
             name="ck_content_items_dimension",
         ),
         Index("ix_content_items_word_dim", "word_id", "dimension"),
+        Index("ix_content_items_word_dim_status", "word_id", "dimension", "qc_status"),
         Index("ix_content_items_word_meaning_dim", "word_id", "meaning_id", "dimension"),
     )
 

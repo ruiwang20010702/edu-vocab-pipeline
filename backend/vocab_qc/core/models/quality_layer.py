@@ -49,7 +49,10 @@ class QcRuleResult(Base):
     """规则级质检结果（核心表）."""
 
     __tablename__ = "qc_rule_results"
-    __table_args__ = (UniqueConstraint("content_item_id", "rule_id", "run_id", name="uq_item_rule_run"),)
+    __table_args__ = (
+        UniqueConstraint("content_item_id", "rule_id", "run_id", name="uq_item_rule_run"),
+        Index("ix_qc_rule_results_item_run_passed", "content_item_id", "run_id", "passed"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)

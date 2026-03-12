@@ -70,7 +70,7 @@ class TestJwt:
         payload = auth_service.decode_jwt(token)
         assert payload["sub"] == "test@example.com"
         assert payload["user_id"] == 1
-        assert payload["role"] == "admin"
+        assert "role" not in payload  # role 从 DB 实时读取，不存 JWT
 
     def test_invalid_token_raises(self):
         from jwt.exceptions import InvalidTokenError

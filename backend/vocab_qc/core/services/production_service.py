@@ -125,36 +125,35 @@ def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
     if not word_ids:
         return 0
 
+    from sqlalchemy import update
+
     # L2 有规则的维度
     _L2_DIMENSIONS = {"sentence", "chunk", "mnemonic_root_affix",
                       "mnemonic_word_in_word", "mnemonic_sound_meaning",
                       "mnemonic_exam_app"}
 
-    count = 0
-
-    # 1. layer2_passed → approved
-    l2_passed = (
-        session.query(ContentItem)
-        .filter(ContentItem.word_id.in_(word_ids))
-        .filter_by(qc_status=QcStatus.LAYER2_PASSED.value)
-        .all()
+    # 1. layer2_passed → approved（批量 UPDATE）
+    r1 = session.execute(
+        update(ContentItem)
+        .where(
+            ContentItem.word_id.in_(word_ids),
+            ContentItem.qc_status == QcStatus.LAYER2_PASSED.value,
+        )
+        .values(qc_status=QcStatus.APPROVED.value)
     )
-    for item in l2_passed:
-        item.qc_status = QcStatus.APPROVED.value
-        count += 1
 
-    # 2. layer1_passed 且无 L2 规则（如 syllable）→ approved
-    l1_passed = (
-        session.query(ContentItem)
-        .filter(ContentItem.word_id.in_(word_ids))
-        .filter_by(qc_status=QcStatus.LAYER1_PASSED.value)
-        .all()
+    # 2. layer1_passed 且无 L2 规则（如 syllable）→ approved（批量 UPDATE）
+    r2 = session.execute(
+        update(ContentItem)
+        .where(
+            ContentItem.word_id.in_(word_ids),
+            ContentItem.qc_status == QcStatus.LAYER1_PASSED.value,
+            ~ContentItem.dimension.in_(_L2_DIMENSIONS),
+        )
+        .values(qc_status=QcStatus.APPROVED.value)
     )
-    for item in l1_passed:
-        if item.dimension not in _L2_DIMENSIONS:
-            item.qc_status = QcStatus.APPROVED.value
-            count += 1
 
+    count = r1.rowcount + r2.rowcount
     if count:
         session.flush()
     return count

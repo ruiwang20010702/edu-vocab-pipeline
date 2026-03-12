@@ -58,6 +58,8 @@ class ExportService:
 
     def export_word(self, session: Session, word_id: int) -> dict[str, Any] | None:
         """导出单个词的完整数据（仅 approved 内容）."""
+        from collections import defaultdict
+
         word = session.query(Word).filter_by(id=word_id).first()
         if not word:
             return None
@@ -65,18 +67,40 @@ class ExportService:
         phonetic = session.query(Phonetic).filter_by(word_id=word.id).first()
         meanings = session.query(Meaning).filter_by(word_id=word.id).all()
 
-        # 音节优先用 syllable ContentItem，fallback 到 Phonetic 表
-        syllable_item = (
+        # 批量加载该词所有 approved ContentItem（1 条查询）
+        approved_items = (
             session.query(ContentItem)
-            .filter_by(word_id=word.id, dimension="syllable", qc_status=QcStatus.APPROVED.value)
-            .first()
+            .filter(
+                ContentItem.word_id == word.id,
+                ContentItem.qc_status == QcStatus.APPROVED.value,
+            )
+            .all()
         )
+
+        # 按 (meaning_id, dimension) 建索引
+        content_index: dict[tuple[int | None, str], ContentItem] = {}
+        mnemonics_by_meaning: dict[int, list[ContentItem]] = defaultdict(list)
+        for ci in approved_items:
+            if ci.dimension in MNEMONIC_DIMENSIONS and ci.meaning_id:
+                mnemonics_by_meaning[ci.meaning_id].append(ci)
+            else:
+                content_index[(ci.meaning_id, ci.dimension)] = ci
+
+        # 批量加载该词所有义项的来源（1 条查询）
+        meaning_ids = [m.id for m in meanings]
+        sources_by_meaning: dict[int, list[Source]] = defaultdict(list)
+        if meaning_ids:
+            for s in session.query(Source).filter(Source.meaning_id.in_(meaning_ids)).all():
+                sources_by_meaning[s.meaning_id].append(s)
+
+        # 音节优先用 syllable ContentItem，fallback 到 Phonetic 表
+        syllable_item = content_index.get((None, "syllable"))
         syllables = (
             syllable_item.content if syllable_item
             else (phonetic.syllables if phonetic else "")
         )
 
-        result = {
+        result: dict[str, Any] = {
             "id": word.id,
             "word": word.word,
             "syllables": syllables,
@@ -85,41 +109,18 @@ class ExportService:
         }
 
         for meaning in meanings:
-            sources = session.query(Source).filter_by(meaning_id=meaning.id).all()
-
-            chunk = (
-                session.query(ContentItem)
-                .filter_by(word_id=word.id, meaning_id=meaning.id, dimension="chunk", qc_status=QcStatus.APPROVED.value)
-                .first()
-            )
-
-            sentence = (
-                session.query(ContentItem)
-                .filter_by(word_id=word.id, meaning_id=meaning.id, dimension="sentence", qc_status=QcStatus.APPROVED.value)
-                .first()
-            )
-
-            # 获取该义项的 approved 助记
-            mnemonics = (
-                session.query(ContentItem)
-                .filter(
-                    ContentItem.word_id == word.id,
-                    ContentItem.meaning_id == meaning.id,
-                    ContentItem.dimension.in_(MNEMONIC_DIMENSIONS),
-                    ContentItem.qc_status == QcStatus.APPROVED.value,
-                )
-                .all()
-            )
+            chunk = content_index.get((meaning.id, "chunk"))
+            sentence = content_index.get((meaning.id, "sentence"))
 
             meaning_data = {
                 "pos": meaning.pos,
                 "def": meaning.definition,
-                "sources": [s.source_name for s in sources],
+                "sources": [s.source_name for s in sources_by_meaning.get(meaning.id, [])],
                 "chunk": chunk.content if chunk else None,
                 "chunk_cn": chunk.content_cn if chunk else None,
                 "sentence": sentence.content if sentence else None,
                 "sentence_cn": sentence.content_cn if sentence else None,
-                "mnemonics": [_format_mnemonic_export(m) for m in mnemonics],
+                "mnemonics": [_format_mnemonic_export(m) for m in mnemonics_by_meaning.get(meaning.id, [])],
             }
             result["meanings"].append(meaning_data)
 

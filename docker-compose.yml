@@ -9,14 +9,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "8000:8000"
     restart: unless-stopped
     command: >
       sh -c "
         alembic upgrade head &&
-        uvicorn vocab_qc.api.main:app --host 0.0.0.0 --port 8000
+        gunicorn -w 4 -k uvicorn.workers.UvicornWorker vocab_qc.api.main:app --bind 0.0.0.0:8000
       "
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2"
 
   frontend:
     build:
@@ -24,9 +29,18 @@ services:
       target: frontend
     ports:
       - "80:80"
+      - "443:443"
     depends_on:
       - backend
     restart: unless-stopped
+    networks:
+      - internal
+      - external
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1"
 
   db:
     image: postgres:16-alpine
@@ -42,6 +56,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1"
 
 volumes:
   pgdata:
+
+networks:
+  internal:
+    internal: true
+  external:
