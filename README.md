@@ -1,8 +1,8 @@
-# VocabularyDataCleaning -- 教育词汇数据生产系统
+# VocabularyDataCleaning — 教育词汇数据生产系统
 
 将人教版中小学英语教材词表整合为标准化词库，为每个词生成音标、释义、语块、例句、助记五个维度的学习内容。最终用户是中小学生，系统的核心设计目标：**学生拿到的每一条数据都必须是对的**。
 
-> 当前状态：质检后端已实现（Layer 1 算法规则 22 条 + Layer 2 AI 语义校验 16 个检查器 + 人工审核流程 + 导出门禁），159 个测试全部通过。下一步：接入真实数据 + 补全 standards.yaml 正反例。
+> 当前状态：前后端均已实现，527 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署配置就绪。
 
 ---
 
@@ -20,7 +20,7 @@
 | 释义 | 按义项整理，保留来源追踪 | 理解词义 |
 | 语块 | 每个义项对应一个高频搭配短语 | 学会搭配用法 |
 | 例句 | 每个义项对应英文例句 + 中文翻译 | 理解语境 |
-| 助记 | 拼写/发音记忆技巧 | 高效记词 |
+| 助记 | 拼写/发音记忆技巧（4 种类型） | 高效记词 |
 
 ### 质量红线
 
@@ -41,21 +41,23 @@
 
 - **语块**（chunk）：义项级——每个义项独立生成一条语块
 - **例句**（sentence）：义项级——每个义项独立生成一条例句 + 翻译
-- **助记**（mnemonic）：词级——面向整个单词的拼写/发音，与义项无关
+- **助记**（mnemonic）：义项级——4 种类型（词根词缀/词中词/音义联想/考试应用），按义项生成
 
-以 `kind` 为例（2 个义项 → 2 条语块 + 2 条例句 + 1 条助记）：
+以 `kind` 为例（2 个义项 → 2 条语块 + 2 条例句 + 8 条助记）：
 
 ```
 kind
 ├── 义项 1：adj. 友好的
 │   ├── chunk: "be kind to sb."
 │   ├── sentence: "The teacher is always kind to every student."
-│   └── sentence_cn: "老师对每位同学总是很友好。"
+│   ├── sentence_cn: "老师对每位同学总是很友好。"
+│   └── mnemonic × 4（词根词缀/词中词/音义联想/考试应用）
 ├── 义项 2：n. 种类
 │   ├── chunk: "a kind of"
 │   ├── sentence: "There are many kinds of animals in the zoo."
-│   └── sentence_cn: "动物园里有很多种动物。"
-└── mnemonic（词级）: "kind 和 king 只差一个字母，国王(king)对人友好(kind)"
+│   ├── sentence_cn: "动物园里有很多种动物。"
+│   └── mnemonic × 4
+└── 音节: kind（AI 生成 + 同步到 Phonetic 表）
 ```
 
 ### 词包模型
@@ -66,17 +68,20 @@ kind
 
 ## 3. 质量体系
 
-### 四道质量门禁
+### 双层质检 + 人工审核
 
 ```
-Gate 1（数据完整性）→ Gate 2（内容规则校验）→ Gate 3（AI 语义校验）→ Gate Export（全部 approved 才放行）
+Layer 1（算法规则 22 条）→ Layer 2（AI 语义校验，Unified 策略）→ 人工审核（最多 3 次重新生成）→ 导出门禁
 ```
 
-### 人工审核机制
+- **Layer 1**：格式校验、长度检查、敏感词检测等算法规则
+- **Layer 2**：AI 语义校验（语块搭配准确性、例句语境匹配度、助记有效性等）
+- **人工审核**：3 次重新生成机会，超限需人工手动修改
+- **导出门禁**：全部 approved 才放行
 
-- 人工审核环节有 **3 次重新生成**未通过部分的机会
-- 3 次重新生成后仍未通过 → 需人工手动修改
-- 审核结果持久化在数据库中，重跑流水线不丢失审核记录
+### AI 错误日志
+
+所有 AI 调用失败（生产 + 质检阶段）持久化到 `ai_error_logs` 表，支持按 phase/error_type 统计失败率。
 
 ---
 
@@ -91,7 +96,98 @@ Gate 1（数据完整性）→ Gate 2（内容规则校验）→ Gate 3（AI 语
 
 ---
 
-## 5. 输出数据结构
+## 5. 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 前端 | React 19 + Vite 7 + TypeScript 5.9 + Tailwind CSS 4 |
+| 后端 | Python 3.11 + FastAPI + SQLAlchemy 2.0 + AsyncPG + Typer (CLI) |
+| 数据库 | PostgreSQL 16+（17 张表），Alembic 迁移 |
+| AI 服务 | Gemini 3 Flash / GPT-5.2（内容生成 + 质检），可通过 Prompt 管理切换 |
+| 部署 | Docker Compose（前后端 + Nginx） |
+
+---
+
+## 6. 项目结构
+
+```
+VocabularyDataCleaning1.0/
+├── CLAUDE.md / README.md
+├── pyproject.toml               ← 项目配置，入口 vocab = vocab_qc.cli.main:app
+├── alembic.ini                  ← 数据库迁移配置（指向 backend/alembic）
+├── Dockerfile                   ← 多阶段构建（backend + frontend）
+├── docker-compose.yml           ← 生产部署编排
+│
+├── backend/                     ← 后端源码
+│   ├── vocab_qc/                ← Python 包（import 路径: from vocab_qc.xxx）
+│   │   ├── core/
+│   │   │   ├── config.py        ← Pydantic Settings，环境变量前缀 VOCAB_QC_
+│   │   │   ├── db.py            ← 数据库连接（sync + async）
+│   │   │   ├── models/          ← ORM 模型（17 张表）
+│   │   │   ├── qc/              ← 质检引擎（Layer 1 算法 + Layer 2 AI）
+│   │   │   ├── services/        ← 业务服务层
+│   │   │   └── generators/      ← 内容生成器（chunk/sentence/syllable/mnemonic）
+│   │   ├── api/
+│   │   │   ├── main.py          ← FastAPI 入口（CORS + 10 个 router）
+│   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt
+│   │   │   └── schemas/         ← Pydantic 响应模型
+│   │   └── cli/                 ← Typer CLI 命令
+│   └── alembic/                 ← 数据库迁移脚本（8 个版本）
+│
+├── frontend/                    ← React 19 + TypeScript + Tailwind CSS v4
+│   ├── src/
+│   │   ├── App.tsx              ← 路由 + 玻璃拟态侧边栏
+│   │   ├── lib/api.ts           ← fetch 封装（JWT 自动注入）
+│   │   ├── lib/auth.ts          ← 认证状态管理
+│   │   ├── types.ts             ← TypeScript 类型（对齐后端 ORM）
+│   │   └── pages/               ← 6 个页面（Dashboard/总表/导入/审核/词包/Prompt管理）
+│   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
+│
+├── tests/                       ← 527 个测试
+│   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
+│   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
+│   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
+│
+└── docs/                        ← 文档
+    ├── design/                  ← PRD、工作流、输出 schema
+    └── prompts/                 ← AI Prompt 模板
+        ├── generation/          ← 生产 Prompt（语块/例句/音节/助记等）
+        └── quality/             ← 质检 Prompt
+```
+
+---
+
+## 7. 快速开始
+
+```bash
+# 安装依赖
+pip install -e ".[dev]"
+
+# 运行测试
+.venv/bin/pytest tests/ -v --tb=short
+
+# 启动后端 API
+PYTHONPATH=backend uvicorn vocab_qc.api.main:app --reload
+
+# 启动前端开发服务器
+cd frontend && npm run dev
+
+# Docker 部署
+DB_PASSWORD=yourpassword docker compose up -d
+
+# CLI 命令
+PYTHONPATH=backend vocab qc run --layer 1              # Layer 1 质检
+PYTHONPATH=backend vocab qc run --layer 1 --dim chunk  # 仅质检语块
+PYTHONPATH=backend vocab qc summary                    # 质检统计
+PYTHONPATH=backend vocab review list                   # 审核队列
+PYTHONPATH=backend vocab review approve <id>           # 通过
+PYTHONPATH=backend vocab review regenerate <id>        # 重新生成（最多 3 次）
+PYTHONPATH=backend vocab review edit <id> "new content" # 人工修改
+```
+
+---
+
+## 8. 输出数据结构
 
 ### 单义词
 
@@ -147,18 +243,7 @@ Gate 1（数据完整性）→ Gate 2（内容规则校验）→ Gate 3（AI 语
 
 ---
 
-## 6. 角色与协作
-
-| 角色 | 职责 |
-|------|------|
-| **学科产品** | 定标准、出 Prompt、做终审 |
-| **AI产品经理** | 选模型、跑生产、做质检 |
-| **业务产品** | 搞数据、做入库 |
-| **前端团队** | 消费词库 |
-
----
-
-## 7. 数据规模
+## 9. 数据规模
 
 | 指标 | 数值 |
 |------|------|
@@ -169,47 +254,20 @@ Gate 1（数据完整性）→ Gate 2（内容规则校验）→ Gate 3（AI 语
 
 ---
 
-## 8. 技术栈
+## 10. 角色与协作
 
-Python 3.12 + FastAPI + SQLAlchemy 2.0 + Typer (CLI) + Alembic (迁移)
-
-### 快速开始
-
-```bash
-# 安装依赖
-pip install -e ".[dev]"
-
-# 运行测试
-pytest tests/ -v
-
-# CLI 命令
-vocab qc run --layer 1              # Layer 1 质检
-vocab qc run --layer 1 --dim chunk  # 仅质检语块
-vocab qc summary                    # 质检统计
-vocab review list                   # 审核队列
-vocab review approve <id>           # 通过
-vocab review regenerate <id>        # 重新生成（最多 3 次）
-vocab review edit <id> "new content" # 人工修改
-```
-
-### API 端点
-
-```
-POST /api/qc/run            # 触发质检
-GET  /api/qc/runs/{id}      # 运行详情
-GET  /api/qc/summary        # 统计
-GET  /api/reviews            # 审核队列
-POST /api/reviews/{id}/approve     # 通过
-POST /api/reviews/{id}/regenerate  # 重新生成
-POST /api/reviews/{id}/edit        # 人工修改
-GET  /api/export/word/{id}   # 导出单词
-GET  /api/export/readiness   # 导出就绪状态
-GET  /health                 # 健康检查
-```
+| 角色 | 职责 |
+|------|------|
+| **学科产品** | 定标准、出 Prompt、做终审 |
+| **AI 产品经理** | 选模型、跑生产、做质检 |
+| **业务产品** | 搞数据、做入库 |
+| **前端团队** | 消费词库 |
 
 ---
 
 ## 相关文档
 
-- `roadmap.md` — 产品方法论与设计决策手册
-- `docs/单词2.0--内容生产与质检工作流程.md` — 内容生产与质检 SOP
+- `docs/design/PRD.md` — 产品需求文档
+- `docs/design/单词2.0--内容生产与质检工作流程.md` — 内容生产与质检 SOP
+- `docs/design/output-schema.md` — 输出数据 Schema
+- `docs/prompts/` — AI Prompt 模板（生产 + 质检）

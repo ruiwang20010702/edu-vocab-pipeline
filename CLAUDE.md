@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-前后端均已实现，506 个测试全部通过。前端 6 页面 + 后端完整 API。
+前后端均已实现，527 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。
 
 ```
 VocabularyDataCleaning1.0/
@@ -23,7 +23,7 @@ VocabularyDataCleaning1.0/
 │   │   ├── core/
 │   │   │   ├── config.py        ← Pydantic Settings，环境变量前缀 VOCAB_QC_
 │   │   │   ├── db.py            ← 数据库连接（sync + async）
-│   │   │   ├── models/          ← ORM 模型（14 张表）
+│   │   │   ├── models/          ← ORM 模型（17 张表）
 │   │   │   ├── qc/              ← 质检引擎（Layer 1 算法 + Layer 2 AI）
 │   │   │   ├── services/        ← 业务服务层
 │   │   │   └── generators/      ← 内容生成器（chunk/sentence/mnemonic）
@@ -43,7 +43,7 @@ VocabularyDataCleaning1.0/
 │   │   └── pages/               ← 6 个页面
 │   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
 │
-├── tests/                       ← 506 个测试
+├── tests/                       ← 527 个测试
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
 │   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
 │   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
