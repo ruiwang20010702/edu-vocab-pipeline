@@ -246,11 +246,21 @@ class TestReviewRegenerate:
 
     def test_regenerate_success(self, cli_session, _patch_session):
         """重新生成成功."""
+        from unittest.mock import patch
+
         data = _seed_word_and_content(cli_session)
         review = _seed_review_item(cli_session, data["content"])
         cli_session.commit()
 
-        result = runner.invoke(app, ["review", "regenerate", str(review.id)])
+        def _mock_regen(session, ci):
+            ci.content = "mock regenerated content"
+
+        with patch(
+            "vocab_qc.core.services.review_service.ReviewService._do_regenerate",
+            side_effect=_mock_regen,
+        ):
+            result = runner.invoke(app, ["review", "regenerate", str(review.id)])
+
         assert result.exit_code == 0
         assert "重新生成" in result.output
 

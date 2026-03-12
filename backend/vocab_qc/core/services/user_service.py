@@ -25,6 +25,28 @@ def list_users(session: Session) -> list[User]:
     return session.query(User).order_by(User.created_at).all()
 
 
+def update_user(
+    session: Session,
+    user_id: int,
+    *,
+    name: Optional[str] = None,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+) -> User:
+    """更新用户信息（仅修改非 None 字段）。"""
+    user = session.query(User).filter_by(id=user_id).first()
+    if user is None:
+        raise ValueError(f"用户 {user_id} 不存在")
+    if name is not None:
+        user.name = name
+    if role is not None:
+        user.role = role
+    if is_active is not None:
+        user.is_active = is_active
+    session.flush()
+    return user
+
+
 def deactivate_user(session: Session, user_id: int) -> User:
     """停用用户。"""
     user = session.query(User).filter_by(id=user_id).one()

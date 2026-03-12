@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'motion/react'
-import { UserPlus, Loader2, Shield, Eye, ShieldCheck } from 'lucide-react'
+import { UserPlus, Loader2, Shield, Eye, ShieldCheck, Pencil, Check, X, Ban, UserCheck } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 
 interface User {
@@ -26,6 +26,8 @@ export default function AdminPage() {
   const [formData, setFormData] = useState({ email: '', name: '', role: 'reviewer' })
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editData, setEditData] = useState({ name: '', role: '', is_active: true })
 
   const loadUsers = async () => {
     setLoading(true)
@@ -57,6 +59,32 @@ export default function AdminPage() {
       setError(e instanceof ApiError ? e.detail : '创建失败')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const startEdit = (u: User) => {
+    setEditingId(u.id)
+    setEditData({ name: u.name, role: u.role, is_active: u.is_active })
+  }
+
+  const cancelEdit = () => setEditingId(null)
+
+  const handleSaveEdit = async (userId: number) => {
+    try {
+      const updated = await api.patch<User>(`/admin/users/${userId}`, editData)
+      setUsers(prev => prev.map(u => u.id === userId ? updated : u))
+      setEditingId(null)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : '更新失败')
+    }
+  }
+
+  const toggleActive = async (u: User) => {
+    try {
+      const updated = await api.patch<User>(`/admin/users/${u.id}`, { is_active: !u.is_active })
+      setUsers(prev => prev.map(x => x.id === u.id ? updated : x))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : '操作失败')
     }
   }
 
@@ -146,20 +174,42 @@ export default function AdminPage() {
                 <th className="text-left text-sm font-medium text-white/60 px-6 py-4">角色</th>
                 <th className="text-left text-sm font-medium text-white/60 px-6 py-4">状态</th>
                 <th className="text-left text-sm font-medium text-white/60 px-6 py-4">最近登录</th>
+                <th className="text-left text-sm font-medium text-white/60 px-6 py-4">操作</th>
               </tr>
             </thead>
             <tbody>
               {users.map(u => {
                 const roleInfo = ROLE_LABELS[u.role] ?? ROLE_LABELS.viewer
+                const isEditing = editingId === u.id
                 return (
                   <tr key={u.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                    <td className="px-6 py-3 text-white font-medium">{u.name}</td>
+                    <td className="px-6 py-3 text-white font-medium">
+                      {isEditing ? (
+                        <input
+                          value={editData.name}
+                          onChange={e => setEditData(prev => ({ ...prev, name: e.target.value }))}
+                          className="w-full px-2 py-1 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:outline-none focus:border-white/50"
+                        />
+                      ) : u.name}
+                    </td>
                     <td className="px-6 py-3 text-white/60 text-sm">{u.email}</td>
                     <td className="px-6 py-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${roleInfo.color}`}>
-                        <roleInfo.icon size={12} />
-                        {roleInfo.label}
-                      </span>
+                      {isEditing ? (
+                        <select
+                          value={editData.role}
+                          onChange={e => setEditData(prev => ({ ...prev, role: e.target.value }))}
+                          className="px-2 py-1 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:outline-none focus:border-white/50 appearance-none"
+                        >
+                          <option value="admin">管理员</option>
+                          <option value="reviewer">审核员</option>
+                          <option value="viewer">查看者</option>
+                        </select>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${roleInfo.color}`}>
+                          <roleInfo.icon size={12} />
+                          {roleInfo.label}
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-3">
                       {u.is_active ? (
@@ -170,6 +220,27 @@ export default function AdminPage() {
                     </td>
                     <td className="px-6 py-3 text-white/40 text-sm">
                       {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : '从未登录'}
+                    </td>
+                    <td className="px-6 py-3">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => handleSaveEdit(u.id)} className="p-1.5 hover:bg-green-400/20 rounded-lg text-green-200 transition-colors" title="保存">
+                            <Check size={14} />
+                          </button>
+                          <button onClick={cancelEdit} className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 transition-colors" title="取消">
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => startEdit(u)} className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-colors" title="编辑">
+                            <Pencil size={14} />
+                          </button>
+                          <button onClick={() => toggleActive(u)} className={`p-1.5 rounded-lg transition-colors ${u.is_active ? 'hover:bg-red-400/20 text-white/40 hover:text-red-200' : 'hover:bg-green-400/20 text-white/40 hover:text-green-200'}`} title={u.is_active ? '停用' : '启用'}>
+                            {u.is_active ? <Ban size={14} /> : <UserCheck size={14} />}
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db, require_role
-from vocab_qc.api.schemas.user import CreateUserRequest, UserResponse
+from vocab_qc.api.schemas.user import CreateUserRequest, UpdateUserRequest, UserResponse
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import user_service
 
@@ -37,6 +37,28 @@ def list_users(
     """列出所有用户（仅管理员）。"""
     users = user_service.list_users(db)
     return [UserResponse.model_validate(u) for u in users]
+
+
+@router.patch("/users/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: int,
+    request: UpdateUserRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """编辑用户（仅管理员）。"""
+    try:
+        user = user_service.update_user(
+            db,
+            user_id,
+            name=request.name,
+            role=request.role,
+            is_active=request.is_active,
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    db.commit()
+    return UserResponse.model_validate(user)
 
 
 @user_router.get("/me", response_model=UserResponse)

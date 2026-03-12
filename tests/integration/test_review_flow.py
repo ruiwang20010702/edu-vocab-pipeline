@@ -59,14 +59,30 @@ def test_approve(db_session, review_with_item, review_service):
 
 
 def test_regenerate_first_time(db_session, review_with_item, review_service):
+    from unittest.mock import patch
+
     review = review_with_item["review"]
-    result = review_service.regenerate(db_session, review.id, reviewer="tester")
+
+    # Mock AI 生成器，避免真实 API 调用
+    def _fake_generate(self, *, word, meaning=None, pos=None, session=None):
+        return {"content": f"mock chunk for {word}"}
+
+    with patch(
+        "vocab_qc.core.services.review_service.ReviewService._do_regenerate",
+        side_effect=lambda session, ci: _mock_regenerate(ci),
+    ):
+        result = review_service.regenerate(db_session, review.id, reviewer="tester")
 
     assert result["success"] is True
     assert result["retry_count"] == 1
 
     content_item = db_session.query(ContentItem).filter_by(id=review.content_item_id).one()
     assert content_item.retry_count == 1
+
+
+def _mock_regenerate(content_item):
+    """模拟 _do_regenerate：填充假内容。"""
+    content_item.content = "mock regenerated content"
 
 
 def test_regenerate_max_retries(db_session, review_with_item, review_service):

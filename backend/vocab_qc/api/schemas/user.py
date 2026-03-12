@@ -12,6 +12,12 @@ class CreateUserRequest(BaseModel):
     role: Literal["admin", "reviewer", "viewer"] = "reviewer"
 
 
+class UpdateUserRequest(BaseModel):
+    name: Optional[str] = None
+    role: Optional[Literal["admin", "reviewer", "viewer"]] = None
+    is_active: Optional[bool] = None
+
+
 class UserResponse(BaseModel):
     id: int
     email: str

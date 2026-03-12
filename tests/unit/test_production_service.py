@@ -1,9 +1,24 @@
 """production_service 单元测试."""
 
+from unittest.mock import AsyncMock, patch
+
 from vocab_qc.core.models import ContentItem, Meaning, Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageMeaning
 from vocab_qc.core.services.production_service import run_production
+
+
+def _fake_generate_async(**kwargs):
+    """返回一个 mock 的 generate_async，根据维度返回不同的假数据。"""
+    async def _gen(self, *, word, meaning=None, pos=None, _preloaded_config=None):
+        dim = self.__class__.__name__.lower()
+        if "chunk" in dim:
+            return {"content": f"eat an {word}", "content_cn": f"吃一个{word}"}
+        if "sentence" in dim:
+            return {"content": f"I like {word}.", "content_cn": f"我喜欢{word}。"}
+        # mnemonics
+        return {"content": f'{{"formula": "{word} memo", "chant": "chant", "script": "script"}}'}
+    return _gen
 
 
 class TestRunProduction:
@@ -43,7 +58,29 @@ class TestRunProduction:
         db_session.add_all([chunk, sentence] + mnem_items)
         db_session.flush()
 
-        result = run_production(db_session, pkg.id)
+        # Mock 所有生成器的 generate_async，避免真实 AI 调用
+        from vocab_qc.core.services.production_service import _GENERATORS
+
+        with patch.multiple(
+            type(_GENERATORS["chunk"]),
+            generate_async=_fake_generate_async(),
+        ), patch.multiple(
+            type(_GENERATORS["sentence"]),
+            generate_async=_fake_generate_async(),
+        ), patch.multiple(
+            type(_GENERATORS["mnemonic_root_affix"]),
+            generate_async=_fake_generate_async(),
+        ), patch.multiple(
+            type(_GENERATORS["mnemonic_word_in_word"]),
+            generate_async=_fake_generate_async(),
+        ), patch.multiple(
+            type(_GENERATORS["mnemonic_sound_meaning"]),
+            generate_async=_fake_generate_async(),
+        ), patch.multiple(
+            type(_GENERATORS["mnemonic_exam_app"]),
+            generate_async=_fake_generate_async(),
+        ):
+            result = run_production(db_session, pkg.id)
 
         assert result["generated"] == 6  # chunk + sentence + 4 mnemonics
         assert result["qc_passed"] + result["qc_failed"] > 0
@@ -147,7 +184,18 @@ class TestRunProduction:
         db_session.add_all(items)
         db_session.flush()
 
-        result = run_production(db_session, pkg.id)
+        # Mock 生成器避免真实 AI 调用
+        from vocab_qc.core.services.production_service import _GENERATORS
+
+        with patch.multiple(
+            type(_GENERATORS["chunk"]),
+            generate_async=_fake_generate_async(),
+        ), patch.multiple(
+            type(_GENERATORS["sentence"]),
+            generate_async=_fake_generate_async(),
+        ):
+            result = run_production(db_session, pkg.id)
+
         assert result["generated"] == 4
 
         for item in items:

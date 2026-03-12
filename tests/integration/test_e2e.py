@@ -130,21 +130,32 @@ def test_e2e_full_pipeline(db_session, full_word_data):
 
 def test_e2e_retry_limit(db_session, full_word_data):
     """测试重试次数限制: 3次后必须人工修改."""
+    from unittest.mock import patch
+
     chunk = full_word_data["chunk"]
     review_service = ReviewService(max_retries=3)
 
     from vocab_qc.core.models.enums import ReviewReason
 
-    # 模拟3次重新生成
-    for i in range(3):
-        review = review_service.create_review_item(db_session, chunk, ReviewReason.LAYER1_FAILED)
-        result = review_service.regenerate(db_session, review.id, reviewer="tester")
-        assert result["success"] is True
-        assert result["retry_count"] == i + 1
+    def _mock_regen(session, ci):
+        ci.content = "mock regenerated content"
 
-    # 第4次应该被拒绝
-    review4 = review_service.create_review_item(db_session, chunk, ReviewReason.LAYER1_FAILED)
-    result4 = review_service.regenerate(db_session, review4.id, reviewer="tester")
+    # Mock AI 生成器，避免真实 API 调用
+    with patch(
+        "vocab_qc.core.services.review_service.ReviewService._do_regenerate",
+        side_effect=_mock_regen,
+    ):
+        # 模拟3次重新生成
+        for i in range(3):
+            review = review_service.create_review_item(db_session, chunk, ReviewReason.LAYER1_FAILED)
+            result = review_service.regenerate(db_session, review.id, reviewer="tester")
+            assert result["success"] is True
+            assert result["retry_count"] == i + 1
+
+        # 第4次应该被拒绝
+        review4 = review_service.create_review_item(db_session, chunk, ReviewReason.LAYER1_FAILED)
+        result4 = review_service.regenerate(db_session, review4.id, reviewer="tester")
+
     assert result4["success"] is False
     assert "最大重试次数" in result4["message"]
 

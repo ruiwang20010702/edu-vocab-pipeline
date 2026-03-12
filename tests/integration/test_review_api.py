@@ -239,10 +239,20 @@ class TestApproveReview:
 class TestRegenerateReview:
     def test_regenerate_success(self, admin_client):
         """正常触发重生成。"""
+        from unittest.mock import patch
+
         client, ids, TestSession = admin_client
         review_id = _add_review_item(TestSession, ids)
 
-        resp = client.post(f"/api/reviews/{review_id}/regenerate")
+        def _mock_regen(session, ci):
+            ci.content = "mock regenerated content"
+
+        with patch(
+            "vocab_qc.core.services.review_service.ReviewService._do_regenerate",
+            side_effect=_mock_regen,
+        ):
+            resp = client.post(f"/api/reviews/{review_id}/regenerate")
+
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
