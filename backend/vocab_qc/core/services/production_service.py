@@ -20,6 +20,7 @@ from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageMeaning
+from vocab_qc.core.models.quality_layer import AiErrorLog, classify_ai_error
 from vocab_qc.core.services.qc_service import QcService
 
 # 维度→生成器映射
@@ -300,6 +301,8 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
         return 0
 
     # --- Step B: asyncio 并发 AI 调用 ---
+    error_logs: list[AiErrorLog] = []
+
     async def _generate_all() -> dict[int, dict]:
         semaphore = asyncio.Semaphore(settings.ai_max_concurrency)
 
@@ -333,6 +336,17 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
             if isinstance(r, Exception):
                 logger.warning("生成失败 item_id=%s: %s", item_id, r)
                 results[item_id] = {}
+                item = item_map[item_id]
+                error_logs.append(AiErrorLog(
+                    content_item_id=item_id,
+                    word_id=item.word_id,
+                    phase="generation",
+                    dimension=item.dimension,
+                    error_type=classify_ai_error(r),
+                    error_message=str(r)[:2000],
+                    ai_model=settings.ai_model,
+                    retry_count=settings.ai_max_retries,
+                ))
             else:
                 results[r[0]] = r[1]
         return results
@@ -358,10 +372,22 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
             count += 1
             continue
 
-        item.content = result.get("content", "")
+        content = result.get("content", "")
+        if not content:
+            # 生成失败（空字典或 content 为空）→ 标记为 LAYER1_FAILED 让质检流程接管
+            item.content = ""
+            item.qc_status = QcStatus.LAYER1_FAILED.value
+            count += 1
+            continue
+
+        item.content = content
         if result.get("content_cn"):
             item.content_cn = result["content_cn"]
         count += 1
+
+    # 持久化 AI 错误日志
+    for log in error_logs:
+        session.add(log)
 
     session.flush()
     return count

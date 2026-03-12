@@ -179,7 +179,10 @@ def parse_upload(file_content: bytes, filename: str) -> list[dict[str, Any]]:
     """根据文件扩展名解析上传内容。"""
     lower = filename.lower()
     if lower.endswith(".json"):
-        return json.loads(file_content.decode("utf-8"))
+        data = json.loads(file_content.decode("utf-8"))
+        if not isinstance(data, list):
+            raise ValueError("JSON 文件格式错误：期望数组格式，如 [{\"word\": \"hello\", ...}]")
+        return data
     if lower.endswith(".csv"):
         return _parse_csv_text(file_content.decode("utf-8"))
     if lower.endswith((".xlsx", ".xls")):

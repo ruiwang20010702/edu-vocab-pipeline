@@ -147,7 +147,7 @@ def get_batch_words(
 
     try:
         data = batch_service.get_batch_words(db, batch_id)
-    except Exception:
+    except ValueError:
         raise HTTPException(status_code=404, detail="批次不存在")
 
     batch_resp = BatchResponse.model_validate(data["batch"])
@@ -244,14 +244,43 @@ def _run_production_bg(batch_id: int) -> None:
             logger.exception(
                 "后台生产流水线失败 batch_id=%s step=%s", batch_id, step_name
             )
-            # 标记 Package 为 failed
+            # 标记 Package 为 failed + 善后处理僵尸 ContentItem
             try:
+                from vocab_qc.core.models import ContentItem, QcStatus
+                from vocab_qc.core.models.package_layer import PackageMeaning
+                from vocab_qc.core.services.production_service import _get_word_ids_for_package
+                from vocab_qc.core.services.review_service import ReviewService
+                from vocab_qc.core.models.enums import ReviewReason
+
                 pkg = session.query(Package).filter_by(id=batch_id).first()
                 if pkg:
                     pkg.status = "failed"
-                    session.commit()
+
+                # 将该批次中 PENDING+空content 的项标记为 LAYER1_FAILED 并入队审核
+                word_ids = _get_word_ids_for_package(session, batch_id)
+                if word_ids:
+                    zombie_items = (
+                        session.query(ContentItem)
+                        .filter(
+                            ContentItem.word_id.in_(word_ids),
+                            ContentItem.qc_status == QcStatus.PENDING.value,
+                            ContentItem.content == "",
+                        )
+                        .all()
+                    )
+                    review_svc = ReviewService()
+                    for item in zombie_items:
+                        item.qc_status = QcStatus.LAYER1_FAILED.value
+                        review_svc.create_review_item(
+                            session, item, ReviewReason.LAYER1_FAILED, priority=10
+                        )
+
+                session.commit()
             except Exception:
                 session.rollback()
+                logger.exception(
+                    "善后处理僵尸 ContentItem 失败 batch_id=%s", batch_id
+                )
             finally:
                 session.close()
             return

@@ -6,8 +6,11 @@ from sqlalchemy.orm import Session, subqueryload
 
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Phonetic, Source, Word
-from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS, QcStatus
 from vocab_qc.core.models.quality_layer import QcRuleResult
+
+# 终态：approved 或 rejected 都算"已完成"
+_TERMINAL_STATUSES = [QcStatus.APPROVED.value, QcStatus.REJECTED.value]
 
 
 def list_words(
@@ -15,6 +18,7 @@ def list_words(
     page: int = 1,
     limit: int = 50,
     q: str | None = None,
+    status: str | None = None,
 ) -> dict[str, Any]:
     """分页查询词汇，含音标、义项、内容项聚合。"""
     query = session.query(Word)
@@ -22,7 +26,35 @@ def list_words(
         escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         query = query.filter(Word.word.ilike(f"%{escaped_q}%", escape="\\"))
 
+    # 子查询：该单词是否存在非终态的 content_item
+    non_terminal_exists = (
+        session.query(ContentItem.id)
+        .filter(
+            ContentItem.word_id == Word.id,
+            ~ContentItem.qc_status.in_(_TERMINAL_STATUSES),
+        )
+        .exists()
+    )
+
+    if status == "approved":
+        query = query.filter(~non_terminal_exists)
+    elif status == "in_progress":
+        query = query.filter(non_terminal_exists)
+
     total = query.count()
+
+    # status_counts：基于同一 q 筛选条件，统计各状态数量
+    base_query = session.query(Word)
+    if q:
+        escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        base_query = base_query.filter(Word.word.ilike(f"%{escaped_q}%", escape="\\"))
+    total_all = base_query.count()
+    approved_count = base_query.filter(~non_terminal_exists).count()
+    status_counts = {
+        "approved": approved_count,
+        "in_progress": total_all - approved_count,
+        "total": total_all,
+    }
 
     words = (
         query.options(
@@ -61,7 +93,13 @@ def list_words(
                 issues_map.setdefault(iss.word_id, []).append(iss)
 
     items = [_build_word_detail_from_loaded(w, issues_map.get(w.id, [])) for w in words]
-    return {"items": items, "total": total, "page": page, "limit": limit}
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "status_counts": status_counts,
+    }
 
 
 def get_word_detail(session: Session, word_id: int) -> dict[str, Any] | None:
@@ -122,6 +160,12 @@ def _build_word_detail_from_loaded(word: Word, issues: list[QcRuleResult]) -> di
     # 词级维度: syllable（meaning_id=None）
     syllable_item = content_by_key.get((None, "syllable"))
 
+    # 完成状态：所有 content_items 都是终态 → approved，否则 in_progress
+    all_terminal = all(
+        ci.qc_status in _TERMINAL_STATUSES for ci in word.content_items
+    ) if word.content_items else False
+    completion_status = "approved" if all_terminal else "in_progress"
+
     return {
         "id": word.id,
         "word": word.word,
@@ -129,6 +173,7 @@ def _build_word_detail_from_loaded(word: Word, issues: list[QcRuleResult]) -> di
         "updated_at": word.updated_at,
         "phonetics": word.phonetics,
         "syllable": syllable_item,
+        "completion_status": completion_status,
         "meanings": meanings_data,
         "issues": [
             {

@@ -23,11 +23,12 @@ def list_words(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=200),
     q: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None, pattern="^(approved|in_progress)$"),
     db: Session = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
     """分页查询词汇列表。"""
-    return word_service.list_words(db, page=page, limit=limit, q=q)
+    return word_service.list_words(db, page=page, limit=limit, q=q, status=status)
 
 
 @router.get("/{word_id}", response_model=WordDetailResponse)
@@ -118,6 +119,7 @@ def regenerate_content_item(
 class ManualEditRequest(BaseModel):
     content: str
     content_cn: Optional[str] = None
+    force_approve: bool = False
 
 
 @router.post("/content-items/{content_item_id}/manual-edit")
@@ -125,15 +127,25 @@ def manual_edit_content_item(
     content_item_id: int,
     body: ManualEditRequest,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role("admin", "reviewer")),
+    current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """手动编辑 ContentItem 内容 + 自动质检（管理员或审核员）。"""
+    from vocab_qc.core.services.audit_service import log_action
     from vocab_qc.core.services.batch_service import update_batch_progress
     from vocab_qc.core.services.review_service import ReviewService
 
     item = db.query(ContentItem).filter_by(id=content_item_id).first()
     if item is None:
         raise HTTPException(status_code=404, detail="内容项不存在")
+
+    # 并发检查：如果关联审核项已分配给其他人，拒绝编辑
+    review = db.query(ReviewItem).filter_by(
+        content_item_id=item.id, status=ReviewStatus.PENDING.value
+    ).first()
+    if review and review.assigned_to_id and review.assigned_to_id != current_user.id:
+        raise HTTPException(status_code=409, detail="该审核项已分配给其他审核员")
+
+    old_content = item.content
 
     # 写入用户提供的内容
     item.content = body.content
@@ -145,20 +157,37 @@ def manual_edit_content_item(
     # 运行质检
     qc_passed = ReviewService._run_qc_for_item(db, item)
 
+    # 强制通过：人工判断内容正确，跳过 QC 结果
+    if body.force_approve:
+        qc_passed = True
+
     if qc_passed:
         item.qc_status = QcStatus.APPROVED.value
         # resolve 关联的 pending review_item
-        review = db.query(ReviewItem).filter_by(
-            content_item_id=item.id, status=ReviewStatus.PENDING.value
-        ).first()
+        if review is None:
+            review = db.query(ReviewItem).filter_by(
+                content_item_id=item.id, status=ReviewStatus.PENDING.value
+            ).first()
         if review:
             review.status = ReviewStatus.RESOLVED.value
             review.resolution = ReviewResolution.MANUAL_EDIT.value
             review.resolved_at = datetime.now(UTC)
+            review.reviewer = current_user.name
             update_batch_progress(db, review.batch_id)
-        message = "保存成功，质检通过"
+        message = "已强制通过" if body.force_approve else "保存成功，质检通过"
     else:
         message = "已保存，但质检未通过"
+
+    # 审计日志
+    log_action(
+        db,
+        entity_type="content_item",
+        entity_id=item.id,
+        action="force_approve" if body.force_approve else "manual_edit",
+        actor=current_user.name,
+        old_value={"content": old_content},
+        new_value={"content": body.content},
+    )
 
     # 查询最新质检失败问题
     from vocab_qc.core.models.quality_layer import QcRuleResult

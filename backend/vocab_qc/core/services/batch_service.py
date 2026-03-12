@@ -112,7 +112,9 @@ def get_batch_words(session: Session, batch_id: int) -> dict:
 
 def skip_word(session: Session, batch_id: int, word_id: int, user_id: int) -> None:
     """跳过某词，释放回池中。"""
-    batch = session.query(ReviewBatch).filter_by(id=batch_id).one()
+    batch = session.query(ReviewBatch).filter_by(id=batch_id).first()
+    if batch is None:
+        raise ValueError("批次不存在")
     if batch.user_id != user_id:
         raise ValueError("无权操作该批次")
 
@@ -134,7 +136,9 @@ def skip_word(session: Session, batch_id: int, word_id: int, user_id: int) -> No
 
 def complete_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
     """标记批次完成。"""
-    batch = session.query(ReviewBatch).filter_by(id=batch_id).one()
+    batch = session.query(ReviewBatch).filter_by(id=batch_id).first()
+    if batch is None:
+        raise ValueError("批次不存在")
     if batch.user_id != user_id:
         raise ValueError("无权操作该批次")
 
@@ -174,7 +178,7 @@ def update_batch_progress(session: Session, batch_id: int) -> None:
     batch.reviewed_count = reviewed_count
 
     # 全部审完 → 自动完成
-    if reviewed_count >= len(all_word_ids) and len(all_word_ids) > 0:
+    if len(all_word_ids) == 0 or reviewed_count >= len(all_word_ids):
         batch.status = BatchStatus.COMPLETED.value
         batch.completed_at = datetime.now(UTC)
 

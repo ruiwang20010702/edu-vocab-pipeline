@@ -1,7 +1,7 @@
 """导出 API 路由."""
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_db, require_role
@@ -46,4 +46,19 @@ def download_all(
     return JSONResponse(
         content=data,
         headers={"Content-Disposition": "attachment; filename=vocab_export.json"},
+    )
+
+
+@router.get("/excel")
+def download_excel(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin", "reviewer")),
+):
+    """下载所有已通过词汇数据 (Excel)."""
+    service = ExportService()
+    buf = service.export_to_excel(db)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=vocab_export.xlsx"},
     )

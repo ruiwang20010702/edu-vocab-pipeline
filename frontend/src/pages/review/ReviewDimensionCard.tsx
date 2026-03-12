@@ -1,8 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import {
-  RefreshCw, CheckCircle2, Loader2, AlertCircle, UserCog, Save,
-  Layers, Volume2, Lightbulb, Ban,
+  RefreshCw, CheckCircle2, Loader2, AlertCircle, Save,
+  Lightbulb, Ban,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import type { ReviewItem } from '../../types'
@@ -61,82 +61,14 @@ export function ReviewDimensionCard({
   onRegenerate: () => void
   embedded?: boolean
 }) {
-  const {
-    editingId, editContent, editContentCn, editResult, editError, saving,
-    setEditContent, setEditContentCn,
-    startEdit, cancelEdit, handleSaveEdit,
-  } = useReviewEdit()
-
-  const isEditing = editingId === item.id
   const dim = item.content_item?.dimension ?? ''
   const dimLabel = DIMENSION_LABELS[dim] ?? dim
   const retryCount = item.content_item?.retry_count ?? 0
   const atLimit = retryCount >= 3
   const content = item.content_item?.content ?? ''
   const issueMsg = item.issues?.[0]?.message ?? ''
-  const isMnemonic = isMnemonicDim(dim)
-  const mnemonicData = isMnemonic ? parseMnemonicJson(content) : null
 
-  // 助记编辑：拆分三个字段
-  const [editFormula, setEditFormula] = useState('')
-  const [editChant, setEditChant] = useState('')
-  const [editScript, setEditScript] = useState('')
-
-  const handleStartMnemonicEdit = () => {
-    if (mnemonicData) {
-      setEditFormula(mnemonicData.formula)
-      setEditChant(mnemonicData.chant)
-      setEditScript(mnemonicData.script)
-    } else {
-      setEditFormula('')
-      setEditChant('')
-      setEditScript('')
-    }
-    startEdit(item)
-  }
-
-  const handleMnemonicSave = () => {
-    const built = buildMnemonicJson(editFormula, editChant, editScript)
-    handleSaveEdit(item.id, built)
-  }
-
-  // 编辑表单（共享：embedded 和独立模式都用）
-  const editForm = isEditing ? (
-    isMnemonic ? (
-      <div className="space-y-2">
-        <MnemonicEditFields
-          formula={editFormula} chant={editChant} script={editScript}
-          onFormulaChange={setEditFormula} onChantChange={setEditChant} onScriptChange={setEditScript}
-          scriptRows={4}
-        />
-        {editResult && <QcResultBanner passed={editResult.passed} message={editResult.message} issues={editResult.issues} />}
-        {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
-        <div className="flex items-center gap-2">
-          <button onClick={handleMnemonicSave} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
-            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存
-          </button>
-          <button onClick={cancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
-        </div>
-      </div>
-    ) : (
-      <div className="space-y-2">
-        <textarea value={editContent} onChange={e => setEditContent(e.target.value)} rows={3}
-          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
-        <textarea value={editContentCn} onChange={e => setEditContentCn(e.target.value)} rows={2} placeholder="中文翻译（可选）"
-          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400" />
-        {editResult && <QcResultBanner passed={editResult.passed} message={editResult.message} issues={editResult.issues} />}
-        {editError && <p className="text-xs text-red-600 text-center">{editError}</p>}
-        <div className="flex items-center gap-2">
-          <button onClick={() => handleSaveEdit(item.id)} disabled={saving} className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
-            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存
-          </button>
-          <button onClick={cancelEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
-        </div>
-      </div>
-    )
-  ) : null
-
-  const actionButtons = !isEditing ? (
+  const actionButtons = (
     <div className="flex items-center gap-2 pt-1">
       <button onClick={onApprove} className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-[11px] font-bold transition-all">
         通过
@@ -148,12 +80,9 @@ export function ReviewDimensionCard({
           AI 修复
         </button>
       )}
-      <button onClick={isMnemonic ? handleStartMnemonicEdit : () => startEdit(item)} className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-xl text-[11px] font-bold transition-all">
-        <UserCog size={11} className="inline mr-1" /> 手动编辑
-      </button>
       <span className={`text-[10px] font-bold ml-auto ${atLimit ? 'text-rose-500' : 'text-slate-400'}`}>{retryCount}/3</span>
     </div>
-  ) : null
+  )
 
   const regenResultBanner = regenResult ? (
     <div className={`text-xs px-3 py-2 rounded-xl text-center font-medium ${regenResult.passed ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
@@ -186,7 +115,6 @@ export function ReviewDimensionCard({
             </motion.div>
           )}
         </AnimatePresence>
-        {editForm}
         {regenResultBanner}
         {actionButtons}
       </div>
@@ -238,17 +166,16 @@ export function ReviewDimensionCard({
       )}
 
       {/* 内容预览 */}
-      {!isEditing && (isMnemonic && mnemonicData ? (
+      {isMnemonicDim(dim) && parseMnemonicJson(content) ? (
         <div className="space-y-2 text-xs">
-          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span><span className="text-slate-700">{mnemonicData.formula}</span></div>
-          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span><span className="text-slate-700">{mnemonicData.chant}</span></div>
-          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span><span className="text-slate-500 line-clamp-2">{mnemonicData.script}</span></div>
+          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span><span className="text-slate-700">{parseMnemonicJson(content)!.formula}</span></div>
+          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span><span className="text-slate-700">{parseMnemonicJson(content)!.chant}</span></div>
+          <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span><span className="text-slate-500 line-clamp-2">{parseMnemonicJson(content)!.script}</span></div>
         </div>
-      ) : !isEditing && (
+      ) : (
         <p className="text-xs text-slate-500 italic line-clamp-2">{content || '暂无内容'}</p>
-      ))}
+      )}
 
-      {editForm}
       {regenResultBanner}
       {actionButtons}
     </motion.div>
@@ -317,6 +244,12 @@ export function ContentDimensionCard({
               className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
               {directEditSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存并质检
             </button>
+            {directEditMsg && !directEditMsg.ok && (
+              <button onClick={() => handleDirectEditSave(content.id, { content: directEditContent, content_cn: directEditContentCn || undefined, force_approve: true })} disabled={directEditSaving}
+                className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+                <CheckCircle2 size={12} /> 强制通过
+              </button>
+            )}
             <button onClick={cancelDirectEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
           </div>
         </div>
@@ -357,7 +290,7 @@ function MnemonicDirectEditForm({
   initialContent: string
   directEditSaving: boolean
   directEditMsg: { ok: boolean; text: string; issues?: QcIssue[] } | null
-  onDirectEditSave: (id: number, body: { content: string }) => void
+  onDirectEditSave: (id: number, body: { content: string; force_approve?: boolean }) => void
   onCancelDirectEdit: () => void
 }) {
   const parsed = parseMnemonicJson(initialContent)
@@ -365,9 +298,9 @@ function MnemonicDirectEditForm({
   const [chant, setChant] = useState(parsed?.chant ?? '')
   const [script, setScript] = useState(parsed?.script ?? '')
 
-  const handleSave = () => {
+  const handleSave = (forceApprove?: boolean) => {
     const content = buildMnemonicJson(formula, chant, script)
-    onDirectEditSave(mnId, { content })
+    onDirectEditSave(mnId, { content, force_approve: forceApprove })
   }
 
   return (
@@ -378,10 +311,16 @@ function MnemonicDirectEditForm({
       />
       {directEditMsg && <QcResultBanner passed={directEditMsg.ok} message={directEditMsg.text} issues={directEditMsg.issues} />}
       <div className="flex items-center gap-2">
-        <button onClick={handleSave} disabled={directEditSaving || !formula.trim()}
+        <button onClick={() => handleSave()} disabled={directEditSaving || !formula.trim()}
           className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
           {directEditSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存并质检
         </button>
+        {directEditMsg && !directEditMsg.ok && (
+          <button onClick={() => handleSave(true)} disabled={directEditSaving}
+            className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+            <CheckCircle2 size={12} /> 强制通过
+          </button>
+        )}
         <button onClick={onCancelDirectEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
       </div>
     </div>
@@ -404,7 +343,6 @@ export function MnemonicReviewSection({
   onRegenerated: () => void
 }) {
   const {
-    editingId,
     directEditId, directEditSaving, directEditMsg,
     startDirectEdit, cancelDirectEdit, handleDirectEditSave,
   } = useReviewEdit()
@@ -587,18 +525,17 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
     setRegenMsg(null)
   }
 
-  const handleSaveEdit = async (mn: any) => {
+  const handleSaveEdit = async (mn: any, forceApprove?: boolean) => {
     setSaving(true)
     setRegenMsg(null)
     try {
       const content = JSON.stringify({ formula: editFormula, chant: editChant, script: editScript })
-      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string; new_issues?: QcIssue[] }>(`/words/content-items/${mn.id}/manual-edit`, { content })
+      const res = await api.post<{ success: boolean; qc_passed: boolean; message: string; new_issues?: QcIssue[] }>(`/words/content-items/${mn.id}/manual-edit`, { content, force_approve: forceApprove })
       setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message, issues: res.new_issues })
       if (res.qc_passed) {
         safeTimeout(() => { setRegenMsg(null); setEditingId(null); onRegenerated() }, 1500)
-      } else {
-        safeTimeout(() => setRegenMsg(null), 3000)
       }
+      // QC 未通过 → 保持编辑框打开
     } catch {
       setRegenMsg({ id: mn.id, ok: false, msg: '保存失败' })
       safeTimeout(() => setRegenMsg(null), 3000)
@@ -634,6 +571,12 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
                   {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                   保存并质检
                 </button>
+                {regenMsg?.id === mn.id && !regenMsg.ok && (
+                  <button onClick={() => handleSaveEdit(mn, true)} disabled={saving}
+                    className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+                    <CheckCircle2 size={12} /> 强制通过
+                  </button>
+                )}
                 <button onClick={() => setEditingId(null)} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
               </div>
             </div>
@@ -641,7 +584,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
         }
 
         return (
-          <div key={mn.id} className="bg-slate-50 rounded-2xl p-3 border border-slate-100 flex items-center justify-between">
+          <div key={mn.id} className="bg-slate-50 rounded-2xl p-3 border border-slate-100 flex items-center justify-between cursor-pointer" onDoubleClick={() => startEdit(mn)} title="双击编辑">
             <div className="flex items-center gap-2">
               <span className="text-[10px] px-2 py-0.5 bg-slate-200 text-slate-500 rounded-md font-bold">{typeLabel}</span>
               <span className="flex items-center gap-1 text-xs text-slate-400">
@@ -659,13 +602,6 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
               >
                 {regenLoading === mn.id ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
                 重新生成
-              </button>
-              <button
-                onClick={() => startEdit(mn)}
-                className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-lg text-[10px] font-bold transition-all"
-              >
-                <UserCog size={10} />
-                手动编辑
               </button>
             </div>
           </div>

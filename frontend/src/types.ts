@@ -113,6 +113,7 @@ export interface BatchDetail {
 export interface WordDetail extends Word {
   phonetics: Phonetic[]
   syllable?: ContentItem
+  completion_status: 'approved' | 'in_progress'
   meanings: (Meaning & {
     chunk?: ContentItem
     sentence?: ContentItem
@@ -157,9 +158,16 @@ export interface AuthUser {
 
 /* ===== API 响应 ===== */
 
+export interface StatusCounts {
+  approved: number
+  in_progress: number
+  total: number
+}
+
 export interface PaginatedResponse<T> {
   items: T[]
   total: number
   page: number
   limit: number
+  status_counts?: StatusCounts
 }

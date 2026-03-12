@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from vocab_qc.core.models import ContentItem, QcRuleResult, QcRun, QcStatus
 from vocab_qc.core.models.enums import AiStrategy
+from vocab_qc.core.models.quality_layer import AiErrorLog, classify_ai_error
 from vocab_qc.core.qc.base import RuleResult
 from vocab_qc.core.qc.layer2.ai_base import AiClient, AiRuleChecker
 from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
@@ -101,8 +102,10 @@ class Layer2Runner:
         meaning_texts: dict[int, str],
         strategy: AiStrategy,
         extra_kwargs: dict[int, dict],
-    ) -> dict[int, list[RuleResult]]:
+    ) -> tuple[dict[int, list[RuleResult]], list[AiErrorLog]]:
         """纯 AI 调用，不涉及 session 操作。并发执行所有 item 检查。"""
+        # item_id → ContentItem 映射，用于错误日志填充 word_id / dimension
+        item_by_id = {item.id: item for item in items}
 
         async def _check_one(item: ContentItem) -> tuple[int, list[RuleResult]]:
             word_text = word_texts.get(item.word_id, "")
@@ -119,13 +122,25 @@ class Layer2Runner:
         gathered = await asyncio.gather(*tasks, return_exceptions=True)
 
         results_map: dict[int, list[RuleResult]] = {}
-        for r in gathered:
+        error_logs: list[AiErrorLog] = []
+        for i, r in enumerate(gathered):
             if isinstance(r, Exception):
                 logger.warning("AI 质检任务异常: %s", r)
+                failed_item = items[i]
+                dim_client = self._get_client_for_dimension(failed_item.dimension)
+                error_logs.append(AiErrorLog(
+                    content_item_id=failed_item.id,
+                    word_id=failed_item.word_id,
+                    phase="qc_layer2",
+                    dimension=failed_item.dimension,
+                    error_type=classify_ai_error(r),
+                    error_message=str(r)[:2000],
+                    ai_model=dim_client.model,
+                ))
                 continue
             item_id, item_results = r
             results_map[item_id] = item_results
-        return results_map
+        return results_map, error_logs
 
     def _save_results(
         self,
@@ -200,10 +215,13 @@ class Layer2Runner:
         session.flush()
 
         # AI 调用（不涉及 session）
-        results_map = await self._collect_ai_results(items, word_texts, meaning_texts, strategy, extra_kwargs)
+        results_map, error_logs = await self._collect_ai_results(items, word_texts, meaning_texts, strategy, extra_kwargs)
 
         # DB 写入（session 安全）
         passed_count, failed_count = self._save_results(session, items, results_map, strategy, run_id)
+
+        for log in error_logs:
+            session.add(log)
 
         qc_run.passed_items = passed_count
         qc_run.failed_items = failed_count
@@ -244,15 +262,18 @@ class Layer2Runner:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            results_map = asyncio.run(coro)
+            results_map, error_logs = asyncio.run(coro)
         else:
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                results_map = pool.submit(asyncio.run, coro).result()
+                results_map, error_logs = pool.submit(asyncio.run, coro).result()
 
         # Step 2: DB 写入（主线程，session 安全）
         passed_count, failed_count = self._save_results(session, items, results_map, strategy, run_id)
+
+        for log in error_logs:
+            session.add(log)
 
         qc_run.passed_items = passed_count
         qc_run.failed_items = failed_count

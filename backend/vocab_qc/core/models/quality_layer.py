@@ -142,6 +142,44 @@ class ReviewItem(Base):
         return f"<ReviewItem id={self.id} status={self.status}>"
 
 
+class AiErrorLog(Base):
+    """AI 调用错误日志（生产 + 质检）."""
+
+    __tablename__ = "ai_error_logs"
+    __table_args__ = (
+        Index("ix_ai_error_logs_phase", "phase"),
+        Index("ix_ai_error_logs_word_id", "word_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    content_item_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("content_items.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    word_id: Mapped[Optional[int]] = mapped_column(ForeignKey("words.id"), nullable=True)
+    phase: Mapped[str] = mapped_column(String(20), nullable=False)  # generation / qc_layer2
+    dimension: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    error_type: Mapped[str] = mapped_column(String(50), nullable=False)  # api_timeout / api_error / parse_error / unknown
+    error_message: Mapped[str] = mapped_column(Text, nullable=False)
+    ai_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<AiErrorLog id={self.id} phase={self.phase} type={self.error_type}>"
+
+
+def classify_ai_error(e: Exception) -> str:
+    """根据异常信息分类错误类型."""
+    msg = str(e).lower()
+    if "timeout" in msg or "timed out" in msg:
+        return "api_timeout"
+    if "status" in msg or "http" in msg or "connect" in msg:
+        return "api_error"
+    if "json" in msg or "parse" in msg or "decode" in msg:
+        return "parse_error"
+    return "unknown"
+
+
 class AuditLogV2(Base):
     """增强版审计日志."""
 

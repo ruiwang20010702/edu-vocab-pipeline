@@ -64,13 +64,10 @@ class TestMalformedJson:
             import_service.parse_upload(b'[{"word": "hello"', "data.json")
 
     def test_json_wrong_top_level_type(self, db_session):
-        """顶层不是列表（字典） — import_from_json 迭代字典键而非条目。"""
+        """顶层不是列表（字典） — parse_upload 应拒绝并抛出 ValueError。"""
         data_bytes = json.dumps({"word": "hello"}).encode("utf-8")
-        # parse_upload 返回 dict，后续 import_from_json 期望 list[dict]
-        # 传 dict 给 import_from_json 会迭代字符串键，全部跳过
-        parsed = import_service.parse_upload(data_bytes, "data.json")
-        # parsed 是一个 dict，不是 list — 验证 parse_upload 不做类型校验
-        assert isinstance(parsed, dict)
+        with pytest.raises(ValueError, match="期望数组格式"):
+            import_service.parse_upload(data_bytes, "data.json")
 
 
 class TestEmptyFile:

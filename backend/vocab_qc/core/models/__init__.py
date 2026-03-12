@@ -17,12 +17,14 @@ from vocab_qc.core.models.enums import (
 from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.package_layer import Package, PackageMeaning
 from vocab_qc.core.models.prompt import Prompt
-from vocab_qc.core.models.quality_layer import AuditLogV2, QcRuleResult, QcRun, RetryCounter, ReviewItem
+from vocab_qc.core.models.quality_layer import AiErrorLog, AuditLogV2, QcRuleResult, QcRun, RetryCounter, ReviewItem, classify_ai_error
 from vocab_qc.core.models.user import User, VerificationCode
 
 __all__ = [
+    "AiErrorLog",
     "AiStrategy",
     "AuditLogV2",
+    "classify_ai_error",
     "BatchStatus",
     "ReviewBatch",
     "ContentDimension",

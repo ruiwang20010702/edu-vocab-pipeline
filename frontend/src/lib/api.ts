@@ -99,6 +99,21 @@ export const api = {
       body: formData,
       headers: {}, // 让浏览器自动设置 multipart boundary
     }),
+
+  /** 下载二进制文件（Excel 等），返回 Blob。 */
+  blob: async (path: string): Promise<Blob> => {
+    const token = getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const res = await fetch(`${BASE_URL}${path}`, { headers })
+    if (res.status === 401) {
+      localStorage.removeItem('auth')
+      window.location.href = '/'
+      throw new ApiError(401, '登录已过期')
+    }
+    if (!res.ok) throw new ApiError(res.status, '下载失败')
+    return res.blob()
+  },
 }
 
 export { ApiError }

@@ -63,8 +63,15 @@ class WordDetailResponse(BaseModel):
     updated_at: Optional[datetime]
     phonetics: list[PhoneticResponse]
     syllable: Optional[ContentItemResponse] = None
+    completion_status: str = "in_progress"
     meanings: list[MeaningDetailResponse]
     issues: list[QualityIssueResponse] = []
+
+
+class StatusCountsResponse(BaseModel):
+    approved: int
+    in_progress: int
+    total: int
 
 
 class PaginatedWordResponse(BaseModel):
@@ -72,3 +79,4 @@ class PaginatedWordResponse(BaseModel):
     total: int
     page: int
     limit: int
+    status_counts: Optional[StatusCountsResponse] = None

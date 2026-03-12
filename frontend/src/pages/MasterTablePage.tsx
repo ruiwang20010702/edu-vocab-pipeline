@@ -1,22 +1,13 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import {
-  Search, Download, ChevronLeft, ChevronRight, X, Loader2,
-  CheckCircle2, AlertTriangle, MoreHorizontal,
+  Search, Download, ChevronLeft, ChevronRight, Loader2, MoreHorizontal,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import type { WordDetail, PaginatedResponse } from '../types'
+import type { WordDetail, PaginatedResponse, StatusCounts } from '../types'
 import WordDetailModal from './mastertable/WordDetailModal'
 import { ALL_MNEMONIC_DIMS, MNEMONIC_TYPE_LABELS } from './review/constants'
 import { parseMnemonic } from './review/utils'
-
-/* ===== 导出就绪 ===== */
-
-interface ExportReadiness {
-  total_words: number
-  approved_words: number
-  ready: boolean
-}
 
 /* ===== 主组件 ===== */
 
@@ -29,8 +20,9 @@ export default function MasterTablePage() {
   const [selectedWordId, setSelectedWordId] = useState<number | null>(null)
   const [detailWord, setDetailWord] = useState<WordDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [exportInfo, setExportInfo] = useState<ExportReadiness | null>(null)
   const [exportLoading, setExportLoading] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<'approved' | 'in_progress' | null>('approved')
+  const [statusCounts, setStatusCounts] = useState<StatusCounts>({ approved: 0, in_progress: 0, total: 0 })
   const limit = 50
 
   const loadWords = async () => {
@@ -38,9 +30,11 @@ export default function MasterTablePage() {
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) })
       if (search) params.set('q', search)
+      if (statusFilter) params.set('status', statusFilter)
       const res = await api.get<PaginatedResponse<WordDetail>>(`/words?${params}`)
       setWords(res.items)
       setTotal(res.total)
+      if (res.status_counts) setStatusCounts(res.status_counts)
     } catch {
       setWords([])
       setTotal(0)
@@ -49,9 +43,14 @@ export default function MasterTablePage() {
     }
   }
 
-  useEffect(() => { loadWords() }, [page])
+  useEffect(() => { loadWords() }, [page, statusFilter])
 
   const handleSearch = () => { setPage(1); loadWords() }
+
+  const handleStatusChange = (s: 'approved' | 'in_progress' | null) => {
+    setStatusFilter(s)
+    setPage(1)
+  }
   const totalPages = Math.max(1, Math.ceil(total / limit))
 
   const handleOpenDetail = async (wordId: number) => {
@@ -76,26 +75,19 @@ export default function MasterTablePage() {
   const handleExport = async () => {
     setExportLoading(true)
     try {
-      const data = await api.get<ExportReadiness>('/export/readiness')
-      setExportInfo(data)
-    } catch {
-      setExportInfo(null)
-    } finally {
-      setExportLoading(false)
-    }
-  }
-
-  const handleDownload = async () => {
-    try {
-      const data = await api.get<unknown[]>('/export/download')
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const blob = await api.blob('/export/excel')
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'vocab_export.json'
+      a.download = `vocab_export_${new Date().toISOString().slice(0, 10)}.xlsx`
       a.click()
       URL.revokeObjectURL(url)
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      console.error('导出失败', e)
+      alert(e?.detail || e?.message || '导出失败，请重试')
+    } finally {
+      setExportLoading(false)
+    }
   }
 
   return (
@@ -121,40 +113,36 @@ export default function MasterTablePage() {
             className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-600/20 hover:bg-blue-700 hover:-translate-y-0.5 active:scale-95 transition-all disabled:opacity-50"
           >
             {exportLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            导出
+            {exportLoading ? '导出中...' : '导出已通过'}
           </button>
         </div>
       </div>
 
-      {/* 导出就绪 */}
-      <AnimatePresence>
-        {exportInfo && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm"
+      {/* 状态 Tab */}
+      <div className="flex items-center gap-1 p-1 bg-white/80 backdrop-blur-sm rounded-2xl w-fit shadow-sm border border-white/80">
+        {([
+          { key: null, label: '全部', count: statusCounts.total },
+          { key: 'approved' as const, label: '已通过', count: statusCounts.approved },
+          { key: 'in_progress' as const, label: '进行中', count: statusCounts.in_progress },
+        ] as const).map(tab => (
+          <button
+            key={tab.key ?? 'all'}
+            onClick={() => handleStatusChange(tab.key)}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              statusFilter === tab.key
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+            }`}
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {exportInfo.ready ? <CheckCircle2 size={20} className="text-green-600" /> : <AlertTriangle size={20} className="text-yellow-600" />}
-                <div>
-                  <p className="text-slate-900 text-sm font-medium">{exportInfo.ready ? '数据就绪，可以导出' : '部分数据未审核通过'}</p>
-                  <p className="text-slate-400 text-xs">已审核 {exportInfo.approved_words}/{exportInfo.total_words} 词</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {exportInfo.ready && (
-                  <button onClick={handleDownload} className="flex items-center gap-1 px-4 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-sm transition-all">
-                    <Download size={14} /> 下载 JSON
-                  </button>
-                )}
-                <button onClick={() => setExportInfo(null)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {tab.key === 'approved' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />}
+            {tab.key === 'in_progress' && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block" />}
+            {tab.label}
+            <span className={`text-[10px] ${statusFilter === tab.key ? 'text-white/70' : 'text-slate-400'}`}>
+              {tab.count}
+            </span>
+          </button>
+        ))}
+      </div>
 
       {/* 表格 */}
       <div className="bg-white rounded-2xl border border-white overflow-hidden shadow-sm">
@@ -199,6 +187,12 @@ export default function MasterTablePage() {
                       <tr key={w.id} className="hover:bg-blue-50/30 transition-colors group">
                         <td className="px-5 py-3 sticky left-0 bg-white group-hover:bg-blue-50/30 transition-colors z-10">
                           <button onClick={() => handleOpenDetail(w.id)} className="font-bold text-slate-900 hover:text-blue-600 transition-colors cursor-pointer text-left">{w.word}</button>
+                          {statusFilter === null && (
+                            <span className={`flex items-center gap-1 text-[9px] mt-0.5 ${w.completion_status === 'approved' ? 'text-emerald-500' : 'text-blue-500'}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${w.completion_status === 'approved' ? 'bg-emerald-400' : 'bg-blue-400'}`} />
+                              {w.completion_status === 'approved' ? '已通过' : '进行中'}
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-3 font-mono text-xs text-slate-400">{ipa}</td>
                         <td className="px-5 py-3 text-xs text-slate-500">{syllables}</td>
@@ -237,6 +231,12 @@ export default function MasterTablePage() {
                             <td rowSpan={rowCount} className="px-5 py-3 sticky left-0 bg-white group-hover:bg-blue-50/30 transition-colors z-10 align-top border-r border-slate-50">
                               <button onClick={() => handleOpenDetail(w.id)} className="font-bold text-slate-900 hover:text-blue-600 transition-colors cursor-pointer text-left">{w.word}</button>
                               {rowCount > 1 && <span className="block text-[9px] text-slate-400 mt-0.5">{rowCount} 个义项</span>}
+                              {statusFilter === null && (
+                                <span className={`flex items-center gap-1 text-[9px] mt-0.5 ${w.completion_status === 'approved' ? 'text-emerald-500' : 'text-blue-500'}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${w.completion_status === 'approved' ? 'bg-emerald-400' : 'bg-blue-400'}`} />
+                                  {w.completion_status === 'approved' ? '已通过' : '进行中'}
+                                </span>
+                              )}
                             </td>
                             <td rowSpan={rowCount} className="px-5 py-3 font-mono text-xs text-slate-400 align-top">{ipa}</td>
                             <td rowSpan={rowCount} className="px-5 py-3 text-xs text-slate-500 align-top">{syllables}</td>
@@ -330,7 +330,7 @@ export default function MasterTablePage() {
       {/* 详情弹窗 */}
       <AnimatePresence>
         {selectedWordId !== null && (
-          <WordDetailModal word={detailWord} loading={detailLoading} onClose={handleCloseDetail} onWordUpdate={setDetailWord} />
+          <WordDetailModal word={detailWord} loading={detailLoading} onClose={handleCloseDetail} onWordUpdate={setDetailWord} editable={detailWord?.completion_status === 'approved'} />
         )}
       </AnimatePresence>
     </div>
