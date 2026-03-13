@@ -11,6 +11,7 @@
 |---|------|------|------|---------|---------|------|
 | 1 | P-H1 | `asyncio.run()` 每次创建新事件循环 | `production_service.py` L354 | 改为复用已有 loop 或 `loop.run_until_complete()` | 15min | 当前已有 try/except 分支 + ThreadPoolExecutor 兜底，不会阻塞主线程；但频繁创建/销毁 loop 有微量开销 |
 | 2 | P-H2 | httpx.AsyncClient 在 `asyncio.run()` 场景下可能泄漏 | `generators/base.py` L39-56 | 在 `_generate_all()` 结束前显式 `await client.aclose()` | 15min | 当前 `_get_async_http_client()` 按 loop 缓存 + lifespan 关闭，正常 FastAPI 路径无泄漏；仅 CLI 同步调用路径有风险 |
+| 3 | PM-H3 | Prompt 文件修改后 DB 不自动同步 | `prompt_service.py` | 新增 `sync_prompts()` 功能：Prompt 模型加 `source`/`file_hash` 字段，启动时自动对比文件 hash 与 DB，文件变更自动更新 DB，用户手动编辑过的不覆盖；新增管理 API（preview + sync） | 1h | 当前 `seed_defaults()` 仅在 DB 为空时导入，后续文件修改不生效 |
 
 ## 第三优先级（持续优化）
 

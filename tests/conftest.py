@@ -4,7 +4,13 @@ import pytest
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from vocab_qc.core.config import settings
 from vocab_qc.core.db import Base
+
+# 清空 AI API 配置，防止测试发出真实网络请求
+# Pydantic Settings 在 import 时已从 .env 加载，需直接覆盖实例属性
+settings.ai_api_key = ""
+settings.ai_api_base_url = ""
 
 # 使用 SQLite 内存数据库进行单元测试，无需 PostgreSQL
 TEST_DATABASE_URL = "sqlite://"

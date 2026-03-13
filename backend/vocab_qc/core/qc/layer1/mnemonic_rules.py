@@ -137,9 +137,16 @@ class N4FormulaLength(_RuleCheckerBase):
         return RuleResult(rule_id=self.rule_id, passed=True)
 
 
+_SCRIPT_LENGTH_LIMITS: dict[str, tuple[int, int]] = {
+    "mnemonic_sound_meaning": (400, 500),
+    "mnemonic_exam_app": (400, 500),
+}
+_DEFAULT_SCRIPT_LENGTH = (400, 600)
+
+
 @RuleRegistry.register_layer1
 class N5TeacherScriptLength(_RuleCheckerBase):
-    """N5: 老师话术约 500 字（±20% 浮动）."""
+    """N5: 老师话术字数校验（音义联想 400-500，其他 400-600）."""
 
     rule_id = "N5"
     dimension = "mnemonic"
@@ -159,10 +166,8 @@ class N5TeacherScriptLength(_RuleCheckerBase):
 
         char_count = len(script)
 
-        target = 500
-        tolerance = 0.2
-        lower = int(target * (1 - tolerance))  # 400
-        upper = int(target * (1 + tolerance))  # 600
+        dimension = kwargs.get("dimension", "")
+        lower, upper = _SCRIPT_LENGTH_LIMITS.get(dimension, _DEFAULT_SCRIPT_LENGTH)
 
         if char_count < lower:
             return RuleResult(
