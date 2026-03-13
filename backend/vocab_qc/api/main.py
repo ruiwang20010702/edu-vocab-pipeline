@@ -32,6 +32,17 @@ async def lifespan(app: FastAPI):
 
     validate_production_config()
 
+    # PM-H3: 启动时自动同步 Prompt 文件 → DB
+    try:
+        from vocab_qc.core.db import SyncSessionLocal
+        from vocab_qc.core.services import prompt_service
+        with SyncSessionLocal() as session:
+            result = prompt_service.sync_prompts(session)
+            session.commit()
+            logger.info("Prompt 同步完成: %s", result)
+    except Exception:
+        logger.warning("Prompt 启动同步失败（不阻塞启动）", exc_info=True)
+
     yield
 
     # --- shutdown: 关闭共享 HTTP 客户端 ---

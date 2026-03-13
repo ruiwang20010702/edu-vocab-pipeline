@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-前后端均已实现，545 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。已完成两轮安全与性能审计。
+前后端均已实现，572 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。已完成三轮安全与性能审计，全部修复。
 
 ```
 VocabularyDataCleaning1.0/
@@ -23,10 +23,11 @@ VocabularyDataCleaning1.0/
 │   │   ├── core/
 │   │   │   ├── config.py        ← Pydantic Settings，环境变量前缀 VOCAB_QC_
 │   │   │   ├── db.py            ← 数据库连接（sync + async）
+│   │   │   ├── async_bridge.py  ← async-to-sync 桥接函数
 │   │   │   ├── models/          ← ORM 模型（17 张表）
 │   │   │   ├── qc/              ← 质检引擎（Layer 1 算法 + Layer 2 AI）
 │   │   │   ├── services/        ← 业务服务层
-│   │   │   └── generators/      ← 内容生成器（chunk/sentence/syllable/mnemonic）
+│   │   │   └── generators/      ← 内容生成器 + prompt injection 防护
 │   │   ├── api/
 │   │   │   ├── main.py          ← FastAPI 入口（CORS + 10 个 router）
 │   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt
@@ -43,7 +44,7 @@ VocabularyDataCleaning1.0/
 │   │   └── pages/               ← 6 个页面
 │   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
 │
-├── tests/                       ← 545 个测试
+├── tests/                       ← 572 个测试
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
 │   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
 │   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
@@ -87,11 +88,14 @@ PYTHONPATH=backend vocab review list
 - **质量门禁**：fail-safe，未审核不放行
 - **审计可追溯**：每次操作可追溯
 
-## 安全加固（两轮审计）
+## 安全加固（三轮审计，全部修复）
 
 - JWT 4h 过期 + 邮箱域名白名单 + slowapi 60/min 全局限速
 - Admin 禁止降级自身角色/停用自身 + Prompt API 限 admin-only
-- 文件上传 magic bytes 校验 + HTML 过滤 + SSRF 防护
-- Docker 网络隔离 + 安全头（CSP/HSTS/X-Frame-Options）
-- 前端全局 Toast 组件（替代静默 catch）+ regenerate 防重复提交
-- 剩余优化项见 `docs/pending-fixes-v2.md`
+- 文件上传 magic bytes 校验 + HTML 过滤 + SSRF 防护 + defusedxml 防 XXE
+- Prompt injection 防护（sanitize_prompt_input）+ AI 单任务超时（60s）
+- Prompt 文件→DB 自动同步（source/file_hash + sync API + 启动同步）
+- Docker 网络隔离 + 安全头 + 基础镜像 digest 固定
+- 前端全局 Toast 组件 + regenerate AbortController 防并发
+- Excel 导出分批查询 + async 桥接公共化 + httpx 客户端泄漏修复
+- 修复记录见 `docs/pending-fixes-v2.md`

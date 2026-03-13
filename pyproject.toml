@@ -20,6 +20,7 @@ dependencies = [
     "email-validator>=2.0.0",
     "python-multipart>=0.0.20",
     "slowapi>=0.1.9",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]

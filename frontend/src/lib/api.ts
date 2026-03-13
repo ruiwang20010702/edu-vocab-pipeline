@@ -70,7 +70,8 @@ async function request<T>(
 /* ===== 公开方法 ===== */
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, options?: { signal?: AbortSignal }) =>
+    request<T>(path, options?.signal ? { signal: options.signal } : {}),
 
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, {

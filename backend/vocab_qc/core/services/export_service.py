@@ -53,6 +53,101 @@ def _parse_mnemonic_fields(content: str) -> dict[str, str]:
     }
 
 
+def _iter_approved_batches(session: Session, batch_size: int = 500):
+    """P-M1: 分批查询已审核通过的词汇数据，避免全量加载到内存。"""
+    from collections import defaultdict
+
+    from sqlalchemy import distinct
+
+    # 一次查出所有有 approved 内容的 word_id
+    approved_word_ids = [
+        row[0]
+        for row in session.query(distinct(ContentItem.word_id))
+        .filter_by(qc_status=QcStatus.APPROVED.value)
+        .all()
+    ]
+    if not approved_word_ids:
+        return
+
+    for i in range(0, len(approved_word_ids), batch_size):
+        batch_ids = approved_word_ids[i : i + batch_size]
+
+        words = {w.id: w for w in session.query(Word).filter(Word.id.in_(batch_ids)).all()}
+        phonetics = {}
+        for p in session.query(Phonetic).filter(Phonetic.word_id.in_(batch_ids)).all():
+            phonetics[p.word_id] = p
+
+        all_meanings = session.query(Meaning).filter(Meaning.word_id.in_(batch_ids)).all()
+        meanings_by_word: dict[int, list[Meaning]] = defaultdict(list)
+        meaning_ids = []
+        for m in all_meanings:
+            meanings_by_word[m.word_id].append(m)
+            meaning_ids.append(m.id)
+
+        sources_by_meaning: dict[int, list[Source]] = defaultdict(list)
+        if meaning_ids:
+            for s in session.query(Source).filter(Source.meaning_id.in_(meaning_ids)).all():
+                sources_by_meaning[s.meaning_id].append(s)
+
+        approved_items = (
+            session.query(ContentItem)
+            .filter(
+                ContentItem.word_id.in_(batch_ids),
+                ContentItem.qc_status == QcStatus.APPROVED.value,
+            )
+            .all()
+        )
+
+        content_index: dict[tuple[int, int | None, str], ContentItem] = {}
+        mnemonics_by_meaning: dict[int, list[ContentItem]] = defaultdict(list)
+        for ci in approved_items:
+            if ci.dimension in MNEMONIC_DIMENSIONS and ci.meaning_id:
+                mnemonics_by_meaning[ci.meaning_id].append(ci)
+            else:
+                content_index[(ci.word_id, ci.meaning_id, ci.dimension)] = ci
+
+        for word_id in batch_ids:
+            word = words.get(word_id)
+            if not word:
+                continue
+
+            phonetic = phonetics.get(word_id)
+            syllable_item = content_index.get((word_id, None, "syllable"))
+            syllables = (
+                syllable_item.content if syllable_item
+                else (phonetic.syllables if phonetic else "")
+            )
+            result: dict[str, Any] = {
+                "id": word.id,
+                "word": word.word,
+                "syllables": syllables,
+                "ipa": phonetic.ipa if phonetic else "",
+                "meanings": [],
+            }
+
+            for meaning in meanings_by_word.get(word_id, []):
+                sources = sources_by_meaning.get(meaning.id, [])
+                chunk = content_index.get((word_id, meaning.id, "chunk"))
+                sentence = content_index.get((word_id, meaning.id, "sentence"))
+
+                meaning_data = {
+                    "pos": meaning.pos,
+                    "def": meaning.definition,
+                    "sources": [s.source_name for s in sources],
+                    "chunk": chunk.content if chunk else None,
+                    "chunk_cn": chunk.content_cn if chunk else None,
+                    "sentence": sentence.content if sentence else None,
+                    "sentence_cn": sentence.content_cn if sentence else None,
+                    "mnemonics": [
+                        {"type": m.dimension, "content": m.content}
+                        for m in mnemonics_by_meaning.get(meaning.id, [])
+                    ],
+                }
+                result["meanings"].append(meaning_data)
+
+            yield result
+
+
 class ExportService:
     """导出服务: 门禁 + 格式化输出."""
 
@@ -232,11 +327,14 @@ class ExportService:
         return len(data)
 
     def export_to_excel(self, session: Session) -> io.BytesIO:
-        """导出已通过词汇数据为 Excel，每个义项一行，4 种助记各占 3 列。"""
+        """导出已通过词汇数据为 Excel，每个义项一行，4 种助记各占 3 列。
+
+        P-M1: 使用分批查询，避免全量加载到内存。
+        """
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Font, PatternFill
 
-        data = self.export_all_approved(session)
+        data = _iter_approved_batches(session)
 
         wb = Workbook()
         ws = wb.active

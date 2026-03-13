@@ -22,6 +22,26 @@ def list_prompts(
     return prompt_service.list_prompts(db, category=category, is_active=is_active)
 
 
+@router.get("/sync/preview")
+def sync_preview(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """预览 Prompt 同步结果（dry run）。"""
+    return prompt_service.sync_prompts(db, dry_run=True)
+
+
+@router.post("/sync")
+def sync_prompts(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """同步 docs/prompts/ 文件到 DB。"""
+    result = prompt_service.sync_prompts(db)
+    db.commit()
+    return result
+
+
 @router.get("/{prompt_id}", response_model=PromptResponse)
 def get_prompt(
     prompt_id: int,

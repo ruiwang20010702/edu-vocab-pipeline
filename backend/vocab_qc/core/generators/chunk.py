@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from vocab_qc.core.generators.base import ContentGenerator
+from vocab_qc.core.generators.base import ContentGenerator, sanitize_prompt_input
 
 
 class ChunkGenerator(ContentGenerator):
@@ -18,7 +18,7 @@ class ChunkGenerator(ContentGenerator):
         )
 
     def _build_user_prompt(self, word: str, pos: Optional[str], meaning: Optional[str]) -> str:
-        return f"Word: {word} | POS: {pos or '未知'} | Meaning: {meaning or '未知'}"
+        return f"Word: {sanitize_prompt_input(word)} | POS: {sanitize_prompt_input(pos or '未知')} | Meaning: {sanitize_prompt_input(meaning or '未知')}"
 
     def _process_result(self, result: dict, word: str) -> dict:
         if result and result.get("content"):

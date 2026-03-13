@@ -109,13 +109,14 @@ export function WordReviewModal({
       .finally(() => setDetailLoading(false))
   }, [group.word_id])
 
-  // 重新生成完成后刷新 wordDetail，使 QC 状态和错误信息更新
+  // F-M2: 重新生成完成后刷新 wordDetail，使用 AbortController 防并发
   useEffect(() => {
-    if (regenResult) {
-      api.get<WordDetail>(`/words/${group.word_id}`)
-        .then(data => setWordDetail(data))
-        .catch(() => {})
-    }
+    if (!regenResult) return
+    const controller = new AbortController()
+    api.get<WordDetail>(`/words/${group.word_id}`, { signal: controller.signal })
+      .then(data => setWordDetail(data))
+      .catch(() => {})
+    return () => controller.abort()
   }, [regenResult, group.word_id])
 
   const meanings = wordDetail?.meanings ?? []

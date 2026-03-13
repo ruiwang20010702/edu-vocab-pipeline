@@ -1,11 +1,15 @@
 """Prompt 管理服务."""
 
+import hashlib
+import logging
 from pathlib import Path
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models.prompt import Prompt
+
+logger = logging.getLogger(__name__)
 
 # 文件名 → (dimension, 显示名)
 _PROMPT_FILE_MAP: list[tuple[str, str, str]] = [
@@ -19,6 +23,11 @@ _PROMPT_FILE_MAP: list[tuple[str, str, str]] = [
 ]
 
 DEFAULT_MODEL = "gpt-5.2"
+
+
+def _compute_file_hash(content: str) -> str:
+    """计算内容 SHA-256 哈希。"""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _find_prompts_dir() -> Path | None:
@@ -58,6 +67,8 @@ def seed_defaults(session: Session) -> int:
                 dimension=dimension,
                 model=DEFAULT_MODEL,
                 content=content,
+                source="file",
+                file_hash=_compute_file_hash(content),
             ))
             created += 1
 
@@ -116,6 +127,9 @@ def update_prompt(session: Session, prompt_id: int, data: dict) -> Optional[Prom
     for field in ("name", "model", "content", "is_active", "ai_api_key", "ai_api_base_url"):
         if field in data:
             setattr(prompt, field, data[field])
+    # PM-H3: 用户手动编辑 content 后标记 source="manual"
+    if "content" in data:
+        prompt.source = "manual"
     session.flush()
     return prompt
 
@@ -148,3 +162,66 @@ def delete_prompt(session: Session, prompt_id: int) -> bool:
     session.delete(prompt)
     session.flush()
     return True
+
+
+def sync_prompts(session: Session, dry_run: bool = False) -> dict:
+    """PM-H3: 同步 docs/prompts/ 文件到 DB。
+
+    - DB 无记录 → 新建 (source="file")
+    - DB 有 + source="file" + hash 不同 → 更新 content + file_hash
+    - DB 有 + source="manual" → 跳过（用户手动编辑的不覆盖）
+    """
+    prompts_dir = _find_prompts_dir()
+    if prompts_dir is None:
+        return {"created": 0, "updated": 0, "skipped": 0}
+
+    created = 0
+    updated = 0
+    skipped = 0
+
+    category_map = [("generation", "generation"), ("qa", "quality")]
+
+    for category, subdir in category_map:
+        category_dir = prompts_dir / subdir
+        if not category_dir.is_dir():
+            continue
+        for filename, dimension, display_name in _PROMPT_FILE_MAP:
+            filepath = category_dir / filename
+            if not filepath.exists():
+                continue
+
+            content = filepath.read_text(encoding="utf-8").strip()
+            file_hash = _compute_file_hash(content)
+
+            existing = (
+                session.query(Prompt)
+                .filter_by(category=category, dimension=dimension, is_active=True)
+                .first()
+            )
+
+            if existing is None:
+                if not dry_run:
+                    session.add(Prompt(
+                        name=f"{display_name}{'生成' if category == 'generation' else '质检'}",
+                        category=category,
+                        dimension=dimension,
+                        model=DEFAULT_MODEL,
+                        content=content,
+                        source="file",
+                        file_hash=file_hash,
+                    ))
+                created += 1
+            elif existing.source == "manual":
+                skipped += 1
+            elif existing.file_hash != file_hash:
+                if not dry_run:
+                    existing.content = content
+                    existing.file_hash = file_hash
+                updated += 1
+            else:
+                skipped += 1
+
+    if not dry_run:
+        session.flush()
+
+    return {"created": created, "updated": updated, "skipped": skipped}

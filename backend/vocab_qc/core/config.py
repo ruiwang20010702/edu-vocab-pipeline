@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     ai_model: str = "gemini-3-flash-preview"
     ai_max_concurrency: int = 20
     ai_max_retries: int = 3
+    ai_task_timeout: int = 60
     allow_private_ai_url: bool = False
 
     max_regenerate_retries: int = 3

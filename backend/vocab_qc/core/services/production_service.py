@@ -310,9 +310,12 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
             generator = _GENERATORS[dimension]
             config = ai_configs[dimension]
             async with semaphore:
-                result = await generator.generate_async(
-                    word=word_text, meaning=meaning_text, pos=pos,
-                    _preloaded_config=config,
+                result = await asyncio.wait_for(
+                    generator.generate_async(
+                        word=word_text, meaning=meaning_text, pos=pos,
+                        _preloaded_config=config,
+                    ),
+                    timeout=settings.ai_task_timeout,
                 )
             return item_id, result
 
@@ -348,17 +351,16 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
                 ))
             else:
                 results[r[0]] = r[1]
+
+        # P-H2: CLI 路径清理 HTTP 客户端
+        from vocab_qc.core.generators.base import close_http_clients
+        await close_http_clients()
+
         return results
 
-    # 同步桥接：在独立事件循环中运行异步任务
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        results = asyncio.run(_generate_all())
-    else:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            results = pool.submit(asyncio.run, _generate_all()).result()
+    # P-H1: 同步桥接
+    from vocab_qc.core.async_bridge import run_async_in_sync
+    results = run_async_in_sync(_generate_all())
 
     # --- Step C: 主线程批量写入 ---
     count = 0

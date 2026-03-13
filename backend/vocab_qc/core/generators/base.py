@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -13,6 +14,21 @@ from typing import Any, Optional
 import httpx
 
 from vocab_qc.core.config import settings
+
+# S-M2: Prompt Injection 防护
+_INJECTION_RE = re.compile(
+    r"(ignore\s+(above|previous|all)|system:|<\|im_|忽略以上|忽略前面)",
+    re.IGNORECASE,
+)
+
+
+def sanitize_prompt_input(text: str, max_len: int = 200) -> str:
+    """清洗用户输入，防止 prompt injection。"""
+    if not text:
+        return ""
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    cleaned = _INJECTION_RE.sub("", cleaned)
+    return cleaned[:max_len].strip()
 
 # 项目根目录 → docs/prompts/generation/
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]

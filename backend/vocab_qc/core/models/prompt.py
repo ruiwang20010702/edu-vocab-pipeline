@@ -30,6 +30,8 @@ class Prompt(Base):
     ai_api_key: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     ai_api_base_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, server_default="1")
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="file", server_default="file")
+    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)

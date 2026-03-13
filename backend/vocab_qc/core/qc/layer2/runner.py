@@ -257,17 +257,10 @@ class Layer2Runner:
         session.add(qc_run)
         session.flush()
 
-        # Step 1: AI 调用（不涉及 session，线程安全）
+        # P-H1: AI 调用（不涉及 session，线程安全）
         coro = self._collect_ai_results(items, word_texts, meaning_texts, strategy, extra_kwargs)
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            results_map, error_logs = asyncio.run(coro)
-        else:
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                results_map, error_logs = pool.submit(asyncio.run, coro).result()
+        from vocab_qc.core.async_bridge import run_async_in_sync
+        results_map, error_logs = run_async_in_sync(coro)
 
         # Step 2: DB 写入（主线程，session 安全）
         passed_count, failed_count = self._save_results(session, items, results_map, strategy, run_id)
