@@ -9,12 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
-
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 from vocab_qc.core.db import Base
 from vocab_qc.core.models.user import User
-
 
 # ── 工具函数（向后兼容，各测试文件如已直接使用可继续使用） ──
 

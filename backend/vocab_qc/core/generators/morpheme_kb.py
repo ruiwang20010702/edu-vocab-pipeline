@@ -5,7 +5,6 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 
 from vocab_qc.core.generators import _find_project_root
 

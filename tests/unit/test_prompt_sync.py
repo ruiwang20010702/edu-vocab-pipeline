@@ -1,6 +1,5 @@
 """PM-H3: Prompt 同步功能测试."""
 
-import pytest
 
 from vocab_qc.core.models.prompt import Prompt
 from vocab_qc.core.services.prompt_service import (
@@ -37,7 +36,7 @@ class TestSyncPrompts:
         db_session.add(prompt)
         db_session.flush()
 
-        result = sync_prompts(db_session)
+        sync_prompts(db_session)
         db_session.flush()
 
         refreshed = db_session.query(Prompt).filter_by(
@@ -56,14 +55,14 @@ class TestSyncPrompts:
         db_session.add(prompt)
         db_session.flush()
 
-        result = sync_prompts(db_session)
+        _result = sync_prompts(db_session)
         # 如果文件存在且 hash 不同，updated >= 1
         # 如果文件不存在，则不会更新
-        assert result["updated"] >= 0
+        assert _result["updated"] >= 0
 
     def test_dry_run_no_changes(self, db_session):
         """dry_run=True 不应修改 DB。"""
         count_before = db_session.query(Prompt).count()
-        result = sync_prompts(db_session, dry_run=True)
+        sync_prompts(db_session, dry_run=True)
         count_after = db_session.query(Prompt).count()
         assert count_before == count_after

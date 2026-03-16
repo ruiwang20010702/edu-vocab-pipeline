@@ -5,7 +5,10 @@ from typing import Optional
 from vocab_qc.core.qc.layer2.ai_base import AiRuleChecker
 from vocab_qc.core.qc.registry import RuleRegistry
 
-_SENTENCE_SYSTEM = "你是中小学英语教学质检专家。请严格按要求判断例句质量。返回 JSON: {\"passed\": true/false, \"detail\": \"原因\"}"
+_SENTENCE_SYSTEM = (
+    "你是中小学英语教学质检专家。请严格按要求判断例句质量。"
+    "返回 JSON: {\"passed\": true/false, \"detail\": \"原因\"}"
+)
 
 
 @RuleRegistry.register_layer2
@@ -64,7 +67,10 @@ class E5ForbiddenStructure(AiRuleChecker):
     system_prompt = _SENTENCE_SYSTEM
 
     def build_user_prompt(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> str:
-        return f"例句: {content}\n\n请判断此例句是否包含以下禁区结构：非谓语动词短语作状语、虚拟语气、倒装句、独立主格。"
+        return (
+            f"例句: {content}\n\n"
+            "请判断此例句是否包含以下禁区结构：非谓语动词短语作状语、虚拟语气、倒装句、独立主格。"
+        )
 
 
 @RuleRegistry.register_layer2
@@ -87,7 +93,10 @@ class E9MeaningMatch(AiRuleChecker):
     system_prompt = _SENTENCE_SYSTEM
 
     def build_user_prompt(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> str:
-        return f"单词: {word}\n标注义项: {meaning or '无'}\n例句: {content}\n\n请判断例句中目标词的用法是否对应标注的义项，有无张冠李戴。"
+        return (
+            f"单词: {word}\n标注义项: {meaning or '无'}\n例句: {content}\n\n"
+            "请判断例句中目标词的用法是否对应标注的义项，有无张冠李戴。"
+        )
 
 
 @RuleRegistry.register_layer2

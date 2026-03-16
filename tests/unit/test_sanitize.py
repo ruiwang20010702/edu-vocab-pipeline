@@ -1,6 +1,5 @@
 """S-M2: Prompt injection 防护测试."""
 
-import pytest
 
 from vocab_qc.core.generators.base import sanitize_prompt_input
 

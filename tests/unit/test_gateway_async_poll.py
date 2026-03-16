@@ -1,12 +1,10 @@
 """Gateway 异步轮询模式测试."""
 
-import asyncio
 from itertools import count
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-
 from vocab_qc.core.generators.base import (
     AiRequestError,
     build_ai_request,
@@ -16,7 +14,6 @@ from vocab_qc.core.generators.base import (
     poll_gateway_task_async,
     poll_gateway_task_sync,
 )
-
 
 # ── parse_async_submit_response ──
 

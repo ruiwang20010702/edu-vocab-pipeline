@@ -1,6 +1,6 @@
 """质检流水线集成测试."""
 
-from vocab_qc.core.models import ContentItem, QcRuleResult, QcRun, QcStatus, ReviewItem
+from vocab_qc.core.models import QcRuleResult, QcRun, ReviewItem
 from vocab_qc.core.services.qc_service import QcService
 
 

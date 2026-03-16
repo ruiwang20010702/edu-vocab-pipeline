@@ -8,13 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from sqlalchemy.orm import Session
-
-from vocab_qc.core.config import _INSECURE_JWT_SECRETS, settings, validate_production_config
 from vocab_qc.api.deps import get_db
 from vocab_qc.api.routers import admin, auth, batch, export, import_, prompt, qc, review, stats, words
+from vocab_qc.core.config import _INSECURE_JWT_SECRETS, settings, validate_production_config
 
 logger = logging.getLogger(__name__)
 

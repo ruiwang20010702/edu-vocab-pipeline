@@ -1,6 +1,5 @@
 """Prompt 服务单元测试."""
 
-from vocab_qc.core.models.prompt import Prompt
 from vocab_qc.core.services import prompt_service
 
 

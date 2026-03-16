@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
 from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
 
-
 _MNEMONIC_TYPE_LABELS: dict[str, str] = {
     "mnemonic_root_affix": "词根词缀",
     "mnemonic_word_in_word": "词中词",

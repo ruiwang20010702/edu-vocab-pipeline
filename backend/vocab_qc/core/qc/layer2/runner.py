@@ -8,6 +8,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+# 确保 Layer 2 规则被加载
+import vocab_qc.core.qc.layer2.per_rule  # noqa: F401
 from vocab_qc.core.models import ContentItem, QcRuleResult, QcRun, QcStatus
 from vocab_qc.core.models.enums import AiStrategy
 from vocab_qc.core.models.quality_layer import AiErrorLog, classify_ai_error
@@ -18,9 +20,6 @@ from vocab_qc.core.qc.layer2.unified.mnemonic_unified import UnifiedMnemonicChec
 from vocab_qc.core.qc.layer2.unified.sentence_unified import UnifiedSentenceChecker
 from vocab_qc.core.qc.layer2.unified.syllable_unified import UnifiedSyllableChecker
 from vocab_qc.core.qc.registry import RuleRegistry
-
-# 确保 Layer 2 规则被加载
-import vocab_qc.core.qc.layer2.per_rule  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +104,7 @@ class Layer2Runner:
     ) -> tuple[dict[int, list[RuleResult]], list[AiErrorLog]]:
         """纯 AI 调用，不涉及 session 操作。并发执行所有 item 检查。"""
         # item_id → ContentItem 映射，用于错误日志填充 word_id / dimension
-        item_by_id = {item.id: item for item in items}
+        {item.id: item for item in items}
 
         async def _check_one(item: ContentItem) -> tuple[int, list[RuleResult]]:
             word_text = word_texts.get(item.word_id, "")
@@ -225,7 +224,9 @@ class Layer2Runner:
         session.flush()
 
         # AI 调用（不涉及 session）
-        results_map, error_logs = await self._collect_ai_results(items, word_texts, meaning_texts, strategy, extra_kwargs)
+        results_map, error_logs = await self._collect_ai_results(
+            items, word_texts, meaning_texts, strategy, extra_kwargs,
+        )
 
         # DB 写入（session 安全）
         passed_count, failed_count = self._save_results(session, items, results_map, strategy, run_id)

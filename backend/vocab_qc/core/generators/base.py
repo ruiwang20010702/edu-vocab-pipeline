@@ -321,7 +321,11 @@ def _get_async_http_client() -> httpx.AsyncClient:
     loop = asyncio.get_running_loop()
     if _async_http_client is None or _async_http_client_loop is not loop:
         old = _async_http_client
-        _pool_size = settings.ai_max_concurrency * 2 if settings.ai_gateway_async else settings.ai_max_concurrency
+        _pool_size = (
+            settings.ai_max_concurrency * 2
+            if settings.ai_gateway_async
+            else settings.ai_max_concurrency
+        )
         _async_http_client = httpx.AsyncClient(
             timeout=60.0,
             limits=httpx.Limits(
@@ -455,10 +459,19 @@ class ContentGenerator:
         **kwargs: Any,
     ) -> dict:
         """异步生成内容。默认委托给同步 generate（子类可覆盖用 _call_ai_async）。"""
-        return self.generate(word=word, meaning=meaning, pos=pos, _preloaded_config=_preloaded_config, **kwargs)
+        return self.generate(
+            word=word, meaning=meaning, pos=pos,
+            _preloaded_config=_preloaded_config, **kwargs,
+        )
 
-    def _call_ai(self, system_prompt: str, user_prompt: str, model: Optional[str] = None,
-                 api_key: Optional[str] = None, base_url: Optional[str] = None) -> dict[str, Any]:
+    def _call_ai(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> dict[str, Any]:
         """同步调用 AI API，返回 JSON 结果.
 
         支持 per-call 覆盖 model/api_key/base_url。

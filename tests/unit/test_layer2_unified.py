@@ -1,13 +1,12 @@
 """Layer2 unified checkers mock 测试."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from vocab_qc.core.qc.base import RuleResult
-from vocab_qc.core.qc.layer2.unified.sentence_unified import UnifiedSentenceChecker
 from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
 from vocab_qc.core.qc.layer2.unified.mnemonic_unified import UnifiedMnemonicChecker
-
+from vocab_qc.core.qc.layer2.unified.sentence_unified import UnifiedSentenceChecker
 
 # ---------------------------------------------------------------------------
 # 工具函数

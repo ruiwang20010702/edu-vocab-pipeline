@@ -1,7 +1,6 @@
 """端到端测试: 导入 → 质检 → 审核 → 导出 完整闭环."""
 
 import pytest
-
 from vocab_qc.core.models import (
     ContentItem,
     Meaning,
@@ -55,8 +54,8 @@ def full_word_data(db_session):
 def test_e2e_full_pipeline(db_session, full_word_data):
     """完整闭环: 质检 → 审核 → 导出."""
     word = full_word_data["word"]
-    chunk = full_word_data["chunk"]
-    sentence = full_word_data["sentence"]
+    full_word_data["chunk"]
+    full_word_data["sentence"]
 
     qc_service = QcService()
     review_service = ReviewService()
@@ -71,7 +70,7 @@ def test_e2e_full_pipeline(db_session, full_word_data):
     assert readiness["approved"] == 0
 
     # === Step 3: 将失败项入队 ===
-    failed_count = qc_service.enqueue_failed_for_review(db_session, result["run_id"])
+    qc_service.enqueue_failed_for_review(db_session, result["run_id"])
 
     # === Step 4: 对通过项直接审核通过 ===
     passed_items = (
@@ -106,7 +105,7 @@ def test_e2e_full_pipeline(db_session, full_word_data):
                 new_content=item.content,
             )
             # 修改后重跑 Layer 1
-            result2 = qc_service.run_layer1(db_session, scope=f"word_id:{word.id}", dimension=item.dimension)
+            qc_service.run_layer1(db_session, scope=f"word_id:{word.id}", dimension=item.dimension)
             # 通过后审核
             db_session.refresh(item)
             if item.qc_status == QcStatus.LAYER1_PASSED.value:

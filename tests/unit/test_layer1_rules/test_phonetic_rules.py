@@ -1,6 +1,5 @@
 """Phonetic 规则单元测试."""
 
-import pytest
 
 from vocab_qc.core.qc.layer1.phonetic_rules import P1IpaFormat, P2IpaSyllableAlignment
 

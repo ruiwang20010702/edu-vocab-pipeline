@@ -1,8 +1,7 @@
 """认证 API 路由."""
 
-from datetime import UTC, datetime
-
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from slowapi import Limiter
@@ -12,7 +11,6 @@ from sqlalchemy.orm import Session
 from vocab_qc.api.deps import get_db
 from vocab_qc.api.schemas.auth import SendCodeRequest, TokenResponse, VerifyRequest
 from vocab_qc.core.config import settings
-from vocab_qc.core.models.user import User
 from vocab_qc.core.services import auth_service, user_service
 
 logger = logging.getLogger(__name__)

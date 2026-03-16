@@ -156,7 +156,10 @@ def approve_review(
     """通过审核."""
     note = request.note if request else None
     try:
-        result = service.approve(db, review_id, reviewer=current_user.name, note=note, user_id=current_user.id)
+        result = service.approve(
+            db, review_id, reviewer=current_user.name,
+            note=note, user_id=current_user.id,
+        )
         db.commit()
         return _enrich_review(db, result)
     except NoResultFound:

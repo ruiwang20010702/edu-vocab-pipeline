@@ -1,17 +1,13 @@
 """审核流程集成测试."""
 
 import pytest
-
 from vocab_qc.core.models import (
     AuditLogV2,
     ContentItem,
     QcStatus,
-    RetryCounter,
-    ReviewItem,
     ReviewReason,
     ReviewResolution,
     ReviewStatus,
-    Word,
 )
 from vocab_qc.core.services.review_service import ReviewService
 

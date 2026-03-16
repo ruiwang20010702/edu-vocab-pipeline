@@ -96,7 +96,8 @@ def validate_production_config() -> None:
         errors.append("VOCAB_QC_AI_GATEWAY_ASYNC=True 需要 VOCAB_QC_AI_GATEWAY_MODE=True")
     if settings.ai_gateway_async and settings.ai_task_timeout < settings.ai_gateway_poll_max_wait:
         errors.append(
-            f"ai_task_timeout({settings.ai_task_timeout}) 应 >= ai_gateway_poll_max_wait({settings.ai_gateway_poll_max_wait})"
+            f"ai_task_timeout({settings.ai_task_timeout})"
+            f" 应 >= ai_gateway_poll_max_wait({settings.ai_gateway_poll_max_wait})"
         )
 
     if not settings.smtp_host:

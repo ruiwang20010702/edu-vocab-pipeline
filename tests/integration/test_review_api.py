@@ -4,7 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
-
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 from vocab_qc.core.db import Base
@@ -12,7 +11,6 @@ from vocab_qc.core.models import ContentItem, Meaning, Word
 from vocab_qc.core.models.enums import QcStatus, ReviewReason, ReviewStatus
 from vocab_qc.core.models.quality_layer import ReviewItem
 from vocab_qc.core.models.user import User
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,9 +26,9 @@ def _make_engine_and_session():
     return engine, sessionmaker(bind=engine)
 
 
-def _override_db(TestSession):
+def _override_db(test_session):
     def override_get_db():
-        session = TestSession()
+        session = test_session()
         try:
             yield session
             session.commit()
@@ -43,9 +41,9 @@ def _override_db(TestSession):
     return override_get_db
 
 
-def _seed_base_data(TestSession):
+def _seed_base_data(test_session):
     """插入 Word + Meaning + ContentItem，返回各 id。"""
-    session = TestSession()
+    session = test_session()
     word = Word(word="happy")
     session.add(word)
     session.flush()
@@ -70,9 +68,9 @@ def _seed_base_data(TestSession):
     return ids
 
 
-def _add_review_item(TestSession, ids, status=ReviewStatus.PENDING.value):
+def _add_review_item(test_session, ids, status=ReviewStatus.PENDING.value):
     """插入 ReviewItem，返回 review id。"""
-    session = TestSession()
+    session = test_session()
     review = ReviewItem(
         content_item_id=ids["item_id"],
         word_id=ids["word_id"],
@@ -95,15 +93,15 @@ def _add_review_item(TestSession, ids, status=ReviewStatus.PENDING.value):
 @pytest.fixture
 def admin_client():
     """admin 角色 + 已有 ReviewItem 的测试客户端。"""
-    engine, TestSession = _make_engine_and_session()
-    ids = _seed_base_data(TestSession)
+    engine, test_session_factory = _make_engine_and_session()
+    ids = _seed_base_data(test_session_factory)
 
     admin = User(id=1, email="admin@test.com", name="Admin", role="admin", is_active=True)
-    app.dependency_overrides[get_db] = _override_db(TestSession)
+    app.dependency_overrides[get_db] = _override_db(test_session_factory)
     app.dependency_overrides[get_current_user] = lambda: admin
 
     client = TestClient(app)
-    yield client, ids, TestSession
+    yield client, ids, test_session_factory
 
     app.dependency_overrides.clear()
     engine.dispose()
@@ -112,15 +110,15 @@ def admin_client():
 @pytest.fixture
 def viewer_client():
     """viewer 角色测试客户端（无写权限）。"""
-    engine, TestSession = _make_engine_and_session()
-    ids = _seed_base_data(TestSession)
+    engine, test_session_factory = _make_engine_and_session()
+    ids = _seed_base_data(test_session_factory)
 
     viewer = User(id=2, email="viewer@test.com", name="Viewer", role="viewer", is_active=True)
-    app.dependency_overrides[get_db] = _override_db(TestSession)
+    app.dependency_overrides[get_db] = _override_db(test_session_factory)
     app.dependency_overrides[get_current_user] = lambda: viewer
 
     client = TestClient(app)
-    yield client, ids, TestSession
+    yield client, ids, test_session_factory
 
     app.dependency_overrides.clear()
     engine.dispose()
@@ -142,8 +140,8 @@ class TestListReviews:
 
     def test_returns_pending_items(self, admin_client):
         """有 pending 审核项时返回列表。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         resp = client.get("/api/reviews")
         assert resp.status_code == 200
@@ -156,8 +154,8 @@ class TestListReviews:
 
     def test_resolved_items_excluded(self, admin_client):
         """已处理的审核项不出现在列表中。"""
-        client, ids, TestSession = admin_client
-        _add_review_item(TestSession, ids, status=ReviewStatus.RESOLVED.value)
+        client, ids, test_session_factory = admin_client
+        _add_review_item(test_session_factory, ids, status=ReviewStatus.RESOLVED.value)
 
         resp = client.get("/api/reviews")
         assert resp.status_code == 200
@@ -167,8 +165,8 @@ class TestListReviews:
 
     def test_filter_by_dimension(self, admin_client):
         """dimension 参数过滤生效。"""
-        client, ids, TestSession = admin_client
-        _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = admin_client
+        _add_review_item(test_session_factory, ids)
 
         resp = client.get("/api/reviews?dimension=chunk")
         assert resp.status_code == 200
@@ -186,8 +184,8 @@ class TestListReviews:
 class TestApproveReview:
     def test_approve_success(self, admin_client):
         """正常通过审核。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         resp = client.post(f"/api/reviews/{review_id}/approve")
         assert resp.status_code == 200
@@ -198,8 +196,8 @@ class TestApproveReview:
 
     def test_approve_with_note(self, admin_client):
         """带备注的通过审核。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         resp = client.post(
             f"/api/reviews/{review_id}/approve",
@@ -217,16 +215,16 @@ class TestApproveReview:
 
     def test_approve_409_already_resolved(self, admin_client):
         """已处理的审核项返回 409。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids, status=ReviewStatus.RESOLVED.value)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids, status=ReviewStatus.RESOLVED.value)
 
         resp = client.post(f"/api/reviews/{review_id}/approve")
         assert resp.status_code == 409
 
     def test_approve_403_viewer_forbidden(self, viewer_client):
         """viewer 角色无权通过审核，返回 403。"""
-        client, ids, TestSession = viewer_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = viewer_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         resp = client.post(f"/api/reviews/{review_id}/approve")
         assert resp.status_code == 403
@@ -241,8 +239,8 @@ class TestRegenerateReview:
         """正常触发重生成。"""
         from unittest.mock import patch
 
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         def _mock_regen(session, ci):
             ci.content = "mock regenerated content"
@@ -267,16 +265,16 @@ class TestRegenerateReview:
 
     def test_regenerate_409_already_resolved(self, admin_client):
         """已处理的审核项返回 409。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids, status=ReviewStatus.RESOLVED.value)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids, status=ReviewStatus.RESOLVED.value)
 
         resp = client.post(f"/api/reviews/{review_id}/regenerate")
         assert resp.status_code == 409
 
     def test_regenerate_403_viewer_forbidden(self, viewer_client):
         """viewer 角色无权触发重生成，返回 403。"""
-        client, ids, TestSession = viewer_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = viewer_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         resp = client.post(f"/api/reviews/{review_id}/regenerate")
         assert resp.status_code == 403
@@ -289,8 +287,8 @@ class TestRegenerateReview:
 class TestManualEdit:
     def test_edit_success(self, admin_client):
         """正常人工修改内容。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         resp = client.post(
             f"/api/reviews/{review_id}/edit",
@@ -304,8 +302,8 @@ class TestManualEdit:
 
     def test_edit_updates_content_item(self, admin_client):
         """修改后 ContentItem 的内容已更新。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         new_content = "feel happy about sth."
         client.post(
@@ -313,7 +311,7 @@ class TestManualEdit:
             json={"content": new_content},
         )
 
-        session = TestSession()
+        session = test_session_factory()
         item = session.query(ContentItem).filter_by(id=ids["item_id"]).one()
         assert item.content == new_content
         # manual_edit 后自动质检，状态不再是初始 pending
@@ -331,8 +329,8 @@ class TestManualEdit:
 
     def test_edit_409_already_resolved(self, admin_client):
         """已处理的审核项返回 409。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids, status=ReviewStatus.RESOLVED.value)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids, status=ReviewStatus.RESOLVED.value)
 
         resp = client.post(
             f"/api/reviews/{review_id}/edit",
@@ -342,8 +340,8 @@ class TestManualEdit:
 
     def test_edit_403_viewer_forbidden(self, viewer_client):
         """viewer 角色无权人工修改，返回 403。"""
-        client, ids, TestSession = viewer_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = viewer_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         resp = client.post(
             f"/api/reviews/{review_id}/edit",
@@ -353,8 +351,8 @@ class TestManualEdit:
 
     def test_edit_requires_content_field(self, admin_client):
         """缺少 content 字段应返回 422。"""
-        client, ids, TestSession = admin_client
-        review_id = _add_review_item(TestSession, ids)
+        client, ids, test_session_factory = admin_client
+        review_id = _add_review_item(test_session_factory, ids)
 
         resp = client.post(
             f"/api/reviews/{review_id}/edit",

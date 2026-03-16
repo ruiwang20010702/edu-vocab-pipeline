@@ -5,8 +5,8 @@ Revises: 005_fix_schema
 Create Date: 2026-03-09
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "006_prompt_ai_config"
 down_revision = "005_fix_schema"

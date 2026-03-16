@@ -2,9 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from sqlalchemy.orm import Session
-
 from vocab_qc.core.models import (
     ContentItem,
     QcStatus,
@@ -14,9 +12,8 @@ from vocab_qc.core.models import (
     Word,
 )
 from vocab_qc.core.models.user import User, VerificationCode
-from vocab_qc.core.services.auth_service import _hash_code, _MAX_VERIFY_ATTEMPTS, verify_code
+from vocab_qc.core.services.auth_service import _MAX_VERIFY_ATTEMPTS, _hash_code, verify_code
 from vocab_qc.core.services.review_service import ReviewService
-
 
 # ---------------------------------------------------------------------------
 # L1: 验证码失败次数限制 —— 连续输错 5 次后，正确验证码也被拒绝
@@ -185,7 +182,6 @@ class TestDeactivatedUserAccess:
     def test_deactivated_user_cannot_login_via_verify(self, db_session: Session):
         """is_active=False 的用户在 verify 端点应被拒绝（403）。"""
         from fastapi.testclient import TestClient
-
         from vocab_qc.api.main import app
 
         email = "deactivated@example.com"
@@ -223,7 +219,6 @@ class TestDeactivatedUserAccess:
     def test_active_user_can_login_via_verify(self, db_session: Session):
         """is_active=True 的用户应能正常通过 verify 端点登录。"""
         from fastapi.testclient import TestClient
-
         from vocab_qc.api.main import app
 
         email = "active@example.com"

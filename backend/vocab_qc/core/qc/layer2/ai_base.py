@@ -17,9 +17,9 @@ from vocab_qc.core.generators.base import (
     parse_async_submit_response,
     poll_gateway_task_async,
 )
+from vocab_qc.core.qc.base import RuleResult
 
 logger = logging.getLogger(__name__)
-from vocab_qc.core.qc.base import RuleResult
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,10 @@ class AiRuleChecker:
     def build_user_prompt(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> str:
         raise NotImplementedError
 
-    async def check(self, client: AiClient, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
+    async def check(
+        self, client: AiClient, content: str, word: str,
+        meaning: Optional[str] = None, **kwargs,
+    ) -> RuleResult:
         user_prompt = self.build_user_prompt(content, word, meaning, **kwargs)
         try:
             result = await client.check(self.system_prompt, user_prompt)

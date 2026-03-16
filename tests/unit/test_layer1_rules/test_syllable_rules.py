@@ -4,9 +4,13 @@
 所以测试中音节数据作为 content（第一参数）传入。
 """
 
-import pytest
 
-from vocab_qc.core.qc.layer1.syllable_rules import S1VowelAnchor, S2Separator, S3AtomicUnitIntegrity, S4SingleSyllableNoSplit
+from vocab_qc.core.qc.layer1.syllable_rules import (
+    S1VowelAnchor,
+    S2Separator,
+    S3AtomicUnitIntegrity,
+    S4SingleSyllableNoSplit,
+)
 
 
 class TestS1VowelAnchor:

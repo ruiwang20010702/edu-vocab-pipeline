@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy.orm import Session
-
 from vocab_qc.core.models.user import User, VerificationCode
 from vocab_qc.core.services import auth_service
 

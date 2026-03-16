@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from vocab_qc.api.deps import get_current_user, get_db, require_role
+from vocab_qc.api.deps import get_db, require_role
 from vocab_qc.api.schemas.prompt import PromptCreateRequest, PromptResponse, PromptUpdateRequest
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import prompt_service

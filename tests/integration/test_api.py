@@ -4,13 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
-
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 from vocab_qc.core.db import Base
-from vocab_qc.core.models import ContentItem, Meaning, Phonetic, ReviewItem, ReviewReason, Source, Word
+from vocab_qc.core.models import ContentItem, Meaning, Phonetic, Source, Word
 from vocab_qc.core.models.user import User
-from vocab_qc.core.services.review_service import ReviewService
 
 
 @pytest.fixture
@@ -18,10 +16,10 @@ def test_app():
     """创建带测试数据库的 FastAPI 测试客户端."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    TestSession = sessionmaker(bind=engine)
+    test_session_factory = sessionmaker(bind=engine)
 
     def override_get_db():
-        session = TestSession()
+        session = test_session_factory()
         try:
             yield session
             session.commit()
@@ -38,7 +36,7 @@ def test_app():
     app.dependency_overrides[get_current_user] = lambda: mock_user
 
     # 插入测试数据
-    session = TestSession()
+    session = test_session_factory()
     word = Word(word="kind")
     session.add(word)
     session.flush()

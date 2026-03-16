@@ -65,7 +65,10 @@ def approve(review_id: int = typer.Argument(..., help="审核项 ID"), reviewer:
 
 
 @review_app.command("regenerate")
-def regenerate(review_id: int = typer.Argument(..., help="审核项 ID"), reviewer: str = typer.Option("cli_user", "--by")):
+def regenerate(
+    review_id: int = typer.Argument(..., help="审核项 ID"),
+    reviewer: str = typer.Option("cli_user", "--by"),
+):
     """触发重新生成."""
     session = get_sync_session()
     try:

@@ -1,7 +1,6 @@
 """GenerationService 单元测试."""
 
 import pytest
-
 from vocab_qc.core.models import AuditLogV2, ContentItem, Meaning, Word
 from vocab_qc.core.services.generation_service import GenerationService
 

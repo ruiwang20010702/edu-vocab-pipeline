@@ -1,6 +1,6 @@
 """仪表板统计服务."""
 
-from sqlalchemy import func, and_, not_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models.content_layer import ContentItem
@@ -24,7 +24,7 @@ def get_dashboard_stats(session: Session) -> dict:
 
     # 已入库 = 有 ContentItem 且全部为终态的词数
     # NOT EXISTS 比 NOT IN 更高效（避免子查询物化 + NULL 安全）
-    from sqlalchemy import exists, alias
+    from sqlalchemy import alias
 
     ci1 = alias(ContentItem.__table__, name="ci1")
     ci2 = alias(ContentItem.__table__, name="ci2")

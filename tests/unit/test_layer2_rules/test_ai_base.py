@@ -2,9 +2,7 @@
 
 import asyncio
 
-import pytest
-
-from vocab_qc.core.qc.layer2.ai_base import AiClient, AiRuleChecker
+from vocab_qc.core.qc.layer2.ai_base import AiClient
 from vocab_qc.core.qc.registry import RuleRegistry
 
 

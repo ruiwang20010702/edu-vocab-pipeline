@@ -26,7 +26,10 @@ class SyllableGenerator(ContentGenerator):
             return {"content": result["content"], "content_cn": None}
         return {"content": word, "content_cn": None}
 
-    def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+    def generate(
+        self, word: str, meaning: Optional[str] = None,
+        pos: Optional[str] = None, **kwargs: Any,
+    ) -> dict:
         ai_config = self.resolve_ai_config(**kwargs)
         user_prompt = self._build_user_prompt(word)
         result = self._call_ai(
@@ -35,7 +38,10 @@ class SyllableGenerator(ContentGenerator):
         )
         return self._process_result(result, word)
 
-    async def generate_async(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+    async def generate_async(
+        self, word: str, meaning: Optional[str] = None,
+        pos: Optional[str] = None, **kwargs: Any,
+    ) -> dict:
         ai_config = self.resolve_ai_config(**kwargs)
         user_prompt = self._build_user_prompt(word)
         result = await self._call_ai_async(

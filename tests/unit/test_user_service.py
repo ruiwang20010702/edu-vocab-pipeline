@@ -2,7 +2,6 @@
 
 import pytest
 from sqlalchemy.orm import Session
-
 from vocab_qc.core.services import user_service
 
 

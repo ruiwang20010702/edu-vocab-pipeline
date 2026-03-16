@@ -1,13 +1,11 @@
 """状态机转换测试 — validate_qc_transition + QC_TERMINAL_STATUSES."""
 
 import pytest
-
 from vocab_qc.core.models.enums import (
     QC_TERMINAL_STATUSES,
     QcStatus,
     validate_qc_transition,
 )
-
 
 # ---------------------------------------------------------------------------
 # QC_TERMINAL_STATUSES

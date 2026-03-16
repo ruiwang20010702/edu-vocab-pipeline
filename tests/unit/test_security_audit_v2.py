@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from vocab_qc.core.services.import_service import _validate_magic_bytes, parse_upload
 
 

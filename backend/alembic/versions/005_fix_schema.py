@@ -5,8 +5,8 @@ Revises: 004_add_prompts
 Create Date: 2026-03-09
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "005_fix_schema"
 down_revision = "004_add_prompts"
@@ -61,14 +61,29 @@ def upgrade() -> None:
 
     # -- M6: RetryCounter 外键级联 (需要重建外键) --
     op.drop_constraint("retry_counters_word_id_fkey", "retry_counters", type_="foreignkey")
-    op.create_foreign_key("retry_counters_word_id_fkey", "retry_counters", "words", ["word_id"], ["id"], ondelete="CASCADE")
+    op.create_foreign_key(
+        "retry_counters_word_id_fkey", "retry_counters", "words",
+        ["word_id"], ["id"], ondelete="CASCADE",
+    )
     op.drop_constraint("retry_counters_meaning_id_fkey", "retry_counters", type_="foreignkey")
-    op.create_foreign_key("retry_counters_meaning_id_fkey", "retry_counters", "meanings", ["meaning_id"], ["id"], ondelete="CASCADE")
+    op.create_foreign_key(
+        "retry_counters_meaning_id_fkey", "retry_counters", "meanings",
+        ["meaning_id"], ["id"], ondelete="CASCADE",
+    )
 
     # -- M1: 状态字段 CHECK 约束 --
-    op.create_check_constraint("ck_review_items_status", "review_items", "status IN ('pending', 'in_progress', 'resolved')")
-    op.create_check_constraint("ck_review_batches_status", "review_batches", "status IN ('in_progress', 'completed')")
-    op.create_check_constraint("ck_packages_status", "packages", "status IN ('pending', 'processing', 'completed', 'failed')")
+    op.create_check_constraint(
+        "ck_review_items_status", "review_items",
+        "status IN ('pending', 'in_progress', 'resolved')",
+    )
+    op.create_check_constraint(
+        "ck_review_batches_status", "review_batches",
+        "status IN ('in_progress', 'completed')",
+    )
+    op.create_check_constraint(
+        "ck_packages_status", "packages",
+        "status IN ('pending', 'processing', 'completed', 'failed')",
+    )
 
     # -- L3 + L4: AuditLogV2 entity_id 类型 + 复合索引 --
     op.alter_column("audit_logs_v2", "entity_id", type_=sa.String(36), existing_type=sa.Integer())
@@ -99,6 +114,32 @@ def downgrade() -> None:
     op.drop_index("ix_qc_rule_results_meaning_id", table_name="qc_rule_results")
     op.drop_constraint("uq_phonetics_word_id", "phonetics", type_="unique")
 
+    _tz_columns = [
+        ("words", "created_at"),
+        ("words", "updated_at"),
+        ("phonetics", "created_at"),
+        ("meanings", "created_at"),
+        ("sources", "created_at"),
+        ("content_items", "created_at"),
+        ("content_items", "updated_at"),
+        ("qc_runs", "started_at"),
+        ("qc_runs", "finished_at"),
+        ("qc_rule_results", "created_at"),
+        ("retry_counters", "last_retry_at"),
+        ("review_items", "resolved_at"),
+        ("review_items", "created_at"),
+        ("review_batches", "created_at"),
+        ("review_batches", "completed_at"),
+        ("packages", "created_at"),
+        ("package_meanings", "created_at"),
+        ("users", "created_at"),
+        ("users", "last_login_at"),
+        ("verification_codes", "created_at"),
+        ("verification_codes", "expires_at"),
+        ("prompts", "created_at"),
+        ("prompts", "updated_at"),
+        ("audit_logs_v2", "created_at"),
+    ]
     for table, col in reversed(_tz_columns):
         op.alter_column(table, col, type_=sa.DateTime(), existing_type=sa.DateTime(timezone=True))
 

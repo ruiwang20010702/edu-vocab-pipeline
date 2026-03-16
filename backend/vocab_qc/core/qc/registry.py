@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from vocab_qc.core.qc.base import RuleChecker, RuleResult
+from vocab_qc.core.qc.base import RuleResult
 
 # 助记规则维度匹配: dimension="mnemonic" 的规则适用于所有 mnemonic_* 维度
 _MNEMONIC_RULE_DIM = "mnemonic"

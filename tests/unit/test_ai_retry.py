@@ -1,12 +1,11 @@
 """AiClient 重试逻辑测试."""
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
-
-from vocab_qc.core.qc.layer2.ai_base import AiClient, AiRuleChecker
 from vocab_qc.core.qc.base import RuleResult
-
+from vocab_qc.core.qc.layer2.ai_base import AiClient, AiRuleChecker
 
 # ---------------------------------------------------------------------------
 # 辅助：构建标准 httpx response mock
@@ -48,7 +47,7 @@ class TestAiClientPlaceholderMode:
 
     @pytest.mark.asyncio
     async def test_placeholder_when_api_key_none(self):
-        client = AiClient(api_key=None, base_url=None, model=None)
+        AiClient(api_key=None, base_url=None, model=None)
         # 无 key 和 url，走占位分支
         with patch("vocab_qc.core.qc.layer2.ai_base.settings") as mock_settings:
             mock_settings.ai_api_key = ""

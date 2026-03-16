@@ -1,5 +1,7 @@
 """质量层模型: QcRun, QcRuleResult, RetryCounter, ReviewItem, AuditLogV2."""
 
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime
 from typing import Any, Optional
@@ -56,7 +58,9 @@ class QcRuleResult(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    content_item_id: Mapped[int] = mapped_column(
+        ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
     word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
     meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id"), nullable=True, index=True)
     dimension: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -123,7 +127,9 @@ class ReviewItem(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    content_item_id: Mapped[int] = mapped_column(
+        ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
     word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
     meaning_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meanings.id"), nullable=True)
     dimension: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -162,7 +168,8 @@ class AiErrorLog(Base):
     word_id: Mapped[Optional[int]] = mapped_column(ForeignKey("words.id"), nullable=True)
     phase: Mapped[str] = mapped_column(String(20), nullable=False)  # generation / qc_layer2
     dimension: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    error_type: Mapped[str] = mapped_column(String(50), nullable=False)  # timeout / http_error / connect_error / parse_error / unknown
+    # timeout / http_error / connect_error / parse_error / unknown
+    error_type: Mapped[str] = mapped_column(String(50), nullable=False)
     error_message: Mapped[str] = mapped_column(Text, nullable=False)
     http_status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     response_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

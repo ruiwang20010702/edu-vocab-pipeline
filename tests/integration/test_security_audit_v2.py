@@ -1,10 +1,8 @@
 """第二轮安全审计修复的集成测试."""
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
-
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 from vocab_qc.core.db import Base
@@ -15,10 +13,10 @@ def _make_client(user_id: int, role: str):
     """创建指定角色的测试客户端。"""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    TestSession = sessionmaker(bind=engine)
+    test_session_factory = sessionmaker(bind=engine)
 
     def override_get_db():
-        session = TestSession()
+        session = test_session_factory()
         try:
             yield session
             session.commit()
@@ -34,7 +32,7 @@ def _make_client(user_id: int, role: str):
     app.dependency_overrides[get_current_user] = lambda: mock_user
 
     # 插入用户到 DB
-    session = TestSession()
+    session = test_session_factory()
     db_user = User(id=user_id, email=f"{role}@test.com", name=f"Test{role.title()}", role=role, is_active=True)
     session.add(db_user)
     # 额外用户用于编辑测试

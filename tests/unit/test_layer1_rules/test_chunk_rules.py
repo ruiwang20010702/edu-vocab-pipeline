@@ -1,8 +1,12 @@
 """Chunk 规则单元测试."""
 
-import pytest
 
-from vocab_qc.core.qc.layer1.chunk_rules import C1ChunkContainsWord, C2ChunkLength, C4NoBrackets, C5ChineseOnSeparateLine
+from vocab_qc.core.qc.layer1.chunk_rules import (
+    C1ChunkContainsWord,
+    C2ChunkLength,
+    C4NoBrackets,
+    C5ChineseOnSeparateLine,
+)
 
 
 class TestC1ChunkContainsWord:

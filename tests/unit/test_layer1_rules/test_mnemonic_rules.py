@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from vocab_qc.core.qc.layer1.mnemonic_rules import (
     N1MnemonicType,
     N2StructureCompleteness,

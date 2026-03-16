@@ -3,7 +3,6 @@
 import asyncio
 
 import pytest
-
 from vocab_qc.core.async_bridge import run_async_in_sync
 
 

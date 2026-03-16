@@ -33,7 +33,7 @@ def run_qc(
                 console.print("[yellow]无内容项需要校验[/yellow]")
                 return
 
-            console.print(f"[green]Layer 1 校验完成[/green]")
+            console.print("[green]Layer 1 校验完成[/green]")
             console.print(f"  运行 ID: {result['run_id']}")
             console.print(f"  总计: {result['total']}")
             console.print(f"  通过: {result['passed']}")

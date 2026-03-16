@@ -1,5 +1,7 @@
 """数据层模型: Word, Phonetic, Meaning, Source."""
 
+from __future__ import annotations
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
@@ -14,7 +16,9 @@ class Word(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     word: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
 
     phonetics: Mapped[list["Phonetic"]] = relationship(back_populates="word_rel", cascade="all, delete-orphan")
     meanings: Mapped[list["Meaning"]] = relationship(back_populates="word_rel", cascade="all, delete-orphan")

@@ -5,8 +5,8 @@ Revises: eb1d3d8b6d1c
 Create Date: 2026-03-12
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "007_add_ai_error_logs"
 down_revision = "eb1d3d8b6d1c"

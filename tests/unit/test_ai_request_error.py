@@ -2,8 +2,6 @@
 
 import asyncio
 
-import pytest
-
 from vocab_qc.core.generators.base import AiRequestError
 from vocab_qc.core.models.quality_layer import classify_ai_error
 

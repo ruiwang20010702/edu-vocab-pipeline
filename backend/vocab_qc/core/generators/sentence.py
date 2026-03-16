@@ -18,14 +18,20 @@ class SentenceGenerator(ContentGenerator):
         )
 
     def _build_user_prompt(self, word: str, pos: Optional[str], meaning: Optional[str]) -> str:
-        return f"Word: {sanitize_prompt_input(word)} | POS: {sanitize_prompt_input(pos or '未知')} | Meaning: {sanitize_prompt_input(meaning or '未知')}"
+        word_s = sanitize_prompt_input(word)
+        pos_s = sanitize_prompt_input(pos or '未知')
+        meaning_s = sanitize_prompt_input(meaning or '未知')
+        return f"Word: {word_s} | POS: {pos_s} | Meaning: {meaning_s}"
 
     def _process_result(self, result: dict, word: str) -> dict:
         if result and result.get("content"):
             return {"content": result["content"], "content_cn": result.get("content_cn")}
         return {"content": f"This is a {word}.", "content_cn": f"这是一个{word}。"}
 
-    def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+    def generate(
+        self, word: str, meaning: Optional[str] = None,
+        pos: Optional[str] = None, **kwargs: Any,
+    ) -> dict:
         ai_config = self.resolve_ai_config(**kwargs)
         user_prompt = self._build_user_prompt(word, pos, meaning)
         result = self._call_ai(
@@ -34,7 +40,10 @@ class SentenceGenerator(ContentGenerator):
         )
         return self._process_result(result, word)
 
-    async def generate_async(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+    async def generate_async(
+        self, word: str, meaning: Optional[str] = None,
+        pos: Optional[str] = None, **kwargs: Any,
+    ) -> dict:
         ai_config = self.resolve_ai_config(**kwargs)
         user_prompt = self._build_user_prompt(word, pos, meaning)
         result = await self._call_ai_async(

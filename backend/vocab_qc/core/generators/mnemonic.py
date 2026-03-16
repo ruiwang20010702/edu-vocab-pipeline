@@ -44,7 +44,10 @@ class _MnemonicBase(ContentGenerator):
             "script": script,
         }
 
-    def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+    def generate(
+        self, word: str, meaning: Optional[str] = None,
+        pos: Optional[str] = None, **kwargs: Any,
+    ) -> dict:
         ai_config = self.resolve_ai_config(**kwargs)
         user_prompt = self._build_user_prompt(word, pos, meaning)
         result = self._call_ai(

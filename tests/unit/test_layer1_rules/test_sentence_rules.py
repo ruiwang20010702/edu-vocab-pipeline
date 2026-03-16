@@ -1,6 +1,5 @@
 """Sentence 规则单元测试."""
 
-import pytest
 
 from vocab_qc.core.qc.layer1.sentence_rules import E6SentenceContainsWord, E7SentenceLength, E8HasChineseTranslation
 

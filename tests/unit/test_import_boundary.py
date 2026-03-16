@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from vocab_qc.core.models import Meaning, Word
 from vocab_qc.core.services import import_service
 
@@ -159,7 +158,7 @@ class TestCsvWhitespace:
     def test_pos_with_spaces(self, db_session):
         """pos 字段有空格 — strip 后正常存储。"""
         csv_content = "word,pos,definition,source\nsad, adj. ,悲伤的,课本1"
-        result = import_service.import_from_csv(db_session, csv_content, "ws_pos")
+        import_service.import_from_csv(db_session, csv_content, "ws_pos")
 
         word = db_session.query(Word).filter_by(word="sad").first()
         meaning = db_session.query(Meaning).filter_by(word_id=word.id).first()
@@ -168,7 +167,7 @@ class TestCsvWhitespace:
     def test_definition_with_spaces(self, db_session):
         """definition 字段有空格 — strip 后正常存储。"""
         csv_content = "word,pos,definition,source\ntall,adj., 高的 ,课本1"
-        result = import_service.import_from_csv(db_session, csv_content, "ws_def")
+        import_service.import_from_csv(db_session, csv_content, "ws_def")
 
         word = db_session.query(Word).filter_by(word="tall").first()
         meaning = db_session.query(Meaning).filter_by(word_id=word.id).first()

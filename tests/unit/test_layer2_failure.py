@@ -6,10 +6,9 @@
 - AI 调用抛异常 → 错误被正确处理（fail-safe: 不自动通过）
 """
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import MagicMock
 
-from vocab_qc.core.models import ContentItem, Meaning, QcRuleResult, ReviewItem, Word
+from vocab_qc.core.models import ContentItem, Meaning, ReviewItem, Word
 from vocab_qc.core.models.enums import QcStatus, ReviewReason, ReviewStatus
 from vocab_qc.core.qc.base import RuleResult
 from vocab_qc.core.qc.layer2.runner import Layer2Runner
@@ -59,8 +58,8 @@ class TestLayer2Failure:
         import uuid
         run_id = str(uuid.uuid4())
 
-        from vocab_qc.core.models.quality_layer import QcRun
         from vocab_qc.core.models.enums import AiStrategy
+        from vocab_qc.core.models.quality_layer import QcRun
 
         qc_run = QcRun(
             id=run_id, layer=2, scope="batch",
@@ -169,6 +168,7 @@ class TestLayer2Failure:
         empty_results_map: dict[int, list[RuleResult]] = {}
 
         import uuid
+
         from vocab_qc.core.models.enums import AiStrategy
 
         run_id = str(uuid.uuid4())
@@ -218,6 +218,7 @@ class TestLayer2Failure:
         }
 
         import uuid
+
         from vocab_qc.core.models.enums import AiStrategy
         from vocab_qc.core.models.quality_layer import QcRun
 

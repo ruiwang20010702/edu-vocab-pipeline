@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from vocab_qc.core.models import ContentItem, Meaning, Word
+from vocab_qc.core.models import ContentItem
 from vocab_qc.core.services.audit_service import log_action
 
 

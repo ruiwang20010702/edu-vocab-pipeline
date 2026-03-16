@@ -13,7 +13,10 @@ class UnifiedChunkChecker:
     dimension = "chunk"
     rule_ids = ["C3"]
 
-    async def check(self, client: AiClient, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> list[RuleResult]:
+    async def check(
+        self, client: AiClient, content: str, word: str,
+        meaning: Optional[str] = None, **kwargs,
+    ) -> list[RuleResult]:
         user_prompt = f"单词: {word}\n义项: {meaning or '无'}\n语块: {content}"
         try:
             response = await client.check(UNIFIED_CHUNK_SYSTEM, user_prompt)

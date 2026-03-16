@@ -1,5 +1,6 @@
 """词汇查询 API 路由."""
 
+from datetime import UTC, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +12,6 @@ from vocab_qc.api.schemas.word import PaginatedWordResponse, WordDetailResponse
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.enums import QcStatus, ReviewResolution, ReviewStatus
 from vocab_qc.core.models.quality_layer import ReviewItem
-from datetime import datetime, UTC
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import word_service
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db, get_qc_service, require_role
-from vocab_qc.api.schemas import QcRunDetail, QcRunRequest, QcRunResponse, QcSummaryItem, RuleResultResponse
+from vocab_qc.api.schemas import QcRunDetail, QcRunRequest, QcSummaryItem, RuleResultResponse
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services.qc_service import QcService
 

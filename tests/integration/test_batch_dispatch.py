@@ -4,11 +4,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import Session, sessionmaker
-
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 from vocab_qc.core.db import Base
-from vocab_qc.core.models import ContentItem, Meaning, Phonetic, ReviewItem, ReviewReason, Word
+from vocab_qc.core.models import ContentItem, Meaning, Phonetic, ReviewReason, Word
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import batch_service
 from vocab_qc.core.services.review_service import ReviewService
@@ -17,8 +16,8 @@ from vocab_qc.core.services.review_service import ReviewService
 def _setup_db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    TestSession = sessionmaker(bind=engine)
-    return engine, TestSession
+    test_session_factory = sessionmaker(bind=engine)
+    return engine, test_session_factory
 
 
 def _seed_words(session: Session, n: int = 10) -> list[Word]:
@@ -56,8 +55,8 @@ class TestMultiUserDispatch:
     """多用户并发领取集成测试。"""
 
     def test_three_users_no_overlap(self):
-        engine, TestSession = _setup_db()
-        session = TestSession()
+        engine, test_session_factory = _setup_db()
+        session = test_session_factory()
 
         # 创建 3 个用户 + 9 个词
         users = []
@@ -95,10 +94,10 @@ class TestBatchApi:
 
     @pytest.fixture
     def batch_app(self):
-        engine, TestSession = _setup_db()
+        engine, test_session_factory = _setup_db()
 
         def override_get_db():
-            session = TestSession()
+            session = test_session_factory()
             try:
                 yield session
                 session.commit()
@@ -109,7 +108,7 @@ class TestBatchApi:
                 session.close()
 
         # 创建 admin 用户
-        session = TestSession()
+        session = test_session_factory()
         admin = User(email="admin@test.com", name="Admin", role="admin")
         session.add(admin)
         session.flush()

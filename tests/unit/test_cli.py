@@ -6,7 +6,6 @@ import pytest
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
-
 from vocab_qc.cli.main import app
 from vocab_qc.core.db import Base
 from vocab_qc.core.models import (

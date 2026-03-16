@@ -5,8 +5,8 @@ Revises: 003_add_package
 Create Date: 2026-03-09
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "004_add_prompts"
 down_revision = "003_add_package"

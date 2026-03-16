@@ -2,11 +2,9 @@
 
 import pytest
 from sqlalchemy.orm import Session
-
-from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Word
+from vocab_qc.core.models import ContentItem, Meaning, QcStatus, Word
 from vocab_qc.core.services.export_service import ExportService
 from vocab_qc.core.services.qc_service import QcService
-
 
 # ---- helpers ----
 
@@ -124,7 +122,7 @@ class TestQcServiceTerminalStatusFiltering:
             db_session, word, "chunk", "run away",
             meaning=meaning, qc_status=QcStatus.REJECTED.value,
         )
-        pending_item = _make_content(
+        _make_content(
             db_session, word, "chunk", "run a race",
             meaning=meaning, qc_status=QcStatus.PENDING.value,
         )

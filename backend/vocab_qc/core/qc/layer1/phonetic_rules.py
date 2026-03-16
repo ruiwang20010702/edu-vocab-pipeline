@@ -1,6 +1,5 @@
 """Phonetic 维度 Layer 1 规则: P1, P2."""
 
-import re
 from typing import Optional
 
 from vocab_qc.core.qc.base import RuleResult

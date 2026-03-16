@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
-
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 from vocab_qc.core.db import Base
@@ -19,10 +18,10 @@ def _make_app(role: str):
     """创建指定角色的测试客户端，预置完整测试数据。"""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    TestSession = sessionmaker(bind=engine)
+    test_session_factory = sessionmaker(bind=engine)
 
     def override_get_db():
-        session = TestSession()
+        session = test_session_factory()
         try:
             yield session
             session.commit()
@@ -38,7 +37,7 @@ def _make_app(role: str):
     app.dependency_overrides[get_current_user] = lambda: mock_user
 
     # 插入测试数据：Word, Phonetic, Meaning, ContentItem, Package, ReviewItem
-    session = TestSession()
+    session = test_session_factory()
 
     # 用户记录（供 /api/users/me 使用）
     db_user = User(id=1, email=f"{role}@test.com", name=f"Test{role.title()}", role=role, is_active=True)
@@ -93,10 +92,10 @@ def no_auth_client():
     """无认证的测试客户端。"""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    TestSession = sessionmaker(bind=engine)
+    test_session_factory = sessionmaker(bind=engine)
 
     def override_get_db():
-        session = TestSession()
+        session = test_session_factory()
         try:
             yield session
             session.commit()

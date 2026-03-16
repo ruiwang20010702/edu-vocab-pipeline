@@ -6,18 +6,20 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from vocab_qc.core.models import ContentItem, QcRuleResult, QcRun, QcStatus
-from vocab_qc.core.qc.base import ItemCheckResult, RuleResult
-from vocab_qc.core.qc.registry import RuleRegistry
-
 # 确保 Layer 1 规则被加载
 import vocab_qc.core.qc.layer1  # noqa: F401
+from vocab_qc.core.models import ContentItem, QcRuleResult, QcRun, QcStatus
+from vocab_qc.core.qc.base import ItemCheckResult
+from vocab_qc.core.qc.registry import RuleRegistry
 
 
 class Layer1Runner:
     """Layer 1 算法校验运行器."""
 
-    def check_item(self, item: ContentItem, word_text: str, meaning_text: Optional[str] = None, **extra) -> ItemCheckResult:
+    def check_item(
+        self, item: ContentItem, word_text: str,
+        meaning_text: Optional[str] = None, **extra,
+    ) -> ItemCheckResult:
         """对单个内容项执行所有适用的 Layer 1 规则."""
         rules = RuleRegistry.get_layer1_rules(dimension=item.dimension)
         results = []
@@ -43,7 +45,11 @@ class Layer1Runner:
             results=results,
         )
 
-    def run(self, session: Session, items: list[ContentItem], word_texts: dict[int, str], meaning_texts: dict[int, str], extra_kwargs: Optional[dict[int, dict]] = None) -> str:
+    def run(
+        self, session: Session, items: list[ContentItem],
+        word_texts: dict[int, str], meaning_texts: dict[int, str],
+        extra_kwargs: Optional[dict[int, dict]] = None,
+    ) -> str:
         """执行 Layer 1 批量校验，结果写入数据库.
 
         Args:

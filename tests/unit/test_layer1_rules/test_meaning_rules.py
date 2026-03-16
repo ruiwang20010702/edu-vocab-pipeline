@@ -1,8 +1,12 @@
 """Meaning 规则单元测试."""
 
 import pytest
-
-from vocab_qc.core.qc.layer1.meaning_rules import M3PosTagFormat, M4PosNewlineSeparation, M5SemicolonSeparation, M6NoBrackets
+from vocab_qc.core.qc.layer1.meaning_rules import (
+    M3PosTagFormat,
+    M4PosNewlineSeparation,
+    M5SemicolonSeparation,
+    M6NoBrackets,
+)
 
 
 class TestM3PosTagFormat:

@@ -5,7 +5,6 @@ from typing import Any, Optional
 from vocab_qc.core.qc.base import RuleResult
 from vocab_qc.core.qc.layer2.ai_base import AiClient
 
-
 UNIFIED_SENTENCE_SYSTEM = """你是中小学英语教学质检专家。请对给定的例句执行以下所有检查项，并返回 JSON 结果。
 
 检查项:

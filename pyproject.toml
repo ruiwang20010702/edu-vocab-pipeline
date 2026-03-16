@@ -45,6 +45,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
 
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy ORM forward references (Mapped["ClassName"]) trigger F821
+"backend/vocab_qc/core/models/content_layer.py" = ["F821"]
+"backend/vocab_qc/core/models/data_layer.py" = ["F821"]
+"backend/vocab_qc/core/models/quality_layer.py" = ["F821"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["backend"]

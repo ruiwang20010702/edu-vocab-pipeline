@@ -2,7 +2,6 @@
 
 import pytest
 from fastapi.testclient import TestClient
-
 from vocab_qc.api.main import app
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services.auth_service import create_jwt

@@ -1,8 +1,6 @@
 """批次派发并发场景测试."""
 
-import pytest
 from sqlalchemy.orm import Session
-
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
 from vocab_qc.core.models.enums import BatchStatus, ReviewStatus
