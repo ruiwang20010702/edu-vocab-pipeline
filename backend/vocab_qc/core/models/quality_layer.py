@@ -1,5 +1,6 @@
 """质量层模型: QcRun, QcRuleResult, RetryCounter, ReviewItem, AuditLogV2."""
 
+import asyncio
 from datetime import datetime
 from typing import Any, Optional
 
@@ -161,9 +162,13 @@ class AiErrorLog(Base):
     word_id: Mapped[Optional[int]] = mapped_column(ForeignKey("words.id"), nullable=True)
     phase: Mapped[str] = mapped_column(String(20), nullable=False)  # generation / qc_layer2
     dimension: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    error_type: Mapped[str] = mapped_column(String(50), nullable=False)  # api_timeout / api_error / parse_error / unknown
+    error_type: Mapped[str] = mapped_column(String(50), nullable=False)  # timeout / http_error / connect_error / parse_error / unknown
     error_message: Mapped[str] = mapped_column(Text, nullable=False)
+    http_status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    elapsed_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     ai_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    gateway_task_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -172,14 +177,20 @@ class AiErrorLog(Base):
 
 
 def classify_ai_error(e: Exception) -> str:
-    """根据异常信息分类错误类型."""
+    """根据异常信息分类错误类型，优先检查结构化异常。"""
+    from vocab_qc.core.generators.base import AiRequestError
+
+    if isinstance(e, AiRequestError):
+        return e.error_type
+    if isinstance(e, asyncio.TimeoutError):
+        return "timeout"
     msg = str(e).lower()
     if "timeout" in msg or "timed out" in msg:
-        return "api_timeout"
-    if "status" in msg or "http" in msg or "connect" in msg:
-        return "api_error"
+        return "timeout"
     if "json" in msg or "parse" in msg or "decode" in msg:
         return "parse_error"
+    if "status" in msg or "http" in msg or "connect" in msg:
+        return "http_error"
     return "unknown"
 
 

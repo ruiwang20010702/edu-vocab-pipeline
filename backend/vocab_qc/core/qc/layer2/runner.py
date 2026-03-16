@@ -125,17 +125,27 @@ class Layer2Runner:
         error_logs: list[AiErrorLog] = []
         for i, r in enumerate(gathered):
             if isinstance(r, Exception):
-                logger.warning("AI 质检任务异常: %s", r)
+                logger.warning("AI 质检任务异常: %s", r, exc_info=True)
                 failed_item = items[i]
                 dim_client = self._get_client_for_dimension(failed_item.dimension)
+                # 从 AiRequestError 或其 __cause__ 提取结构化信息
+                cause = r.__cause__ if r.__cause__ else r
+                status_code = getattr(cause, "status_code", None)
+                resp_body = getattr(cause, "response_body", None) or ""
+                elapsed = getattr(cause, "elapsed_ms", None)
+                task_no = getattr(cause, "task_no", None) or ""
                 error_logs.append(AiErrorLog(
                     content_item_id=failed_item.id,
                     word_id=failed_item.word_id,
                     phase="qc_layer2",
                     dimension=failed_item.dimension,
-                    error_type=classify_ai_error(r),
+                    error_type=classify_ai_error(cause),
                     error_message=str(r)[:2000],
+                    http_status_code=status_code,
+                    response_body=resp_body[:500] if resp_body else None,
+                    elapsed_ms=elapsed,
                     ai_model=dim_client.model,
+                    gateway_task_no=task_no or None,
                 ))
                 continue
             item_id, item_results = r

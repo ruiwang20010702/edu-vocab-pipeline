@@ -15,6 +15,255 @@ import httpx
 
 from vocab_qc.core.config import settings
 
+logger = logging.getLogger(__name__)
+
+
+class AiRequestError(Exception):
+    """AI 请求错误，携带完整诊断信息。"""
+
+    def __init__(
+        self,
+        error_type: str,
+        *,
+        status_code: int | None = None,
+        response_body: str = "",
+        elapsed_ms: int = 0,
+        detail: str = "",
+        task_no: str = "",
+    ):
+        self.error_type = error_type  # timeout / connect_error / http_error / parse_error / task_*
+        self.status_code = status_code
+        self.response_body = response_body
+        self.elapsed_ms = elapsed_ms
+        self.detail = detail
+        self.task_no = task_no
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        parts = [self.error_type]
+        if self.status_code:
+            parts.append(f"HTTP {self.status_code}")
+        if self.elapsed_ms:
+            parts.append(f"{self.elapsed_ms}ms")
+        if self.response_body:
+            parts.append(self.response_body[:200])
+        elif self.detail:
+            parts.append(self.detail[:200])
+        return " | ".join(parts)
+
+
+def build_ai_request(
+    base_url: str,
+    api_key: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    temperature: float = 0.7,
+) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """构造 AI 请求参数（模块级公共函数，生成 + 质检共用）。"""
+    import uuid
+
+    safe_prompt = ContentGenerator._ensure_json_hint(system_prompt)
+
+    if settings.ai_gateway_mode:
+        headers = {"Content-Type": "application/json"}
+        body: dict[str, Any] = {
+            "model": model,
+            "provider": ContentGenerator._resolve_gateway_provider(model),
+            "api_key": api_key,
+            "biz_type": settings.ai_gateway_biz_type,
+            "biz_id": str(uuid.uuid4()),
+            "stream": False,
+            "async": bool(settings.ai_gateway_async),
+            "messages": [
+                {"role": "system", "content": [{"type": "text", "text": safe_prompt}]},
+                {"role": "user", "content": [{"type": "text", "text": user_prompt}]},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": temperature,
+        }
+    else:
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": safe_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": temperature,
+        }
+
+    url = f"{base_url}/chat/completions"
+    return url, headers, body
+
+
+def parse_ai_response(data: dict[str, Any]) -> str:
+    """从响应中提取 content，自动适配 gateway 包裹格式（模块级公共函数）。"""
+    if "res" in data and "choices" not in data:
+        data = data["res"]
+    return data["choices"][0]["message"]["content"]
+
+
+def parse_async_submit_response(data: dict[str, Any]) -> str:
+    """解析 Gateway 异步提交响应，返回 task_no。"""
+    code = data.get("code")
+    res = data.get("res")
+    if code != 10000 or not isinstance(res, str):
+        raise AiRequestError(
+            "task_submit_failed",
+            detail=f"code={code}, res={res!r}",
+        )
+    return res
+
+
+def parse_poll_response(data: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str]:
+    """解析轮询响应，返回 (status, result_dict_or_None, failed_reason)。"""
+    code = data.get("code")
+    res = data.get("res")
+    if code != 10000 or res is None or not isinstance(res, dict) or "status" not in res:
+        raise AiRequestError(
+            "task_poll_error",
+            detail=f"code={code}, res={res!r}",
+        )
+    return res["status"], res.get("result"), res.get("failed_reason", "")
+
+
+def build_poll_body(submit_body: dict[str, Any], task_no: str) -> dict[str, Any]:
+    """从提交 body 中提取字段，构造轮询请求 body。"""
+    return {
+        "provider": submit_body["provider"],
+        "model": submit_body["model"],
+        "api_key": submit_body["api_key"],
+        "biz_type": submit_body["biz_type"],
+        "biz_id": submit_body["biz_id"],
+        "task_no": task_no,
+    }
+
+
+async def poll_gateway_task_async(
+    client: httpx.AsyncClient,
+    base_url: str,
+    task_no: str,
+    submit_body: dict[str, Any],
+) -> dict[str, Any]:
+    """异步轮询 Gateway 任务直到完成/失败/超时。"""
+    poll_url = f"{base_url}/chat/task/result"
+    poll_body = build_poll_body(submit_body, task_no)
+    deadline = time.monotonic() + settings.ai_gateway_poll_max_wait
+    start_time = time.monotonic()
+    poll_count = 0
+
+    while True:
+        if time.monotonic() > deadline:
+            raise AiRequestError(
+                "task_timeout",
+                detail=f"轮询超时({settings.ai_gateway_poll_max_wait}s), task_no={task_no}",
+                task_no=task_no,
+            )
+
+        await asyncio.sleep(settings.ai_gateway_poll_interval)
+        poll_count += 1
+
+        t0 = time.monotonic()
+        try:
+            response = await client.post(
+                poll_url, headers={"Content-Type": "application/json"}, json=poll_body,
+            )
+        except httpx.TimeoutException as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            raise AiRequestError("timeout", elapsed_ms=elapsed, detail=str(e), task_no=task_no) from e
+        except httpx.ConnectError as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e), task_no=task_no) from e
+
+        if response.status_code >= 400:
+            raise AiRequestError(
+                "http_error",
+                status_code=response.status_code,
+                response_body=response.text[:500],
+                task_no=task_no,
+            )
+
+        status, result, failed_reason = parse_poll_response(response.json())
+
+        logger.debug("轮询 task_no=%s attempt=%d status=%s", task_no, poll_count, status)
+
+        if status == "COMPLETED" and result is not None:
+            total_elapsed = int((time.monotonic() - start_time) * 1000)
+            logger.info("Gateway 任务完成 task_no=%s polls=%d elapsed=%dms", task_no, poll_count, total_elapsed)
+            return result
+        elif status == "FAILED":
+            raise AiRequestError(
+                "task_failed",
+                detail=f"task_no={task_no}: {failed_reason}",
+                task_no=task_no,
+            )
+        # PENDING / PROCESSING → 继续轮询
+
+
+def poll_gateway_task_sync(
+    client: httpx.Client,
+    base_url: str,
+    task_no: str,
+    submit_body: dict[str, Any],
+) -> dict[str, Any]:
+    """同步轮询 Gateway 任务直到完成/失败/超时。"""
+    poll_url = f"{base_url}/chat/task/result"
+    poll_body = build_poll_body(submit_body, task_no)
+    deadline = time.monotonic() + settings.ai_gateway_poll_max_wait
+    start_time = time.monotonic()
+    poll_count = 0
+
+    while True:
+        if time.monotonic() > deadline:
+            raise AiRequestError(
+                "task_timeout",
+                detail=f"轮询超时({settings.ai_gateway_poll_max_wait}s), task_no={task_no}",
+                task_no=task_no,
+            )
+
+        time.sleep(settings.ai_gateway_poll_interval)
+        poll_count += 1
+
+        t0 = time.monotonic()
+        try:
+            response = client.post(
+                poll_url, headers={"Content-Type": "application/json"}, json=poll_body,
+            )
+        except httpx.TimeoutException as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            raise AiRequestError("timeout", elapsed_ms=elapsed, detail=str(e), task_no=task_no) from e
+        except httpx.ConnectError as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e), task_no=task_no) from e
+
+        if response.status_code >= 400:
+            raise AiRequestError(
+                "http_error",
+                status_code=response.status_code,
+                response_body=response.text[:500],
+                task_no=task_no,
+            )
+
+        status, result, failed_reason = parse_poll_response(response.json())
+
+        logger.debug("轮询 task_no=%s attempt=%d status=%s", task_no, poll_count, status)
+
+        if status == "COMPLETED" and result is not None:
+            total_elapsed = int((time.monotonic() - start_time) * 1000)
+            logger.info("Gateway 任务完成 task_no=%s polls=%d elapsed=%dms", task_no, poll_count, total_elapsed)
+            return result
+        elif status == "FAILED":
+            raise AiRequestError(
+                "task_failed",
+                detail=f"task_no={task_no}: {failed_reason}",
+                task_no=task_no,
+            )
+        # PENDING / PROCESSING → 继续轮询
+
+
 # S-M2: Prompt Injection 防护
 _INJECTION_RE = re.compile(
     r"(ignore\s+(above|previous|all)|system:|<\|im_|忽略以上|忽略前面)",
@@ -43,12 +292,26 @@ _async_http_client: httpx.AsyncClient | None = None
 _async_http_client_loop: asyncio.AbstractEventLoop | None = None
 
 
+def _no_proxy_mounts_sync() -> dict:
+    """ai_use_proxy=False 时返回强制直连的 mounts 参数。"""
+    if settings.ai_use_proxy:
+        return {}
+    return {"mounts": {"all://": httpx.HTTPTransport()}}
+
+
+def _no_proxy_mounts_async() -> dict:
+    """ai_use_proxy=False 时返回强制直连的 mounts 参数（异步版）。"""
+    if settings.ai_use_proxy:
+        return {}
+    return {"mounts": {"all://": httpx.AsyncHTTPTransport()}}
+
+
 def _get_http_client() -> httpx.Client:
     global _http_client
     if _http_client is None:
         with _http_client_lock:
             if _http_client is None:
-                _http_client = httpx.Client(timeout=60.0)
+                _http_client = httpx.Client(timeout=60.0, **_no_proxy_mounts_sync())
     return _http_client
 
 
@@ -58,12 +321,14 @@ def _get_async_http_client() -> httpx.AsyncClient:
     loop = asyncio.get_running_loop()
     if _async_http_client is None or _async_http_client_loop is not loop:
         old = _async_http_client
+        _pool_size = settings.ai_max_concurrency * 2 if settings.ai_gateway_async else settings.ai_max_concurrency
         _async_http_client = httpx.AsyncClient(
             timeout=60.0,
             limits=httpx.Limits(
-                max_connections=settings.ai_max_concurrency,
-                max_keepalive_connections=settings.ai_max_concurrency,
+                max_connections=_pool_size,
+                max_keepalive_connections=_pool_size,
             ),
+            **_no_proxy_mounts_async(),
         )
         _async_http_client_loop = loop
         # 在当前循环中异步关闭旧客户端
@@ -199,6 +464,10 @@ class ContentGenerator:
                 return self._do_request(actual_url, actual_key, actual_model, system_prompt, user_prompt)
             except Exception as e:
                 last_error = e
+                logger.warning(
+                    "AI 调用失败 [%s] attempt=%d/%d: %s",
+                    actual_model, attempt + 1, settings.ai_max_retries, e,
+                )
                 if attempt < settings.ai_max_retries - 1:
                     time.sleep(2**attempt + random.uniform(0, 1))
 
@@ -222,33 +491,62 @@ class ContentGenerator:
 
         self._validate_url(actual_url)
 
+        url, headers, body = self._build_request(actual_url, actual_key, actual_model, system_prompt, user_prompt)
         client = _get_async_http_client()
         last_error = None
         for attempt in range(settings.ai_max_retries):
+            t0 = time.monotonic()
             try:
-                response = await client.post(
-                    f"{actual_url}/chat/completions",
-                    headers={"Authorization": f"Bearer {actual_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": actual_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0.7,
-                    },
-                )
-                response.raise_for_status()
+                try:
+                    response = await client.post(url, headers=headers, json=body)
+                except httpx.TimeoutException as e:
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    raise AiRequestError("timeout", elapsed_ms=elapsed, detail=str(e)) from e
+                except httpx.ConnectError as e:
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e)) from e
+
+                elapsed = int((time.monotonic() - t0) * 1000)
+                if response.status_code >= 400:
+                    raise AiRequestError(
+                        "http_error",
+                        status_code=response.status_code,
+                        response_body=response.text[:500],
+                        elapsed_ms=elapsed,
+                    )
                 data = response.json()
-                content = data["choices"][0]["message"]["content"]
-                return json.loads(content)
+
+                # Gateway 异步模式：提交 → 轮询
+                if settings.ai_gateway_mode and settings.ai_gateway_async:
+                    task_no = parse_async_submit_response(data)
+                    logger.info("Gateway async 提交成功 task_no=%s model=%s", task_no, actual_model)
+                    data = await poll_gateway_task_async(client, actual_url, task_no, body)
+
+                content = self._parse_response(data)
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError as e:
+                    raise AiRequestError(
+                        "parse_error", elapsed_ms=elapsed,
+                        response_body=content[:500], detail=str(e),
+                    ) from e
             except Exception as e:
                 last_error = e
+                logger.warning(
+                    "AI 调用失败 [%s] attempt=%d/%d: %s",
+                    actual_model, attempt + 1, settings.ai_max_retries, e,
+                )
                 if attempt < settings.ai_max_retries - 1:
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
 
         raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")
+
+    @staticmethod
+    def _ensure_json_hint(system_prompt: str) -> str:
+        """确保 system prompt 包含 'json' 关键词，满足 response_format 要求。"""
+        if "json" not in system_prompt.lower():
+            return system_prompt + "\n请以 JSON 格式返回结果。"
+        return system_prompt
 
     @staticmethod
     def _validate_url(base_url: str) -> None:
@@ -257,25 +555,67 @@ class ContentGenerator:
 
         validate_ai_url(base_url)
 
+    @staticmethod
+    def _resolve_gateway_provider(model: str) -> str:
+        """根据模型名自动推断 Gateway provider，兜底用配置值。"""
+        _MODEL_PROVIDER_MAP = {
+            "gemini": "VERTEX",
+            "gpt": "AZURE",
+        }
+        model_lower = model.lower().split("|")[0]  # "gpt-5.2|efficiency" → "gpt-5.2"
+        for prefix, provider in _MODEL_PROVIDER_MAP.items():
+            if model_lower.startswith(prefix):
+                return provider
+        return settings.ai_gateway_provider  # 兜底
+
+    def _build_request(
+        self, base_url: str, api_key: str, model: str, system_prompt: str, user_prompt: str,
+    ) -> tuple[str, dict[str, str], dict[str, Any]]:
+        """构造请求参数，委托给模块级公共函数。"""
+        return build_ai_request(base_url, api_key, model, system_prompt, user_prompt)
+
+    @staticmethod
+    def _parse_response(data: dict[str, Any]) -> str:
+        """从响应中提取 content，委托给模块级公共函数。"""
+        return parse_ai_response(data)
+
     def _do_request(
         self, base_url: str, api_key: str, model: str, system_prompt: str, user_prompt: str
     ) -> dict[str, Any]:
         self._validate_url(base_url)
+        url, headers, body = self._build_request(base_url, api_key, model, system_prompt, user_prompt)
         client = _get_http_client()
-        response = client.post(
-            f"{base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.7,
-            },
-        )
-        response.raise_for_status()
+        t0 = time.monotonic()
+        try:
+            response = client.post(url, headers=headers, json=body)
+        except httpx.TimeoutException as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            raise AiRequestError("timeout", elapsed_ms=elapsed, detail=str(e)) from e
+        except httpx.ConnectError as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e)) from e
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        if response.status_code >= 400:
+            raise AiRequestError(
+                "http_error",
+                status_code=response.status_code,
+                response_body=response.text[:500],
+                elapsed_ms=elapsed,
+            )
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        return json.loads(content)
+
+        # Gateway 异步模式：提交 → 轮询
+        if settings.ai_gateway_mode and settings.ai_gateway_async:
+            task_no = parse_async_submit_response(data)
+            logger.info("Gateway async 提交成功 task_no=%s model=%s", task_no, model)
+            data = poll_gateway_task_sync(client, base_url, task_no, body)
+
+        content = self._parse_response(data)
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            raise AiRequestError(
+                "parse_error", elapsed_ms=elapsed,
+                response_body=content[:500], detail=str(e),
+            ) from e

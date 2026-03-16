@@ -323,7 +323,7 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
         try:
             gathered = await asyncio.wait_for(
                 asyncio.gather(*async_tasks, return_exceptions=True),
-                timeout=300,  # 5 分钟总超时，防止永久挂起
+                timeout=1200,  # 20 分钟总超时（推理模型较慢）
             )
         except asyncio.TimeoutError:
             for t in async_tasks:
@@ -336,17 +336,27 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
         for i, r in enumerate(gathered):
             item_id = tasks[i][0]
             if isinstance(r, Exception):
-                logger.warning("生成失败 item_id=%s: %s", item_id, r)
+                logger.warning("生成失败 item_id=%s: %s(%s)", item_id, type(r).__name__, r, exc_info=True)
                 results[item_id] = {}
                 item = item_map[item_id]
+                # 从 AiRequestError 或其 __cause__ 提取结构化信息
+                cause = r.__cause__ if r.__cause__ else r
+                status_code = getattr(cause, "status_code", None)
+                resp_body = getattr(cause, "response_body", None) or ""
+                elapsed = getattr(cause, "elapsed_ms", None)
+                task_no = getattr(cause, "task_no", None) or ""
                 error_logs.append(AiErrorLog(
                     content_item_id=item_id,
                     word_id=item.word_id,
                     phase="generation",
                     dimension=item.dimension,
-                    error_type=classify_ai_error(r),
+                    error_type=classify_ai_error(cause),
                     error_message=str(r)[:2000],
+                    http_status_code=status_code,
+                    response_body=resp_body[:500] if resp_body else None,
+                    elapsed_ms=elapsed,
                     ai_model=settings.ai_model,
+                    gateway_task_no=task_no or None,
                     retry_count=settings.ai_max_retries,
                 ))
             else:

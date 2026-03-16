@@ -22,7 +22,22 @@ _PROMPT_FILE_MAP: list[tuple[str, str, str]] = [
     ("助记-考试应用.md", "mnemonic_exam_app", "助记-考试应用"),
 ]
 
-DEFAULT_MODEL = "gpt-5.2"
+# 维度→模型映射（例句用 GPT，其余用 Gemini）
+_DIMENSION_MODEL_MAP: dict[str, str] = {
+    "chunk": "gemini-3-flash-preview",
+    "sentence": "gpt-5.2",
+    "syllable": "gemini-3-flash-preview",
+    "mnemonic_root_affix": "gemini-3-flash-preview",
+    "mnemonic_word_in_word": "gemini-3-flash-preview",
+    "mnemonic_sound_meaning": "gemini-3-flash-preview",
+    "mnemonic_exam_app": "gemini-3-flash-preview",
+}
+DEFAULT_MODEL = "gemini-3-flash-preview"
+
+
+def _model_for_dimension(dimension: str) -> str:
+    """根据维度返回对应的模型名。"""
+    return _DIMENSION_MODEL_MAP.get(dimension, DEFAULT_MODEL)
 
 
 def _compute_file_hash(content: str) -> str:
@@ -65,7 +80,7 @@ def seed_defaults(session: Session) -> int:
                 name=f"{display_name}{'生成' if category == 'generation' else '质检'}",
                 category=category,
                 dimension=dimension,
-                model=DEFAULT_MODEL,
+                model=_model_for_dimension(dimension),
                 content=content,
                 source="file",
                 file_hash=_compute_file_hash(content),
@@ -109,7 +124,7 @@ def create_prompt(session: Session, data: dict, user_id: Optional[int] = None) -
         name=data["name"],
         category=data["category"],
         dimension=data["dimension"],
-        model=data.get("model", "gemini-3-flash-preview"),
+        model=data.get("model", _model_for_dimension(data["dimension"])),
         content=data.get("content", ""),
         ai_api_key=data.get("ai_api_key"),
         ai_api_base_url=data.get("ai_api_base_url"),
@@ -205,7 +220,7 @@ def sync_prompts(session: Session, dry_run: bool = False) -> dict:
                         name=f"{display_name}{'生成' if category == 'generation' else '质检'}",
                         category=category,
                         dimension=dimension,
-                        model=DEFAULT_MODEL,
+                        model=_model_for_dimension(dimension),
                         content=content,
                         source="file",
                         file_hash=file_hash,

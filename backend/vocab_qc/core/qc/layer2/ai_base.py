@@ -3,12 +3,20 @@
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import httpx
 
 from vocab_qc.core.config import settings
+from vocab_qc.core.generators.base import (
+    AiRequestError,
+    build_ai_request,
+    parse_ai_response,
+    parse_async_submit_response,
+    poll_gateway_task_async,
+)
 
 logger = logging.getLogger(__name__)
 from vocab_qc.core.qc.base import RuleResult
@@ -79,6 +87,10 @@ class AiClient:
                 return await self._call_api(system_prompt, user_prompt)
             except Exception as e:
                 last_error = e
+                logger.warning(
+                    "AI 质检调用失败 [%s] attempt=%d/%d: %s",
+                    self.model, attempt + 1, self.max_retries, e,
+                )
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2**attempt)
         raise RuntimeError(f"AI API 调用失败（{self.max_retries}次重试后）: {last_error}")
@@ -88,23 +100,45 @@ class AiClient:
             logger.warning("AI API 未配置，占位模式跳过校验")
             return {"passed": True, "detail": "占位模式 - 未配置 AI API"}
 
-        response = await self._get_http_client().post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            json={
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0,
-            },
+        url, headers, body = build_ai_request(
+            self.base_url, self.api_key, self.model,
+            system_prompt, user_prompt, temperature=0,
         )
-        response.raise_for_status()
+        client = self._get_http_client()
+        t0 = time.monotonic()
+        try:
+            response = await client.post(url, headers=headers, json=body)
+        except httpx.TimeoutException as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            raise AiRequestError("timeout", elapsed_ms=elapsed, detail=str(e)) from e
+        except httpx.ConnectError as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e)) from e
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        if response.status_code >= 400:
+            raise AiRequestError(
+                "http_error",
+                status_code=response.status_code,
+                response_body=response.text[:500],
+                elapsed_ms=elapsed,
+            )
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        return json.loads(content)
+
+        # Gateway 异步模式：提交 → 轮询
+        if settings.ai_gateway_mode and settings.ai_gateway_async:
+            task_no = parse_async_submit_response(data)
+            logger.info("Gateway async 质检提交 task_no=%s model=%s", task_no, self.model)
+            data = await poll_gateway_task_async(client, self.base_url, task_no, body)
+
+        content = parse_ai_response(data)
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            raise AiRequestError(
+                "parse_error", elapsed_ms=elapsed,
+                response_body=content[:500], detail=str(e),
+            ) from e
 
 
 class AiRuleChecker:

@@ -20,7 +20,14 @@ class Settings(BaseSettings):
     ai_model: str = "gemini-3-flash-preview"
     ai_max_concurrency: int = 20
     ai_max_retries: int = 3
-    ai_task_timeout: int = 60
+    ai_task_timeout: int = 360
+    ai_use_proxy: bool = False  # True=使用系统代理（GPT等海外API），False=直连（豆包等国内API）
+    ai_gateway_mode: bool = False  # True=51talk AI Gateway 格式（api_key 在 body，响应包裹在 res 中）
+    ai_gateway_provider: str = "OPENAI"  # Gateway provider: OPENAI/GEMINI/AZURE/DEEPSEEK 等
+    ai_gateway_biz_type: str = "vocab_qc"  # Gateway biz_type 标识
+    ai_gateway_async: bool = False  # True=使用异步提交+轮询（仅 ai_gateway_mode=True 时生效）
+    ai_gateway_poll_interval: float = 3.0  # 轮询间隔（秒）
+    ai_gateway_poll_max_wait: int = 300  # 单任务最大轮询等待（秒）
     allow_private_ai_url: bool = False
 
     max_regenerate_retries: int = 3
@@ -84,6 +91,13 @@ def validate_production_config() -> None:
 
     if settings.allow_private_ai_url:
         errors.append("生产环境禁止 VOCAB_QC_ALLOW_PRIVATE_AI_URL=True（SSRF 风险）")
+
+    if settings.ai_gateway_async and not settings.ai_gateway_mode:
+        errors.append("VOCAB_QC_AI_GATEWAY_ASYNC=True 需要 VOCAB_QC_AI_GATEWAY_MODE=True")
+    if settings.ai_gateway_async and settings.ai_task_timeout < settings.ai_gateway_poll_max_wait:
+        errors.append(
+            f"ai_task_timeout({settings.ai_task_timeout}) 应 >= ai_gateway_poll_max_wait({settings.ai_gateway_poll_max_wait})"
+        )
 
     if not settings.smtp_host:
         errors.append("VOCAB_QC_SMTP_HOST 未配置，无法发送验证码")
