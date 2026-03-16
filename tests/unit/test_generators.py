@@ -103,6 +103,39 @@ class TestRootAffixMnemonicGenerator:
         assert result["content"] is None
 
 
+class TestProcessResultEdgeCases:
+    def test_none_input(self):
+        from vocab_qc.core.generators.mnemonic import _MnemonicBase
+        result = _MnemonicBase._process_result(None)
+        assert result["valid"] is False
+
+    def test_valid_string_false(self):
+        from vocab_qc.core.generators.mnemonic import _MnemonicBase
+        result = _MnemonicBase._process_result({"valid": "false"})
+        assert result["valid"] is False
+
+    def test_valid_zero(self):
+        from vocab_qc.core.generators.mnemonic import _MnemonicBase
+        result = _MnemonicBase._process_result({"valid": 0})
+        assert result["valid"] is False
+
+    def test_missing_chant_field(self):
+        from vocab_qc.core.generators.mnemonic import _MnemonicBase
+        result = _MnemonicBase._process_result(
+            {"valid": True, "formula": "a+b", "script": "..."}
+        )
+        assert result["valid"] is True
+        parsed = json.loads(result["content"])
+        assert parsed["chant"] == ""
+
+    def test_ai_valid_string_false_via_generator(self):
+        """AI 返回字符串 'false' 时应视为无效."""
+        gen = RootAffixMnemonicGenerator()
+        with patch.object(gen, "_call_ai", return_value={"valid": "false"}):
+            result = gen.generate("dog", meaning="狗", pos="n.")
+        assert result["valid"] is False
+
+
 class TestRootAffixSystemPrompt:
     def test_system_prompt_contains_kb(self):
         """词根词缀助记的 system prompt 应包含知识库."""

@@ -7,9 +7,11 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from vocab_qc.core.generators import _find_project_root
+
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_PROJECT_ROOT = _find_project_root()
 _DATA_DIR = _PROJECT_ROOT / "docs" / "data"
 
 
@@ -24,22 +26,25 @@ class MorphemeEntry:
 
 
 def _parse_root_forms(raw: str) -> tuple[str, ...]:
-    """解析词根: 'DUC, DUCT[DU]' → ('duc', 'duct', 'du')."""
+    """解析词根: 'DUC, DUCT[DU]' → ('duc', 'duct', 'du')——主形式在前，变体在后."""
     forms: list[str] = []
-    # 提取方括号内的变体
+    # 先提取方括号变体（暂存）
+    bracket_variants: list[str] = []
     bracket_matches = re.findall(r"\[([^\]]+)\]", raw)
     for bm in bracket_matches:
         for part in bm.split(","):
             part = part.strip().lower()
             if part:
-                forms.append(part)
-    # 去掉方括号部分，按逗号分割
+                bracket_variants.append(part)
+    # 去掉方括号部分，主形式先加入
     cleaned = re.sub(r"\[[^\]]*\]", "", raw)
     for part in cleaned.split(","):
         part = part.strip().lower()
         if part:
             forms.append(part)
-    return tuple(dict.fromkeys(forms))  # 去重保序
+    # 变体追加在后
+    forms.extend(bracket_variants)
+    return tuple(dict.fromkeys(forms))
 
 
 def _parse_prefix_forms(raw: str) -> tuple[str, ...]:
@@ -103,12 +108,12 @@ def _load_csv(filename: str, category: str, parser) -> list[MorphemeEntry]:
     return entries
 
 
-_kb_cache: list[MorphemeEntry] | None = None
+_kb_cache: tuple[MorphemeEntry, ...] | None = None
 _kb_lock = threading.Lock()
 
 
-def get_morpheme_kb() -> list[MorphemeEntry]:
-    """延迟加载 + 双检锁单例."""
+def get_morpheme_kb() -> tuple[MorphemeEntry, ...]:
+    """延迟加载 + 双检锁单例，返回不可变 tuple."""
     global _kb_cache
     if _kb_cache is not None:
         return _kb_cache
@@ -120,12 +125,21 @@ def get_morpheme_kb() -> list[MorphemeEntry]:
         entries.extend(_load_csv("morpheme_prefixes.csv", "prefix", _parse_prefix_forms))
         entries.extend(_load_csv("morpheme_suffixes.csv", "suffix", _parse_suffix_forms))
         logger.info("词素知识库加载完成: %d 条", len(entries))
-        _kb_cache = entries
+        _kb_cache = tuple(entries)
         return _kb_cache
 
 
 _fmt_cache: str | None = None
 _fmt_lock = threading.Lock()
+
+_INJECTION_PATTERNS = re.compile(
+    r"(?i)(ignore|forget|disregard)\s+(\w+\s+)?(previous|above|prior)\s+(instructions?|rules?|prompts?)",
+)
+
+
+def _sanitize_kb_entry(text: str) -> str:
+    """清洗知识库条目，移除疑似 prompt injection 模式."""
+    return _INJECTION_PATTERNS.sub("[FILTERED]", text)
 
 
 def format_kb_for_prompt() -> str:
@@ -139,7 +153,9 @@ def format_kb_for_prompt() -> str:
         kb = get_morpheme_kb()
         sections: dict[str, list[str]] = {"prefix": [], "root": [], "suffix": []}
         for entry in kb:
-            sections[entry.category].append(f"  - {entry.display}: {entry.description}")
+            sections[entry.category].append(
+                f"  - {_sanitize_kb_entry(entry.display)}: {_sanitize_kb_entry(entry.description)}"
+            )
         parts: list[str] = []
         for cat, label in [("prefix", "前缀"), ("root", "词根"), ("suffix", "后缀")]:
             if sections[cat]:

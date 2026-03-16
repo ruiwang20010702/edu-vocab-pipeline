@@ -3,7 +3,6 @@
 import pytest
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import Session, sessionmaker
-
 from vocab_qc.core.config import settings
 from vocab_qc.core.db import Base
 
@@ -14,6 +13,17 @@ settings.ai_api_base_url = ""
 
 # 使用 SQLite 内存数据库进行单元测试，无需 PostgreSQL
 TEST_DATABASE_URL = "sqlite://"
+
+
+@pytest.fixture(autouse=True)
+def _reset_morpheme_kb_cache():
+    """每个测试前后重置词素知识库缓存，确保测试隔离."""
+    import vocab_qc.core.generators.morpheme_kb as mkb
+    mkb._kb_cache = None
+    mkb._fmt_cache = None
+    yield
+    mkb._kb_cache = None
+    mkb._fmt_cache = None
 
 
 @pytest.fixture(scope="session")
@@ -74,11 +84,15 @@ def sample_word(db_session: Session):
         content_cn="动物园里有很多种动物。",
     )
     # 助记按义项创建
+    wiw_content = (
+        '{"formula": "kind = k + ind", "chant": "kind里藏着king",'
+        ' "script": "kind 和 king 只差一个字母，国王(king)对人友好(kind)"}'
+    )
     mnemonic_wiw = ContentItem(
         word_id=word.id,
         meaning_id=meaning1.id,
         dimension="mnemonic_word_in_word",
-        content='{"formula": "kind = k + ind", "chant": "kind里藏着king", "script": "kind 和 king 只差一个字母，国王(king)对人友好(kind)"}',
+        content=wiw_content,
     )
     mnemonic_ra = ContentItem(
         word_id=word.id,

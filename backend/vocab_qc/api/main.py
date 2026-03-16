@@ -43,6 +43,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Prompt 启动同步失败（不阻塞启动）", exc_info=True)
 
+    # 预热词根词缀知识库缓存，避免首次请求延迟
+    try:
+        from vocab_qc.core.generators.morpheme_kb import get_morpheme_kb
+        kb = get_morpheme_kb()
+        logger.info("词根词缀知识库预热完成: %d 条", len(kb))
+    except Exception:
+        logger.warning("词根词缀知识库预热失败（不阻塞启动）", exc_info=True)
+
     yield
 
     # --- shutdown: 关闭共享 HTTP 客户端 ---

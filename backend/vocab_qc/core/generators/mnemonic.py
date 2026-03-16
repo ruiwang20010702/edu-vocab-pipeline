@@ -14,13 +14,18 @@ class _MnemonicBase(ContentGenerator):
     """助记生成器基类，统一处理 valid/false 逻辑."""
 
     def _build_user_prompt(self, word: str, pos: Optional[str], meaning: Optional[str]) -> str:
-        return f"Word: {sanitize_prompt_input(word)} | POS: {sanitize_prompt_input(pos or '未知')} | Meaning: {sanitize_prompt_input(meaning or '未知')}"
+        word_s = sanitize_prompt_input(word)
+        pos_s = sanitize_prompt_input(pos or "未知")
+        meaning_s = sanitize_prompt_input(meaning or "未知")
+        return f"Word: {word_s} | POS: {pos_s} | Meaning: {meaning_s}"
 
     @staticmethod
-    def _process_result(result: dict) -> dict:
+    def _process_result(result: dict | None) -> dict:
         if not result:
             return {"valid": False, "content": None, "content_cn": None}
-        if result.get("valid") is False:
+        raw_valid = result.get("valid")
+        # fail-safe: 仅严格 True 视为有效；字符串 "false"、0、None 等均为无效
+        if raw_valid is not True and raw_valid != 1:
             return {"valid": False, "content": None, "content_cn": None}
 
         formula = result.get("formula", "")
@@ -48,7 +53,13 @@ class _MnemonicBase(ContentGenerator):
         )
         return self._process_result(result)
 
-    async def generate_async(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, **kwargs: Any) -> dict:
+    async def generate_async(
+        self,
+        word: str,
+        meaning: Optional[str] = None,
+        pos: Optional[str] = None,
+        **kwargs: Any,
+    ) -> dict:
         ai_config = self.resolve_ai_config(**kwargs)
         user_prompt = self._build_user_prompt(word, pos, meaning)
         result = await self._call_ai_async(

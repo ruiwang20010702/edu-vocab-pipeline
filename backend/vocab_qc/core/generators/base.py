@@ -8,12 +8,12 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Optional
 
 import httpx
 
 from vocab_qc.core.config import settings
+from vocab_qc.core.generators import _find_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +280,7 @@ def sanitize_prompt_input(text: str, max_len: int = 200) -> str:
     return cleaned[:max_len].strip()
 
 # 项目根目录 → docs/prompts/generation/
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_PROJECT_ROOT = _find_project_root()
 _PROMPT_DIR = _PROJECT_ROOT / "docs" / "prompts" / "generation"
 
 # 模块级复用的 HTTP 客户端，避免每次请求创建新连接
@@ -418,13 +418,26 @@ class ContentGenerator:
         """硬编码兜底 Prompt，子类可覆盖."""
         return ""
 
-    def resolve_ai_config(self, session: Any = None, _preloaded_config: Optional["AiConfig"] = None, **kwargs: Any) -> "AiConfig":
+    def resolve_ai_config(
+        self,
+        session: Any = None,
+        _preloaded_config: Optional["AiConfig"] = None,
+        **kwargs: Any,
+    ) -> "AiConfig":
         """获取 AI 配置：优先使用预加载配置（并发安全），否则从 DB 读取。"""
         if _preloaded_config is not None:
             return _preloaded_config
         return self.get_ai_config(session)
 
-    def generate(self, word: str, meaning: Optional[str] = None, pos: Optional[str] = None, session: Any = None, _preloaded_config: Optional["AiConfig"] = None, **kwargs: Any) -> dict:
+    def generate(
+        self,
+        word: str,
+        meaning: Optional[str] = None,
+        pos: Optional[str] = None,
+        session: Any = None,
+        _preloaded_config: Optional["AiConfig"] = None,
+        **kwargs: Any,
+    ) -> dict:
         """生成内容.
 
         Returns:
@@ -558,12 +571,12 @@ class ContentGenerator:
     @staticmethod
     def _resolve_gateway_provider(model: str) -> str:
         """根据模型名自动推断 Gateway provider，兜底用配置值。"""
-        _MODEL_PROVIDER_MAP = {
+        _model_provider_map = {
             "gemini": "VERTEX",
             "gpt": "AZURE",
         }
         model_lower = model.lower().split("|")[0]  # "gpt-5.2|efficiency" → "gpt-5.2"
-        for prefix, provider in _MODEL_PROVIDER_MAP.items():
+        for prefix, provider in _model_provider_map.items():
             if model_lower.startswith(prefix):
                 return provider
         return settings.ai_gateway_provider  # 兜底
