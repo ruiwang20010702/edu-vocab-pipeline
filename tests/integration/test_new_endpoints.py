@@ -6,12 +6,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
-
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 from vocab_qc.core.db import Base
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
-from vocab_qc.core.models.package_layer import Package, PackageMeaning
+from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.user import User
 
 
@@ -19,10 +18,10 @@ from vocab_qc.core.models.user import User
 def test_app():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    TestSession = sessionmaker(bind=engine)
+    test_session_factory = sessionmaker(bind=engine)
 
     def override_get_db():
-        session = TestSession()
+        session = test_session_factory()
         try:
             yield session
             session.commit()
@@ -37,7 +36,7 @@ def test_app():
     app.dependency_overrides[get_current_user] = lambda: mock_user
 
     # 插入测试数据
-    session = TestSession()
+    session = test_session_factory()
     word = Word(word="happy")
     session.add(word)
     session.flush()
@@ -66,8 +65,8 @@ def test_app():
     pkg = Package(name="测试词包")
     session.add(pkg)
     session.flush()
-    pm = PackageMeaning(package_id=pkg.id, meaning_id=meaning.id)
-    session.add(pm)
+    pw = PackageWord(package_id=pkg.id, word_id=word.id)
+    session.add(pw)
 
     session.commit()
     session.close()

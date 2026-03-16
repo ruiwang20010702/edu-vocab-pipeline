@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Phonetic, Source, Word
 from vocab_qc.core.models.enums import QcStatus
-from vocab_qc.core.models.package_layer import Package, PackageMeaning
+from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import RetryCounter, ReviewItem
 
 
@@ -65,14 +65,14 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
                 if existing is None:
                     session.add(Source(meaning_id=meaning.id, source_name=src_name))
 
-            # 包-义项映射
-            existing_pm = (
-                session.query(PackageMeaning)
-                .filter_by(package_id=package.id, meaning_id=meaning.id)
-                .first()
-            )
-            if existing_pm is None:
-                session.add(PackageMeaning(package_id=package.id, meaning_id=meaning.id))
+        # 包-词映射（每个词一条，去重）
+        existing_pw = (
+            session.query(PackageWord)
+            .filter_by(package_id=package.id, word_id=word.id)
+            .first()
+        )
+        if existing_pw is None:
+            session.add(PackageWord(package_id=package.id, word_id=word.id))
 
     # 创建 ContentItem 占位记录（chunk/sentence/mnemonic 均按义项）
     _create_content_placeholders(session, imported_words, imported_meanings)
@@ -237,42 +237,38 @@ def _clean_package_data(session: Session, pkg: Package) -> None:
     """清理批次关联的旧数据，为重新导入做准备。
 
     策略：
-    - 删除该包独占义项的 pending ContentItem（chunk/sentence）
-    - 删除该包独占义项的 pending mnemonic ContentItem
-    - 删除该包的 PackageMeaning 映射
+    - 删除该包独占词的 pending ContentItem（chunk/sentence/mnemonic/syllable）
+    - 删除该包的 PackageWord 映射
     - 不删除已生成的内容（非空 content），不删除跨包共享的数据
     """
     from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
 
-    # 1. 找出该包关联的所有 meaning_id
-    old_pm_rows = session.query(PackageMeaning).filter_by(package_id=pkg.id).all()
-    old_meaning_ids = {pm.meaning_id for pm in old_pm_rows}
-    if not old_meaning_ids:
+    # 1. 找出该包关联的所有 word_id
+    old_pw_rows = session.query(PackageWord).filter_by(package_id=pkg.id).all()
+    old_word_ids = {pw.word_id for pw in old_pw_rows}
+    if not old_word_ids:
         return
 
-    # 2. 找出哪些 meaning 被其他包共享
-    shared_meaning_ids: set[int] = set()
-    for mid in old_meaning_ids:
+    # 2. 找出哪些 word 被其他包共享
+    shared_word_ids: set[int] = set()
+    for wid in old_word_ids:
         other = (
-            session.query(PackageMeaning)
-            .filter(PackageMeaning.meaning_id == mid, PackageMeaning.package_id != pkg.id)
+            session.query(PackageWord)
+            .filter(PackageWord.word_id == wid, PackageWord.package_id != pkg.id)
             .first()
         )
         if other is not None:
-            shared_meaning_ids.add(mid)
+            shared_word_ids.add(wid)
 
-    exclusive_meaning_ids = old_meaning_ids - shared_meaning_ids
+    exclusive_word_ids = old_word_ids - shared_word_ids
 
-    # 3. 找出独占义项对应的 word_id
-    exclusive_word_ids: set[int] = set()
-    if exclusive_meaning_ids:
-        meanings = session.query(Meaning).filter(Meaning.id.in_(exclusive_meaning_ids)).all()
-        candidate_word_ids = {m.word_id for m in meanings}
-        # 只有当该词的所有义项都是本包独占时，才算独占词
-        for wid in candidate_word_ids:
-            word_meaning_ids = {m.id for m in session.query(Meaning).filter_by(word_id=wid).all()}
-            if word_meaning_ids <= exclusive_meaning_ids:
-                exclusive_word_ids.add(wid)
+    # 3. 找出独占词的所有 meaning_id
+    exclusive_meaning_ids: set[int] = set()
+    if exclusive_word_ids:
+        exclusive_meaning_ids = {
+            row[0] for row in
+            session.query(Meaning.id).filter(Meaning.word_id.in_(exclusive_word_ids)).all()
+        }
 
     # 4. 收集要删除的 ContentItem IDs，先删关联的 ReviewItem 再删 ContentItem
     ci_ids_to_delete: list[int] = []
@@ -306,7 +302,7 @@ def _clean_package_data(session: Session, pkg: Package) -> None:
             ContentItem.id.in_(ci_ids_to_delete),
         ).delete(synchronize_session=False)
 
-    # 7. 删除独占义项/词的 RetryCounter
+    # 7. 删除独占词的 RetryCounter
     if exclusive_meaning_ids:
         session.query(RetryCounter).filter(
             RetryCounter.meaning_id.in_(exclusive_meaning_ids),
@@ -317,8 +313,8 @@ def _clean_package_data(session: Session, pkg: Package) -> None:
             RetryCounter.meaning_id.is_(None),
         ).delete(synchronize_session=False)
 
-    # 8. 删除 PackageMeaning 映射
-    session.query(PackageMeaning).filter_by(package_id=pkg.id).delete(synchronize_session=False)
+    # 8. 删除 PackageWord 映射
+    session.query(PackageWord).filter_by(package_id=pkg.id).delete(synchronize_session=False)
     session.flush()
 
 

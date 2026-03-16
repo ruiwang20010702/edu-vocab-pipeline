@@ -19,7 +19,7 @@ from vocab_qc.core.generators.syllable import SyllableGenerator
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
 from vocab_qc.core.models.enums import QcStatus
-from vocab_qc.core.models.package_layer import Package, PackageMeaning
+from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import AiErrorLog, classify_ai_error
 from vocab_qc.core.services.qc_service import QcService
 
@@ -37,18 +37,10 @@ _GENERATORS = {
 
 def _get_word_ids_for_package(session: Session, package_id: int) -> set[int]:
     """获取 Package 关联的所有 word_id。"""
-    meaning_ids = {
-        row[0]
-        for row in session.query(PackageMeaning.meaning_id)
-        .filter_by(package_id=package_id)
-        .all()
-    }
-    if not meaning_ids:
-        return set()
     return {
         row[0]
-        for row in session.query(Meaning.word_id)
-        .filter(Meaning.id.in_(meaning_ids))
+        for row in session.query(PackageWord.word_id)
+        .filter_by(package_id=package_id)
         .all()
     }
 
@@ -128,9 +120,9 @@ def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
     from sqlalchemy import update
 
     # L2 有规则的维度
-    _L2_DIMENSIONS = {"sentence", "chunk", "mnemonic_root_affix",
-                      "mnemonic_word_in_word", "mnemonic_sound_meaning",
-                      "mnemonic_exam_app"}
+    l2_dimensions = {"sentence", "chunk", "mnemonic_root_affix",
+                     "mnemonic_word_in_word", "mnemonic_sound_meaning",
+                     "mnemonic_exam_app"}
 
     # 1. layer2_passed → approved（批量 UPDATE）
     r1 = session.execute(
@@ -148,7 +140,7 @@ def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
         .where(
             ContentItem.word_id.in_(word_ids),
             ContentItem.qc_status == QcStatus.LAYER1_PASSED.value,
-            ~ContentItem.dimension.in_(_L2_DIMENSIONS),
+            ~ContentItem.dimension.in_(l2_dimensions),
         )
         .values(qc_status=QcStatus.APPROVED.value)
     )
@@ -181,32 +173,19 @@ def run_production(
     pkg.status = "processing"
     session.flush()
 
-    # 获取 Package 下所有义项关联的 word_id
-    package_meaning_rows = (
-        session.query(PackageMeaning.meaning_id)
-        .filter_by(package_id=package_id)
-        .all()
-    )
-    meaning_ids = {row[0] for row in package_meaning_rows}
+    # 获取 Package 关联的所有 word_id
+    word_ids_from_package = _get_word_ids_for_package(session, package_id)
 
-    if not meaning_ids:
+    if not word_ids_from_package:
         pkg.status = "completed"
         pkg.processed_words = 0
         session.flush()
         return {"generated": 0, "qc_passed": 0, "qc_failed": 0, "enqueued": 0}
 
-    # 找出所有 word_id
-    word_ids_from_meanings = {
-        row[0]
-        for row in session.query(Meaning.word_id)
-        .filter(Meaning.id.in_(meaning_ids))
-        .all()
-    }
-
     # 获取所有待生成的 ContentItem（content 为空且状态 pending）
     items = (
         session.query(ContentItem)
-        .filter(ContentItem.word_id.in_(word_ids_from_meanings))
+        .filter(ContentItem.word_id.in_(word_ids_from_package))
         .filter_by(qc_status=QcStatus.PENDING.value)
         .all()
     )
@@ -216,21 +195,21 @@ def run_production(
     session.flush()
 
     # Step 2: 运行 Layer 1 质检（批量）
-    qc_result = qc.run_layer1_batch(session, word_ids_from_meanings)
+    qc_result = qc.run_layer1_batch(session, word_ids_from_package)
     if qc_result.get("run_id"):
         qc.enqueue_failed_for_review(session, qc_result["run_id"])
     session.flush()
 
     # Step 3: 运行 Layer 2 AI 质检（批量，仅针对 Layer 1 通过项）
-    l2_result = qc.run_layer2_batch(session, word_ids_from_meanings)
+    l2_result = qc.run_layer2_batch(session, word_ids_from_package)
     if l2_result.get("run_id"):
         qc.enqueue_layer2_failed_for_review(session, l2_result["run_id"])
 
     # Step 4: 自动批准通过全部质检的项目
-    auto_approved = _auto_approve_passed(session, word_ids_from_meanings)
+    auto_approved = _auto_approve_passed(session, word_ids_from_package)
 
     # 更新 Package 状态
-    pkg.processed_words = len(word_ids_from_meanings)
+    pkg.processed_words = len(word_ids_from_package)
     pkg.status = "completed"
     session.flush()
 

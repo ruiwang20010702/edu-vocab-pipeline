@@ -1,10 +1,10 @@
 """production_service 单元测试."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from vocab_qc.core.models import ContentItem, Meaning, Word
 from vocab_qc.core.models.enums import QcStatus
-from vocab_qc.core.models.package_layer import Package, PackageMeaning
+from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.services.production_service import run_production
 
 
@@ -36,8 +36,8 @@ class TestRunProduction:
         db_session.add(pkg)
         db_session.flush()
 
-        pm = PackageMeaning(package_id=pkg.id, meaning_id=meaning.id)
-        db_session.add(pm)
+        pw = PackageWord(package_id=pkg.id, word_id=word.id)
+        db_session.add(pw)
 
         # 创建空占位 ContentItem
         chunk = ContentItem(
@@ -122,8 +122,8 @@ class TestRunProduction:
         db_session.add(pkg)
         db_session.flush()
 
-        pm = PackageMeaning(package_id=pkg.id, meaning_id=meaning.id)
-        db_session.add(pm)
+        pw = PackageWord(package_id=pkg.id, word_id=word.id)
+        db_session.add(pw)
 
         # 已有内容的 chunk
         chunk = ContentItem(
@@ -169,17 +169,27 @@ class TestRunProduction:
         db_session.add(pkg)
         db_session.flush()
 
-        db_session.add_all([
-            PackageMeaning(package_id=pkg.id, meaning_id=m1.id),
-            PackageMeaning(package_id=pkg.id, meaning_id=m2.id),
-        ])
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
 
         # 4 个空占位: chunk×2 + sentence×2
+        pending = QcStatus.PENDING.value
         items = [
-            ContentItem(word_id=word.id, meaning_id=m1.id, dimension="chunk", content="", qc_status=QcStatus.PENDING.value),
-            ContentItem(word_id=word.id, meaning_id=m1.id, dimension="sentence", content="", qc_status=QcStatus.PENDING.value),
-            ContentItem(word_id=word.id, meaning_id=m2.id, dimension="chunk", content="", qc_status=QcStatus.PENDING.value),
-            ContentItem(word_id=word.id, meaning_id=m2.id, dimension="sentence", content="", qc_status=QcStatus.PENDING.value),
+            ContentItem(
+                word_id=word.id, meaning_id=m1.id,
+                dimension="chunk", content="", qc_status=pending,
+            ),
+            ContentItem(
+                word_id=word.id, meaning_id=m1.id,
+                dimension="sentence", content="", qc_status=pending,
+            ),
+            ContentItem(
+                word_id=word.id, meaning_id=m2.id,
+                dimension="chunk", content="", qc_status=pending,
+            ),
+            ContentItem(
+                word_id=word.id, meaning_id=m2.id,
+                dimension="sentence", content="", qc_status=pending,
+            ),
         ]
         db_session.add_all(items)
         db_session.flush()

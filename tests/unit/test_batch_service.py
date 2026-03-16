@@ -2,9 +2,8 @@
 
 import pytest
 from sqlalchemy.orm import Session
-
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, ReviewItem, ReviewReason, Word
-from vocab_qc.core.models.enums import BatchStatus, ReviewStatus
+from vocab_qc.core.models.enums import BatchStatus
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import batch_service
 from vocab_qc.core.services.review_service import ReviewService
@@ -179,3 +178,49 @@ class TestConcurrencyCheck:
         service = ReviewService()
         with pytest.raises(ValueError, match="已分配给其他审核员"):
             service.approve(db_session, reviews[0].id, reviewer="User2", user_id=user2.id)
+
+
+class TestProcessingLock:
+    """生产中锁：Package 为 processing 时，其关联词不被领取。"""
+
+    def test_processing_words_excluded(self, db_session: Session):
+        """正在生产的 Package 关联的 word 不应被 assign_batch 领取。"""
+        from vocab_qc.core.models.package_layer import Package, PackageWord
+
+        user = _create_user(db_session)
+
+        # 创建一个 processing 状态的 Package，关联 word "mango"
+        word_mango, reviews_mango = _create_word_with_reviews(db_session, "mango")
+        pkg = Package(name="processing_pkg", status="processing", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word_mango.id))
+        db_session.flush()
+
+        # 创建一个不在任何 Package 中的 word "kiwi"
+        _create_word_with_reviews(db_session, "kiwi")
+
+        batch = batch_service.assign_batch(db_session, user.id, batch_size=10)
+        assert batch is not None
+        # 只应领取 kiwi，不应领取 mango
+        assert batch.word_count == 1
+        data = batch_service.get_batch_words(db_session, batch.id)
+        assigned_word_ids = set(data["words"].keys())
+        assert word_mango.id not in assigned_word_ids
+
+    def test_completed_package_words_available(self, db_session: Session):
+        """已完成的 Package 关联的 word 应该可以被领取。"""
+        from vocab_qc.core.models.package_layer import Package, PackageWord
+
+        user = _create_user(db_session)
+
+        word, _ = _create_word_with_reviews(db_session, "papaya")
+        pkg = Package(name="completed_pkg", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+        db_session.flush()
+
+        batch = batch_service.assign_batch(db_session, user.id, batch_size=10)
+        assert batch is not None
+        assert batch.word_count == 1

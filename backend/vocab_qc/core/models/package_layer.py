@@ -1,4 +1,4 @@
-"""词包层模型: Package, PackageMeaning."""
+"""词包层模型: Package, PackageWord."""
 
 from datetime import datetime
 from typing import Optional
@@ -27,17 +27,17 @@ class Package(Base):
         return f"<Package id={self.id} name={self.name!r}>"
 
 
-class PackageMeaning(Base):
-    __tablename__ = "package_meanings"
+class PackageWord(Base):
+    __tablename__ = "package_words"
     __table_args__ = (
-        UniqueConstraint("package_id", "meaning_id", name="uq_package_meanings_pkg_meaning"),
+        UniqueConstraint("package_id", "word_id", name="uq_package_words_pkg_word"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     package_id: Mapped[int] = mapped_column(ForeignKey("packages.id"), nullable=False, index=True)
-    meaning_id: Mapped[int] = mapped_column(ForeignKey("meanings.id"), nullable=False, index=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:
-        return f"<PackageMeaning pkg={self.package_id} meaning={self.meaning_id}>"
+        return f"<PackageWord pkg={self.package_id} word={self.word_id}>"

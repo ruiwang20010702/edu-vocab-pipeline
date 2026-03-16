@@ -1,6 +1,7 @@
 """批次派发 API 路由."""
 
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -20,8 +21,6 @@ from vocab_qc.api.schemas.batch_info import BatchInfoResponse
 from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.package_layer import Package
 from vocab_qc.core.models.user import User
-import logging
-
 from vocab_qc.core.services import batch_service
 
 logger = logging.getLogger(__name__)
@@ -37,15 +36,16 @@ def _bulk_query_package_stats(
 ) -> dict[int, tuple[int, int, int]]:
     """批量查询所有 package 的 total/approved/failed 统计，返回 {pkg_id: (total, approved, failed)}。"""
     from sqlalchemy import case, func
+
     from vocab_qc.core.models import ContentItem, QcStatus
-    from vocab_qc.core.models.package_layer import PackageMeaning
+    from vocab_qc.core.models.package_layer import PackageWord
 
     if not package_ids:
         return {}
 
     rows = (
         db.query(
-            PackageMeaning.package_id,
+            PackageWord.package_id,
             func.count(ContentItem.id).label("total"),
             func.sum(case(
                 (ContentItem.qc_status == QcStatus.APPROVED.value, 1),
@@ -59,12 +59,12 @@ def _bulk_query_package_stats(
                 else_=0,
             )).label("failed"),
         )
-        .join(PackageMeaning, PackageMeaning.meaning_id == ContentItem.meaning_id)
+        .join(PackageWord, PackageWord.word_id == ContentItem.word_id)
         .filter(
-            PackageMeaning.package_id.in_(package_ids),
+            PackageWord.package_id.in_(package_ids),
             ContentItem.qc_status != QcStatus.REJECTED.value,
         )
-        .group_by(PackageMeaning.package_id)
+        .group_by(PackageWord.package_id)
         .all()
     )
 
@@ -241,10 +241,10 @@ def _run_production_bg(batch_id: int) -> None:
     """
     from vocab_qc.core.db import SyncSessionLocal
     from vocab_qc.core.services.production_service import (
+        step_finalize,
         step_generate,
         step_qc_layer1,
         step_qc_layer2,
-        step_finalize,
     )
 
     steps = [
@@ -266,10 +266,9 @@ def _run_production_bg(batch_id: int) -> None:
             # 标记 Package 为 failed + 善后处理僵尸 ContentItem
             try:
                 from vocab_qc.core.models import ContentItem, QcStatus
-                from vocab_qc.core.models.package_layer import PackageMeaning
+                from vocab_qc.core.models.enums import ReviewReason
                 from vocab_qc.core.services.production_service import _get_word_ids_for_package
                 from vocab_qc.core.services.review_service import ReviewService
-                from vocab_qc.core.models.enums import ReviewReason
 
                 pkg = session.query(Package).filter_by(id=batch_id).first()
                 if pkg:

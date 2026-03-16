@@ -3,9 +3,8 @@
 import json
 
 import pytest
-
 from vocab_qc.core.models import ContentItem, Meaning, Source, Word
-from vocab_qc.core.models.package_layer import Package, PackageMeaning
+from vocab_qc.core.models.package_layer import Package
 from vocab_qc.core.services import import_service
 
 

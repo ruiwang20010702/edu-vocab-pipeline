@@ -38,15 +38,26 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
         existing.completed_at = datetime.now(UTC)
         session.flush()
 
-    # Step 1: 查 word_ids（不加锁，DISTINCT 不兼容 FOR UPDATE）
-    word_ids = [
+    # 前置检查：排除正在生产中的 Package 关联的 word
+    from vocab_qc.core.models.package_layer import Package, PackageWord
+
+    processing_word_ids = {
         row[0] for row in
+        session.query(PackageWord.word_id)
+        .join(Package, Package.id == PackageWord.package_id)
+        .filter(Package.status == "processing")
+        .all()
+    }
+
+    # Step 1: 查 word_ids（不加锁，DISTINCT 不兼容 FOR UPDATE）
+    query_step1 = (
         session.query(distinct(ReviewItem.word_id))
         .filter_by(status=ReviewStatus.PENDING.value)
         .filter(ReviewItem.assigned_to_id.is_(None))
-        .limit(batch_size)
-        .all()
-    ]
+    )
+    if processing_word_ids:
+        query_step1 = query_step1.filter(~ReviewItem.word_id.in_(processing_word_ids))
+    word_ids = [row[0] for row in query_step1.limit(batch_size).all()]
     if not word_ids:
         return None
 

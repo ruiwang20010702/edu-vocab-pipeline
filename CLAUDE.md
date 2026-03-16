@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-前后端均已实现，572 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。已完成三轮安全与性能审计，全部修复。
+前后端均已实现，655 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。已完成三轮安全与性能审计，全部修复。
 
 ```
 VocabularyDataCleaning1.0/
@@ -44,7 +44,7 @@ VocabularyDataCleaning1.0/
 │   │   └── pages/               ← 6 个页面
 │   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
 │
-├── tests/                       ← 572 个测试
+├── tests/                       ← 655 个测试
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
 │   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
 │   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
@@ -79,6 +79,8 @@ PYTHONPATH=backend vocab review list
 2. **内容按义项挂载**：语块、例句、助记均按义项生成（防止多义词张冠李戴），音节按单词生成
 3. **质量门禁**：未审核通过的内容不会出现在最终产出中
 4. **人工审核拥有重试权**：人工审核环节有 3 次重新生成未通过部分的机会，3 次后需人工手动修改
+5. **词包按词关联**：Package 通过 PackageWord（word_id）关联单词，导入/生产/统计均按词维度操作
+6. **生产中锁**：Package 状态为 processing 时，其关联词不会被批次领取（防止生产与审核并发冲突）
 
 ## 设计原则
 

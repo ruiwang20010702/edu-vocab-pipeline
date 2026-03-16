@@ -8,21 +8,19 @@
 - 完整流水线: 导入 → 生产 → L1 质检 → 入队审核
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
+import pytest
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
-
 from vocab_qc.core.db import Base
-from vocab_qc.core.models import ContentItem, Meaning, Package, PackageMeaning, ReviewItem, Word
+from vocab_qc.core.models import ContentItem, Meaning, Package, PackageWord, ReviewItem, Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.services.production_service import (
     run_production,
+    step_finalize,
     step_generate,
     step_qc_layer1,
-    step_qc_layer2,
-    step_finalize,
 )
 
 
@@ -42,8 +40,8 @@ def prod_engine():
 @pytest.fixture
 def prod_session(prod_engine):
     """独立 session，不使用事务回滚（模拟真实后台任务行为）。"""
-    Session = sessionmaker(bind=prod_engine)
-    session = Session()
+    session_factory = sessionmaker(bind=prod_engine)
+    session = session_factory()
     yield session
     session.close()
 
@@ -62,8 +60,8 @@ def _seed_package_with_items(session, word_text="apple", definition="苹果", po
     session.add(pkg)
     session.flush()
 
-    pm = PackageMeaning(package_id=pkg.id, meaning_id=meaning.id)
-    session.add(pm)
+    pw = PackageWord(package_id=pkg.id, word_id=word.id)
+    session.add(pw)
 
     items = []
     for dim in ["chunk", "sentence"]:
@@ -137,8 +135,8 @@ class TestProductionPipeline:
 
     def test_run_production_bg_happy_path(self, prod_engine):
         """_run_production_bg 多 session 模式正常完成。"""
-        Session = sessionmaker(bind=prod_engine)
-        session = Session()
+        session_factory = sessionmaker(bind=prod_engine)
+        session = session_factory()
 
         pkg, word, meaning, items = _seed_package_with_items(session)
         session.commit()
@@ -147,12 +145,12 @@ class TestProductionPipeline:
 
         with patch(
             "vocab_qc.core.db.SyncSessionLocal",
-            new=Session,
+            new=session_factory,
         ):
             from vocab_qc.api.routers.batch import _run_production_bg
             _run_production_bg(pkg_id)
 
-        verify_session = Session()
+        verify_session = session_factory()
         pkg_result = verify_session.query(Package).filter_by(id=pkg_id).first()
         assert pkg_result.status == "completed"
         assert pkg_result.processed_words == 1
@@ -160,8 +158,8 @@ class TestProductionPipeline:
 
     def test_run_production_bg_failure_at_generate(self, prod_engine):
         """_run_production_bg 在 generate 步骤失败时 Package.status 应为 failed。"""
-        Session = sessionmaker(bind=prod_engine)
-        session = Session()
+        session_factory = sessionmaker(bind=prod_engine)
+        session = session_factory()
 
         pkg, word, meaning, items = _seed_package_with_items(session)
         session.commit()
@@ -170,7 +168,7 @@ class TestProductionPipeline:
 
         with patch(
             "vocab_qc.core.db.SyncSessionLocal",
-            new=Session,
+            new=session_factory,
         ), patch(
             "vocab_qc.core.services.production_service.step_generate",
             side_effect=RuntimeError("模拟生成失败"),
@@ -178,15 +176,15 @@ class TestProductionPipeline:
             from vocab_qc.api.routers.batch import _run_production_bg
             _run_production_bg(pkg_id)
 
-        verify_session = Session()
+        verify_session = session_factory()
         pkg_result = verify_session.query(Package).filter_by(id=pkg_id).first()
         assert pkg_result.status == "failed"
         verify_session.close()
 
     def test_run_production_bg_failure_at_qc_layer1(self, prod_engine):
         """_run_production_bg 在 L1 质检步骤失败时 Package.status 应为 failed。"""
-        Session = sessionmaker(bind=prod_engine)
-        session = Session()
+        session_factory = sessionmaker(bind=prod_engine)
+        session = session_factory()
 
         pkg, word, meaning, items = _seed_package_with_items(session)
         session.commit()
@@ -195,7 +193,7 @@ class TestProductionPipeline:
 
         with patch(
             "vocab_qc.core.db.SyncSessionLocal",
-            new=Session,
+            new=session_factory,
         ), patch(
             "vocab_qc.core.services.production_service.step_qc_layer1",
             side_effect=RuntimeError("模拟 L1 失败"),
@@ -203,7 +201,7 @@ class TestProductionPipeline:
             from vocab_qc.api.routers.batch import _run_production_bg
             _run_production_bg(pkg_id)
 
-        verify_session = Session()
+        verify_session = session_factory()
         pkg_result = verify_session.query(Package).filter_by(id=pkg_id).first()
         assert pkg_result.status == "failed"
         verify_session.close()
@@ -297,23 +295,23 @@ class TestStepFunctions:
 
     def test_multi_session_isolation(self, prod_engine):
         """验证每步使用独立 session 时数据正确持久化。"""
-        Session = sessionmaker(bind=prod_engine)
+        session_factory = sessionmaker(bind=prod_engine)
 
         # 准备数据
-        s1 = Session()
+        s1 = session_factory()
         pkg, word, meaning, items = _seed_package_with_items(s1)
         s1.commit()
         pkg_id = pkg.id
         s1.close()
 
         # Step 1: generate（独立 session）
-        s2 = Session()
+        s2 = session_factory()
         step_generate(s2, pkg_id)
         s2.commit()
         s2.close()
 
         # Step 2: L1 QC（独立 session，应能看到 step 1 的结果）
-        s3 = Session()
+        s3 = session_factory()
         result = step_qc_layer1(s3, pkg_id)
         s3.commit()
         s3.close()
@@ -321,13 +319,13 @@ class TestStepFunctions:
         assert result["passed"] + result["failed"] > 0
 
         # Finalize（独立 session）
-        s4 = Session()
+        s4 = session_factory()
         step_finalize(s4, pkg_id)
         s4.commit()
         s4.close()
 
         # 验证最终状态
-        s5 = Session()
+        s5 = session_factory()
         pkg_final = s5.query(Package).filter_by(id=pkg_id).first()
         assert pkg_final.status == "completed"
         assert pkg_final.processed_words == 1
