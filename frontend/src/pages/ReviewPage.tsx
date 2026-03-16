@@ -133,6 +133,7 @@ export default function ReviewPage({ onBack }: Props) {
   }
 
   const handleApprove = async (id: number) => {
+    if (actionLoading !== null) return
     setActionLoading(id)
     try {
       await api.post(`/reviews/${id}/approve`)
@@ -171,8 +172,29 @@ export default function ReviewPage({ onBack }: Props) {
           setRegenResult(null)
         }, 1500)
       } else {
+        // 就地更新 items：用响应中的 new_issues + new_content 替换旧数据，避免额外 API 调用的时序问题
+        setItems(prev => prev.map(item =>
+          item.id === id
+            ? {
+                ...item,
+                content_item: item.content_item ? {
+                  ...item.content_item,
+                  content: res.new_content ?? item.content_item.content,
+                  content_cn: res.new_content_cn ?? item.content_item.content_cn,
+                  retry_count: res.retry_count,
+                } : item.content_item,
+                issues: res.new_issues.map((iss, idx) => ({
+                  id: -(idx + 1),
+                  content_item_id: item.content_item_id,
+                  rule_id: iss.rule_id,
+                  field: iss.field,
+                  message: iss.message,
+                  severity: 'error',
+                })),
+              }
+            : item
+        ))
         setRegenResult({ id, passed: false, message: res.message })
-        await loadItems()
         safeTimeout(() => setRegenResult(null), 3000)
       }
     } catch (e) { showToast('error', e instanceof ApiError ? e.detail : '重新生成失败') }

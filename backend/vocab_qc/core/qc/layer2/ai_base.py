@@ -12,6 +12,7 @@ import httpx
 from vocab_qc.core.config import settings
 from vocab_qc.core.generators.base import (
     AiRequestError,
+    _strip_markdown_fences,
     build_ai_request,
     parse_ai_response,
     parse_async_submit_response,
@@ -131,7 +132,7 @@ class AiClient:
             logger.info("Gateway async 质检提交 task_no=%s model=%s", task_no, self.model)
             data = await poll_gateway_task_async(client, self.base_url, task_no, body)
 
-        content = parse_ai_response(data)
+        content = _strip_markdown_fences(parse_ai_response(data))
         try:
             return json.loads(content)
         except json.JSONDecodeError as e:

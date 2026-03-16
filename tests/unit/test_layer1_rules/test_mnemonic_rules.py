@@ -8,6 +8,7 @@ from vocab_qc.core.qc.layer1.mnemonic_rules import (
     N3FormulaSymbol,
     N4FormulaLength,
     N5TeacherScriptLength,
+    count_logical_chars,
 )
 
 
@@ -119,6 +120,23 @@ class TestN4FormulaLength:
         result = self.checker.check(_mj(chant="字" * 31), "kind", dimension="mnemonic_exam_app")
         assert not result.passed
 
+    def test_mixed_text_counts_word_as_one(self):
+        """中英混排：'站(stand)稳的旗帜即标准。' len=18, logical=12, 应通过."""
+        chant = "站(stand)稳的旗帜即标准。"
+        assert count_logical_chars(chant) == 12
+        result = self.checker.check(_mj(chant=chant), "standard")
+        assert result.passed
+
+    def test_mixed_text_over_limit(self):
+        """中英混排超限：14中文+1英文单词 = logical 15 通过，16中文+1英文 = 17 不通过."""
+        chant_ok = "字" * 14 + "a"  # logical = 15
+        result = self.checker.check(_mj(chant=chant_ok), "w")
+        assert result.passed
+
+        chant_fail = "字" * 15 + "a"  # logical = 16
+        result = self.checker.check(_mj(chant=chant_fail), "w")
+        assert not result.passed
+
     def test_empty_chant_fails(self):
         result = self.checker.check(_mj(chant=""), "kind")
         assert not result.passed
@@ -148,6 +166,53 @@ class TestN5TeacherScriptLength:
         result = self.checker.check(_mj(script="字" * 700), "kind")
         assert not result.passed
 
+    def test_mixed_text_script_length(self):
+        """话术中英混排：英文单词按 1 计数."""
+        # 398 中文 + 1 英文单词 "hello" = logical 399 → 低于下限 400
+        script_short = "字" * 398 + "hello"
+        result = self.checker.check(_mj(script=script_short), "kind")
+        assert not result.passed
+
+        # 399 中文 + 1 英文单词 = logical 400 → 刚好达到下限
+        script_ok = "字" * 399 + "hello"
+        result = self.checker.check(_mj(script=script_ok), "kind")
+        assert result.passed
+
     def test_empty_script(self):
         result = self.checker.check(_mj(script=""), "kind")
         assert not result.passed
+
+
+class TestCountLogicalChars:
+    def test_pure_chinese(self):
+        assert count_logical_chars("你好世界") == 4
+
+    def test_pure_english_single_word(self):
+        assert count_logical_chars("hello") == 1
+
+    def test_pure_english_multiple_words(self):
+        # "hello world" → "¤ ¤" → 3
+        assert count_logical_chars("hello world") == 3
+
+    def test_mixed_chinese_english(self):
+        # "站(stand)稳的旗帜即标准。" → "站(¤)稳的旗帜即标准。" → 12
+        assert count_logical_chars("站(stand)稳的旗帜即标准。") == 12
+
+    def test_english_in_parentheses(self):
+        # "好(good)的" → "好(¤)的" → 5
+        assert count_logical_chars("好(good)的") == 5
+
+    def test_multiple_english_words_in_chinese(self):
+        # "the big dog很大" → "¤ ¤ ¤很大" → 7
+        assert count_logical_chars("the big dog很大") == 7
+
+    def test_empty_string(self):
+        assert count_logical_chars("") == 0
+
+    def test_numbers_and_punctuation(self):
+        assert count_logical_chars("123") == 3
+        assert count_logical_chars("!@#") == 3
+
+    def test_mixed_with_numbers(self):
+        # "hello123" → "¤123" → 4 (英文算1，数字各算1)
+        assert count_logical_chars("hello123") == 4

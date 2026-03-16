@@ -70,7 +70,7 @@ export function ReviewDimensionCard({
 
   const actionButtons = (
     <div className="flex items-center gap-2 pt-1">
-      <button onClick={onApprove} className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-[11px] font-bold transition-all">
+      <button onClick={onApprove} disabled={isLoading} className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-[11px] font-bold transition-all disabled:opacity-50">
         通过
       </button>
       {!atLimit && (

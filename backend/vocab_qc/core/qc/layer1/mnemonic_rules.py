@@ -1,9 +1,15 @@
 """Mnemonic 维度 Layer 1 规则: N1, N2, N3, N4, N5."""
 
 import json
+import re
 from typing import Any, Optional
 
 from vocab_qc.core.qc.base import RuleResult
+
+
+def count_logical_chars(text: str) -> int:
+    """中英混排逻辑字数统计：连续英文字母算 1 个字，其余每字符算 1 个字."""
+    return len(re.sub(r"[a-zA-Z]+", "¤", text))
 from vocab_qc.core.qc.registry import RuleRegistry, _RuleCheckerBase
 
 
@@ -127,7 +133,7 @@ class N4FormulaLength(_RuleCheckerBase):
         is_exam = dimension == "mnemonic_exam_app"
         max_chars = 30 if is_exam else 15
 
-        char_count = len(chant)
+        char_count = count_logical_chars(chant)
         if char_count > max_chars:
             return RuleResult(
                 rule_id=self.rule_id, passed=False,
@@ -164,7 +170,7 @@ class N5TeacherScriptLength(_RuleCheckerBase):
         if not script:
             return RuleResult(rule_id=self.rule_id, passed=False, detail="未找到老师话术部分")
 
-        char_count = len(script)
+        char_count = count_logical_chars(script)
 
         dimension = kwargs.get("dimension", "")
         lower, upper = _SCRIPT_LENGTH_LIMITS.get(dimension, _DEFAULT_SCRIPT_LENGTH)

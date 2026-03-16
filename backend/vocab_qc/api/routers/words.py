@@ -18,6 +18,38 @@ from vocab_qc.core.services import word_service
 router = APIRouter(prefix="/api/words", tags=["词汇"])
 
 
+def _run_layer1_only(session: Session, content_item: ContentItem) -> bool:
+    """仅运行 Layer 1 算法校验，返回是否全部通过（用于总表管理快速编辑）。"""
+    from vocab_qc.core.models.data_layer import Meaning, Phonetic, Word
+    from vocab_qc.core.qc.runner import Layer1Runner
+
+    word = session.query(Word).filter_by(id=content_item.word_id).first()
+    word_text = word.word if word else ""
+
+    meaning_texts: dict[int, str] = {}
+    extra: dict = {"content_cn": content_item.content_cn or ""}
+
+    if content_item.meaning_id:
+        meaning = session.query(Meaning).filter_by(id=content_item.meaning_id).first()
+        if meaning:
+            meaning_texts[meaning.id] = meaning.definition
+            if meaning.pos:
+                extra["pos"] = meaning.pos
+
+    phonetic = session.query(Phonetic).filter_by(word_id=content_item.word_id).first()
+    if phonetic:
+        extra["ipa"] = phonetic.ipa
+        extra["syllables"] = phonetic.syllables
+
+    word_texts = {content_item.word_id: word_text}
+    extra_kwargs = {content_item.id: extra}
+
+    l1_runner = Layer1Runner()
+    l1_runner.run(session, [content_item], word_texts, meaning_texts, extra_kwargs)
+
+    return content_item.qc_status == QcStatus.LAYER1_PASSED.value
+
+
 @router.get("", response_model=PaginatedWordResponse)
 def list_words(
     page: int = Query(default=1, ge=1),
@@ -158,8 +190,9 @@ def manual_edit_content_item(
     item.qc_status = QcStatus.PENDING.value
     db.flush()
 
-    # 运行质检
-    qc_passed = ReviewService._run_qc_for_item(db, item)
+    # 仅运行 Layer 1 算法校验（毫秒级），跳过 Layer 2 AI 校验（分钟级）
+    # 总表管理的人工编辑场景下，人工判断本身即为语义审核
+    qc_passed = _run_layer1_only(db, item)
 
     # 强制通过：人工判断内容正确，跳过 QC 结果
     if body.force_approve:

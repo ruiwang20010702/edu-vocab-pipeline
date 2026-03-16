@@ -99,11 +99,39 @@ def build_ai_request(
     return url, headers, body
 
 
+def _strip_markdown_fences(text: str) -> str:
+    """剥掉 AI 返回的 markdown 代码块标记（```json ... ```）。"""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        # 去掉首行 ```json 或 ```
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:]
+        # 去掉末尾 ```
+        if stripped.rstrip().endswith("```"):
+            stripped = stripped.rstrip()[:-3].rstrip()
+    return stripped
+
+
 def parse_ai_response(data: dict[str, Any]) -> str:
     """从响应中提取 content，自动适配 gateway 包裹格式（模块级公共函数）。"""
     if "res" in data and "choices" not in data:
-        data = data["res"]
-    return data["choices"][0]["message"]["content"]
+        inner = data["res"]
+        if inner is None:
+            raise AiRequestError(
+                "parse_error",
+                detail=f"Gateway 返回 res=null (code={data.get('code')})",
+                response_body=str(data)[:500],
+            )
+        data = inner
+    choices = data.get("choices")
+    if not choices:
+        raise AiRequestError(
+            "parse_error",
+            detail="响应缺少 choices 字段",
+            response_body=str(data)[:500],
+        )
+    return choices[0]["message"]["content"]
 
 
 def parse_async_submit_response(data: dict[str, Any]) -> str:
@@ -548,7 +576,7 @@ class ContentGenerator:
                     logger.info("Gateway async 提交成功 task_no=%s model=%s", task_no, actual_model)
                     data = await poll_gateway_task_async(client, actual_url, task_no, body)
 
-                content = self._parse_response(data)
+                content = _strip_markdown_fences(self._parse_response(data))
                 try:
                     return json.loads(content)
                 except json.JSONDecodeError as e:
@@ -637,7 +665,7 @@ class ContentGenerator:
             logger.info("Gateway async 提交成功 task_no=%s model=%s", task_no, model)
             data = poll_gateway_task_sync(client, base_url, task_no, body)
 
-        content = self._parse_response(data)
+        content = _strip_markdown_fences(self._parse_response(data))
         try:
             return json.loads(content)
         except json.JSONDecodeError as e:

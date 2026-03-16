@@ -7,6 +7,14 @@ import pytest
 from vocab_qc.core.qc.base import RuleResult
 from vocab_qc.core.qc.layer2.ai_base import AiClient, AiRuleChecker
 
+
+@pytest.fixture(autouse=True)
+def _disable_gateway(monkeypatch):
+    """测试中禁用 Gateway 模式，使用标准 OpenAI 响应格式。"""
+    from vocab_qc.core import config
+    monkeypatch.setattr(config.settings, "ai_gateway_mode", False)
+    monkeypatch.setattr(config.settings, "ai_gateway_async", False)
+
 # ---------------------------------------------------------------------------
 # 辅助：构建标准 httpx response mock
 # ---------------------------------------------------------------------------
