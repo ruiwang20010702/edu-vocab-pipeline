@@ -17,7 +17,7 @@ function SyllableEditor({ syllable, wordId, onUpdated }: {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(syllable.content)
   const [saving, setSaving] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; text: string; issues?: Array<{ rule_id: string; message: string }> } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { setValue(syllable.content) }, [syllable.content])
@@ -30,17 +30,19 @@ function SyllableEditor({ syllable, wordId, onUpdated }: {
     setSaving(true)
     setResult(null)
     try {
-      const res = await api.post<{ qc_passed: boolean; message: string }>(
+      const res = await api.post<{ qc_passed: boolean; message: string; new_issues?: Array<{ rule_id: string; field: string; message: string }> }>(
         `/words/content-items/${syllable.id}/manual-edit`, { content: value.trim() },
       )
-      setResult({ ok: res.qc_passed, text: res.message })
-      setTimeout(() => {
-        setEditing(false)
-        setResult(null)
-        api.get<WordDetail>(`/words/${wordId}`)
-          .then(data => onUpdated(data))
-          .catch(() => {})
-      }, 1500)
+      setResult({ ok: res.qc_passed, text: res.message, issues: res.new_issues })
+      if (res.qc_passed) {
+        setTimeout(() => {
+          setEditing(false)
+          setResult(null)
+          api.get<WordDetail>(`/words/${wordId}`)
+            .then(data => onUpdated(data))
+            .catch(() => {})
+        }, 1500)
+      }
     } catch (err: any) {
       setResult({ ok: false, text: err?.message ?? '保存失败' })
     } finally { setSaving(false) }
@@ -66,9 +68,20 @@ function SyllableEditor({ syllable, wordId, onUpdated }: {
         </button>
         <button onClick={cancel} className="text-xs text-slate-400 hover:text-slate-600 font-bold">取消</button>
         {result && (
-          <span className={`flex items-center gap-1 text-xs font-bold ${result.ok ? 'text-emerald-600' : 'text-rose-500'}`}>
-            {result.ok ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {result.text}
-          </span>
+          <div className="w-full">
+            <span className={`flex items-center gap-1 text-xs font-bold ${result.ok ? 'text-emerald-600' : 'text-rose-500'}`}>
+              {result.ok ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {result.text}
+            </span>
+            {!result.ok && result.issues && result.issues.length > 0 && (
+              <ul className="mt-1 space-y-0.5">
+                {result.issues.map((iss, i) => (
+                  <li key={i} className="text-xs text-rose-600/80 bg-rose-50/50 px-2 py-1 rounded-lg border border-rose-100/50">
+                    <span className="font-bold text-rose-500">{iss.rule_id}</span> {iss.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
     )

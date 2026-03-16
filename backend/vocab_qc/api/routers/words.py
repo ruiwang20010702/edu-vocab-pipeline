@@ -190,9 +190,8 @@ def manual_edit_content_item(
     item.qc_status = QcStatus.PENDING.value
     db.flush()
 
-    # 仅运行 Layer 1 算法校验（毫秒级），跳过 Layer 2 AI 校验（分钟级）
-    # 总表管理的人工编辑场景下，人工判断本身即为语义审核
-    qc_passed = _run_layer1_only(db, item)
+    # 运行完整质检（Layer 1 + Layer 2）
+    qc_passed = ReviewService._run_qc_for_item(db, item)
 
     # 强制通过：人工判断内容正确，跳过 QC 结果
     if body.force_approve:

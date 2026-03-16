@@ -10,17 +10,16 @@ import { api } from '../../lib/api'
 import { ALL_MNEMONIC_DIMS, MNEMONIC_TYPE_LABELS } from '../review/constants'
 import { parseMnemonic, buildMnemonicJson } from '../review/utils'
 
-type EditResult = { ok: boolean; text: string } | null
+interface QcIssue { rule_id: string; field: string; message: string }
+type EditResult = { ok: boolean; text: string; issues?: QcIssue[] } | null
 
 /** 通用的保存+质检 hook */
 function useContentEdit(itemId: number, onSaved: () => void) {
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState<EditResult>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
-  const activeRef = useRef(true)
 
   useEffect(() => () => {
-    activeRef.current = false
     if (timerRef.current) clearTimeout(timerRef.current)
   }, [])
 
@@ -31,24 +30,24 @@ function useContentEdit(itemId: number, onSaved: () => void) {
     setSaving(true)
     setResult(null)
     try {
-      const res = await api.post<{ qc_passed: boolean; message: string }>(
+      const res = await api.post<{
+        qc_passed: boolean; message: string
+        new_issues?: QcIssue[]
+      }>(
         `/words/content-items/${itemId}/manual-edit`, body,
       )
-      if (!activeRef.current) return
-      setResult({ ok: res.qc_passed, text: res.message })
+      setResult({ ok: res.qc_passed, text: res.message, issues: res.new_issues })
       if (res.qc_passed) {
         timerRef.current = setTimeout(() => {
-          if (!activeRef.current) return
           setResult(null)
           onClose()
           onSaved()
         }, 1500)
       }
     } catch (err: any) {
-      if (!activeRef.current) return
       setResult({ ok: false, text: err?.message ?? '保存失败' })
     } finally {
-      if (activeRef.current) setSaving(false)
+      setSaving(false)
     }
   }, [itemId, onSaved])
 
@@ -112,9 +111,20 @@ function SaveRow({ saving, result, onSave, onForceApprove, onCancel }: {
       )}
       <button onClick={onCancel} className="text-xs text-slate-400 hover:text-slate-600 font-bold">取消</button>
       {result && (
-        <span className={`flex items-center gap-1 text-xs font-bold ${result.ok ? 'text-emerald-600' : 'text-rose-500'}`}>
-          {result.ok ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {result.text}
-        </span>
+        <div className="w-full mt-1">
+          <span className={`flex items-center gap-1 text-xs font-bold ${result.ok ? 'text-emerald-600' : 'text-rose-500'}`}>
+            {result.ok ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {result.text}
+          </span>
+          {!result.ok && result.issues && result.issues.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {result.issues.map((iss, i) => (
+                <li key={i} className="text-xs text-rose-600/80 bg-rose-50/50 px-2.5 py-1.5 rounded-lg border border-rose-100/50">
+                  <span className="font-bold text-rose-500">{iss.rule_id}</span> {iss.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   )
