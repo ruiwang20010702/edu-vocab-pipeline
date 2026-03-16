@@ -4,6 +4,7 @@ import {
   Search, Download, ChevronLeft, ChevronRight, Loader2, MoreHorizontal,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { usePolling } from '../hooks/usePolling'
 import { useToast } from '../components/Toast'
 import type { WordDetail, PaginatedResponse, StatusCounts } from '../types'
 import WordDetailModal from './mastertable/WordDetailModal'
@@ -34,8 +35,8 @@ export default function MasterTablePage() {
     debounceRef.current = setTimeout(fn, 300)
   }, [])
 
-  const loadWords = async () => {
-    setLoading(true)
+  const loadWords = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) })
       if (search) params.set('q', search)
@@ -45,15 +46,18 @@ export default function MasterTablePage() {
       setTotal(res.total)
       if (res.status_counts) setStatusCounts(res.status_counts)
     } catch (e) {
-      showToast('error', e instanceof ApiError ? e.detail : '加载数据失败')
-      setWords([])
-      setTotal(0)
+      if (!silent) {
+        showToast('error', e instanceof ApiError ? e.detail : '加载数据失败')
+        setWords([])
+        setTotal(0)
+      }
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
-  }
+  }, [page, search, statusFilter, showToast])
 
-  useEffect(() => { debouncedLoadWords(loadWords) }, [page, statusFilter])
+  useEffect(() => { debouncedLoadWords(() => loadWords()) }, [page, statusFilter, loadWords])
+  usePolling(() => loadWords(true), 10_000, !loading)
 
   const handleSearch = () => { setPage(1); loadWords() }
 

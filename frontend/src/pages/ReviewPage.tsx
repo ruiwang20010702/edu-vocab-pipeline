@@ -7,6 +7,7 @@ import {
 import { api, ApiError } from '../lib/api'
 import { useToast } from '../components/Toast'
 import type { ReviewItem, ReviewBatch, BatchDetail } from '../types'
+import { usePolling } from '../hooks/usePolling'
 import type { Tab } from './review/types'
 import { DIMENSION_LABELS, FILTER_GROUPS } from './review/constants'
 import { groupByWord } from './review/utils'
@@ -101,6 +102,22 @@ export default function ReviewPage({ onBack }: Props) {
 
   useEffect(() => { loadBatch() }, [loadBatch])
   useEffect(() => { if (!batchLoading) loadItems() }, [batchLoading, loadItems])
+
+  // 静默轮询刷新：操作进行中时跳过，防止覆盖乐观更新
+  const silentRefresh = useCallback(async () => {
+    if (actionLoading !== null || batchFixing) return
+    try {
+      const data = await api.get<ReviewBatch | null>('/batches/current')
+      setBatch(data)
+      if (!data) { setItems([]); return }
+      const detail = await api.get<BatchDetail>(`/batches/${data.id}/words`)
+      const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
+      const batchReviewIds = new Set(detail.words.flatMap(w => w.items.map(i => i.review_id)))
+      setItems((res.items ?? []).filter(r => batchReviewIds.has(r.id)))
+    } catch { /* 静默失败 */ }
+  }, [actionLoading, batchFixing])
+
+  usePolling(silentRefresh, 10_000, !batchLoading && !loading && actionLoading === null && !batchFixing)
 
   const handleAssign = async () => {
     setAssignLoading(true)

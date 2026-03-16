@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   LayoutDashboard, CheckCircle2, AlertCircle, TrendingUp,
@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { DashboardStats, BatchInfo } from '../types'
+import { usePolling } from '../hooks/usePolling'
 
 interface Props {
   onViewBatch: (batchId: string, view: 'monitoring' | 'review') => void
@@ -120,25 +121,28 @@ export default function DashboardPage({ onViewBatch }: Props) {
   const [loading, setLoading] = useState(true)
   const [activeDim, setActiveDim] = useState<any | null>(null)
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [s, b] = await Promise.all([
-          api.get<DashboardStats>('/stats'),
-          api.get<BatchInfo[]>('/batches'),
-        ])
-        setStats(s)
-        setBatches(b)
-      } catch (e) {
-        console.error('加载仪表板数据失败', e)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    try {
+      const [s, b] = await Promise.all([
+        api.get<DashboardStats>('/stats'),
+        api.get<BatchInfo[]>('/batches'),
+      ])
+      setStats(s)
+      setBatches(b)
+    } catch (e) {
+      console.error('加载仪表板数据失败', e)
+      if (!silent) {
         setStats({ total_words: 0, approved_count: 0, pending_count: 0, rejected_count: 0, pass_rate: 0, issues: [] })
         setBatches([])
-      } finally {
-        setLoading(false)
       }
+    } finally {
+      if (!silent) setLoading(false)
     }
-    load()
   }, [])
+
+  useEffect(() => { load() }, [load])
+  usePolling(() => load(true), 10_000, !loading)
 
   if (loading) {
     return (
