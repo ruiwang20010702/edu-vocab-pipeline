@@ -103,6 +103,24 @@ class TestRootAffixMnemonicGenerator:
         assert result["content"] is None
 
 
+class TestRootAffixSystemPrompt:
+    def test_system_prompt_contains_kb(self):
+        """词根词缀助记的 system prompt 应包含知识库."""
+        gen = RootAffixMnemonicGenerator()
+        config = gen.get_ai_config()
+        assert "词根词缀知识库" in config.system_prompt
+        assert "## 前缀" in config.system_prompt
+        assert "## 词根" in config.system_prompt
+        assert "## 后缀" in config.system_prompt
+
+    def test_system_prompt_preserves_original(self):
+        """注入知识库后仍保留原始 system prompt 内容."""
+        gen = RootAffixMnemonicGenerator()
+        original = super(RootAffixMnemonicGenerator, gen).get_ai_config()
+        enriched = gen.get_ai_config()
+        assert enriched.system_prompt.startswith(original.system_prompt)
+
+
 class TestWordInWordMnemonicGenerator:
     def test_dimension(self):
         gen = WordInWordMnemonicGenerator()

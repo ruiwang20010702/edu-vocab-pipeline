@@ -3,7 +3,8 @@
 import json
 from typing import Any, Optional
 
-from vocab_qc.core.generators.base import ContentGenerator, sanitize_prompt_input
+from vocab_qc.core.generators.base import AiConfig, ContentGenerator, sanitize_prompt_input
+from vocab_qc.core.generators.morpheme_kb import format_kb_for_prompt
 
 # 助记结果的统一 key: valid, formula, chant, script
 # valid=false 时表示该类型不适用于此单词
@@ -69,6 +70,21 @@ class RootAffixMnemonicGenerator(_MnemonicBase):
 
     dimension = "mnemonic_root_affix"
     prompt_filename = "助记-词根词缀.md"
+
+    def get_ai_config(self, session: Any = None) -> AiConfig:
+        config = super().get_ai_config(session)
+        kb_text = format_kb_for_prompt()
+        enriched_prompt = (
+            f"{config.system_prompt}\n\n"
+            f"# 词根词缀知识库（仅供参考，请基于专业判断使用）\n\n"
+            f"{kb_text}"
+        )
+        return AiConfig(
+            system_prompt=enriched_prompt,
+            model=config.model,
+            api_key=config.api_key,
+            base_url=config.base_url,
+        )
 
 
 class WordInWordMnemonicGenerator(_MnemonicBase):
