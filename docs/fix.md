@@ -68,7 +68,7 @@ HALF_OPEN（试探，放 1 个请求通过）
 
 配置项（`config.py`）:
 ```
-VOCAB_QC_AI_CIRCUIT_BREAKER_THRESHOLD=5    # 连续失败次数触发熔断
+VOCAB_QC_AI_CIRCUIT_BREAKER_THRESHOLD=15   # 连续失败次数触发熔断（允许 5 个并发任务各失败 3 次）
 VOCAB_QC_AI_CIRCUIT_BREAKER_RECOVERY=30    # 熔断恢复冷却时间（秒）
 ```
 

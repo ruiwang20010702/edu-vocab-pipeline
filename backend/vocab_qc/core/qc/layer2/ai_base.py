@@ -66,6 +66,7 @@ class AiClient:
         if self._http_client is None or self._http_client_loop is not loop:
             self._http_client = httpx.AsyncClient(
                 timeout=60.0,
+                verify=False,
                 limits=httpx.Limits(
                     max_connections=self._max_concurrency,
                     max_keepalive_connections=self._max_concurrency,
@@ -89,7 +90,10 @@ class AiClient:
 
     async def _call_with_retry(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         if not self._circuit_breaker.allow_request():
-            raise AiRequestError("circuit_open", detail="质检熔断器已打开，跳过调用")
+            raise AiRequestError(
+                "circuit_open",
+                detail=f"质检熔断器已打开，跳过调用 | 触发原因: {self._circuit_breaker.last_error or '未知'}",
+            )
 
         last_error = None
         for attempt in range(self.max_retries):
@@ -99,14 +103,17 @@ class AiClient:
                 return result
             except Exception as e:
                 last_error = e
-                self._circuit_breaker.record_failure()
+                self._circuit_breaker.record_failure(str(e))
                 logger.warning(
                     "AI 质检调用失败 [%s] attempt=%d/%d: %s",
                     self.model, attempt + 1, self.max_retries, e,
                 )
                 if attempt < self.max_retries - 1:
                     if not self._circuit_breaker.allow_request():
-                        raise AiRequestError("circuit_open", detail="质检熔断器已打开，跳过调用") from e
+                        raise AiRequestError(
+                            "circuit_open",
+                            detail=f"质检熔断器已打开，跳过调用 | 触发原因: {self._circuit_breaker.last_error or '未知'}",
+                        ) from e
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
         raise RuntimeError(f"AI API 调用失败（{self.max_retries}次重试后）: {last_error}")
 

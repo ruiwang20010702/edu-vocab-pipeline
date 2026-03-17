@@ -20,6 +20,7 @@ class CircuitBreaker:
         self._failure_threshold = failure_threshold
         self._recovery_timeout = recovery_timeout
         self._last_failure_time = 0.0
+        self._last_error: str = ""
         self._lock = threading.Lock()
 
     @property
@@ -29,6 +30,12 @@ class CircuitBreaker:
                 if time.monotonic() - self._last_failure_time >= self._recovery_timeout:
                     self._state = self.HALF_OPEN
             return self._state
+
+    @property
+    def last_error(self) -> str:
+        """触发熔断的最后一次真实错误信息。"""
+        with self._lock:
+            return self._last_error
 
     def allow_request(self) -> bool:
         """是否允许请求通过。"""
@@ -45,10 +52,12 @@ class CircuitBreaker:
             self._failure_count = 0
             self._state = self.CLOSED
 
-    def record_failure(self) -> None:
+    def record_failure(self, error: str = "") -> None:
         """记录失败，达阈值则熔断。"""
         with self._lock:
             self._failure_count += 1
+            if error:
+                self._last_error = error
             if self._failure_count >= self._failure_threshold:
                 self._state = self.OPEN
                 self._last_failure_time = time.monotonic()

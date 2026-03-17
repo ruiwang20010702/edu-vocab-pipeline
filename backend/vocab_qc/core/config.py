@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     allow_private_ai_url: bool = False
     allowed_ai_hosts: list[str] = []
 
-    ai_circuit_breaker_threshold: int = 5   # 连续失败次数触发熔断
+    ai_circuit_breaker_threshold: int = 15  # 连续失败次数触发熔断
     ai_circuit_breaker_recovery: int = 30   # 熔断恢复冷却时间（秒）
 
     max_regenerate_retries: int = 3

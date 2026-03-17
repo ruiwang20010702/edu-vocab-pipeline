@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-前后端均已实现，655 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。已完成三轮安全与性能审计，全部修复。
+前后端均已实现，709 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。已完成三轮安全与性能审计，全部修复。
 
 ```
 VocabularyDataCleaning1.0/
@@ -44,7 +44,7 @@ VocabularyDataCleaning1.0/
 │   │   └── pages/               ← 6 个页面
 │   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
 │
-├── tests/                       ← 655 个测试
+├── tests/                       ← 709 个测试
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
 │   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
 │   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC

@@ -74,9 +74,19 @@
 
 ---
 
+## 后续修复：AI Gateway 兼容性 & 熔断器健壮性（2026-03-17）
+
+| # | 问题 | 修复方式 | 涉及文件 |
+|---|------|---------|---------|
+| 1 | sync_prompts 不更新 model | 更新分支增加 `existing.model = _model_for_dimension(dimension)` | `prompt_service.py` |
+| 2 | 熔断器阈值过低（5），并发场景误触发 | 阈值 5→15（允许 5 个并发任务各失败 3 次才熔断） | `config.py` |
+| 3 | .env 示例缺少 `\|efficiency` 后缀 | 模型名统一加 `\|efficiency` | `.env.example`、`.env.production.example` |
+
+---
+
 ## 验证结果
 
 ```
 PYTHONPATH=backend .venv/bin/pytest tests/ -x -q --tb=short
-709 passed in 3.11s
+709 passed in 3.14s
 ```

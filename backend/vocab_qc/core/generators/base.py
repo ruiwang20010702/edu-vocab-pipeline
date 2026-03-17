@@ -331,14 +331,14 @@ def _no_proxy_mounts_sync() -> dict:
     """ai_use_proxy=False 时返回强制直连的 mounts 参数。"""
     if settings.ai_use_proxy:
         return {}
-    return {"mounts": {"all://": httpx.HTTPTransport()}}
+    return {"mounts": {"all://": httpx.HTTPTransport(verify=False)}}
 
 
 def _no_proxy_mounts_async() -> dict:
     """ai_use_proxy=False 时返回强制直连的 mounts 参数（异步版）。"""
     if settings.ai_use_proxy:
         return {}
-    return {"mounts": {"all://": httpx.AsyncHTTPTransport()}}
+    return {"mounts": {"all://": httpx.AsyncHTTPTransport(verify=False)}}
 
 
 def _get_http_client() -> httpx.Client:
@@ -346,7 +346,7 @@ def _get_http_client() -> httpx.Client:
     if _http_client is None:
         with _http_client_lock:
             if _http_client is None:
-                _http_client = httpx.Client(timeout=60.0, **_no_proxy_mounts_sync())
+                _http_client = httpx.Client(timeout=60.0, verify=False, **_no_proxy_mounts_sync())
     return _http_client
 
 
@@ -363,6 +363,7 @@ def _get_async_http_client() -> httpx.AsyncClient:
         )
         _async_http_client = httpx.AsyncClient(
             timeout=60.0,
+            verify=False,
             limits=httpx.Limits(
                 max_connections=_pool_size,
                 max_keepalive_connections=_pool_size,
@@ -520,7 +521,10 @@ class ContentGenerator:
             return {}
 
         if not _generator_circuit_breaker.allow_request():
-            raise AiRequestError("circuit_open", detail="熔断器已打开，跳过调用")
+            raise AiRequestError(
+                "circuit_open",
+                detail=f"熔断器已打开，跳过调用 | 触发原因: {_generator_circuit_breaker.last_error or '未知'}",
+            )
 
         last_error = None
         for attempt in range(settings.ai_max_retries):
@@ -530,7 +534,7 @@ class ContentGenerator:
                 return result
             except Exception as e:
                 last_error = e
-                _generator_circuit_breaker.record_failure()
+                _generator_circuit_breaker.record_failure(str(e))
                 logger.warning(
                     "AI 调用失败 [%s] attempt=%d/%d: %s",
                     actual_model, attempt + 1, settings.ai_max_retries, e,
@@ -559,7 +563,10 @@ class ContentGenerator:
             return {}
 
         if not _generator_circuit_breaker.allow_request():
-            raise AiRequestError("circuit_open", detail="熔断器已打开，跳过调用")
+            raise AiRequestError(
+                "circuit_open",
+                detail=f"熔断器已打开，跳过调用 | 触发原因: {_generator_circuit_breaker.last_error or '未知'}",
+            )
 
         self._validate_url(actual_url)
 
@@ -606,7 +613,7 @@ class ContentGenerator:
                     ) from e
             except Exception as e:
                 last_error = e
-                _generator_circuit_breaker.record_failure()
+                _generator_circuit_breaker.record_failure(str(e))
                 logger.warning(
                     "AI 调用失败 [%s] attempt=%d/%d: %s",
                     actual_model, attempt + 1, settings.ai_max_retries, e,

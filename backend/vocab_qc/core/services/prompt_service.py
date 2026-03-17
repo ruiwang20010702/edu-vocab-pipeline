@@ -231,6 +231,7 @@ def sync_prompts(session: Session, dry_run: bool = False) -> dict:
                 if not dry_run:
                     existing.content = content
                     existing.file_hash = file_hash
+                    existing.model = _model_for_dimension(dimension)
                 updated += 1
             else:
                 skipped += 1
