@@ -4,100 +4,104 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-教育词汇数据产品的生产系统——将人教版中小学英语教材词表整合为标准化词库，为每个词生成音标、释义、语块、例句、助记五个维度的学习内容。最终用户是中小学生。
+S9 词汇数据生产系统——将人教版中小学英语教材词表整合为标准化词库，为每个词生成音标、释义、语块、例句、助记五个维度的学习内容。最终用户是中小学生。
 
 **产品质量红线**：学生拿到的每一条数据都必须是对的。系统设计为 fail-safe——未审核通过的内容不会出现在最终产出中。
-
-## 当前状态
-
-前后端均已实现，709 个测试全部通过。前端 6 页面 + 后端完整 API + Docker 部署就绪。已完成三轮安全与性能审计，全部修复。
-
-```
-VocabularyDataCleaning1.0/
-├── CLAUDE.md / README.md
-├── pyproject.toml               ← 项目配置，入口 vocab = vocab_qc.cli.main:app
-├── alembic.ini                  ← 数据库迁移配置（指向 backend/alembic）
-│
-├── backend/                     ← 后端源码
-│   ├── vocab_qc/                ← Python 包（import 路径: from vocab_qc.xxx）
-│   │   ├── core/
-│   │   │   ├── config.py        ← Pydantic Settings，环境变量前缀 VOCAB_QC_
-│   │   │   ├── db.py            ← 数据库连接（sync + async）
-│   │   │   ├── async_bridge.py  ← async-to-sync 桥接函数
-│   │   │   ├── models/          ← ORM 模型（17 张表）
-│   │   │   ├── qc/              ← 质检引擎（Layer 1 算法 + Layer 2 AI）
-│   │   │   ├── services/        ← 业务服务层
-│   │   │   └── generators/      ← 内容生成器 + prompt injection 防护
-│   │   ├── api/
-│   │   │   ├── main.py          ← FastAPI 入口（CORS + 10 个 router）
-│   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt
-│   │   │   └── schemas/         ← Pydantic 响应模型
-│   │   └── cli/                 ← Typer CLI 命令
-│   └── alembic/                 ← 数据库迁移脚本
-│
-├── frontend/                    ← React 19 + TypeScript + Tailwind CSS v4
-│   ├── src/
-│   │   ├── App.tsx              ← 路由 + 玻璃拟态侧边栏
-│   │   ├── lib/api.ts           ← fetch 封装（JWT 自动注入）
-│   │   ├── lib/auth.ts          ← 认证状态管理
-│   │   ├── types.ts             ← TypeScript 类型（对齐后端 ORM）
-│   │   └── pages/               ← 6 个页面
-│   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
-│
-├── tests/                       ← 709 个测试
-│   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
-│   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
-│   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
-│
-└── docs/                        ← 文档
-    ├── design/                  ← PRD、工作流、输出 schema
-    └── prompts/                 ← AI Prompt 模板
-        ├── generation/          ← 生产 Prompt（语块/例句/助记等）
-        └── quality/             ← 质检 Prompt
-```
 
 ## 开发命令
 
 ```bash
-# 测试
-.venv/bin/pytest tests/ -v --tb=short
+# 测试（venv 解释器路径可能需要重建，优先用 PYTHONPATH 方式）
+PYTHONPATH=backend python3 -m pytest tests/ -v --tb=short
+
+# 运行单个测试文件
+PYTHONPATH=backend python3 -m pytest tests/unit/test_generators.py -v
+
+# 运行匹配关键字的测试
+PYTHONPATH=backend python3 -m pytest tests/ -k "test_chunk" -v
 
 # 启动后端 API
 PYTHONPATH=backend uvicorn vocab_qc.api.main:app --reload
 
-# 启动前端开发服务器
+# 启动前端开发服务器（Vite dev server，代理 API 到 localhost:8000）
 cd frontend && npm run dev
 
-# CLI
-PYTHONPATH=backend vocab qc run --layer 1
-PYTHONPATH=backend vocab review list
+# CLI 工具
+PYTHONPATH=backend python3 -m vocab_qc.cli.main qc run --layer 1
+PYTHONPATH=backend python3 -m vocab_qc.cli.main review list
+
+# Alembic 数据库迁移
+PYTHONPATH=backend alembic upgrade head
+
+# Docker 一键部署（需设置 DB_PASSWORD 环境变量）
+DB_PASSWORD=xxx docker compose up -d
+
+# Lint
+ruff check backend/
 ```
+
+## 架构概览
+
+### 后端（FastAPI + SQLAlchemy + PostgreSQL）
+
+**分层结构**：
+
+```
+vocab_qc/
+├── api/            ← HTTP 层：FastAPI routers + Pydantic schemas + 依赖注入
+│   ├── main.py     ← 应用入口（lifespan: prompt同步 + 词素KB预热 + httpx关闭）
+│   ├── deps.py     ← DI：get_db(Session), get_current_user(JWT Cookie/Bearer), require_role()
+│   └── routers/    ← 10 个 router: auth, admin, stats, words, import_, qc, review, batch, export, prompt
+├── core/           ← 业务层
+│   ├── config.py   ← Pydantic Settings，所有配置项前缀 VOCAB_QC_（如 VOCAB_QC_DATABASE_URL_SYNC）
+│   ├── db.py       ← SQLAlchemy Engine + SyncSessionLocal（SQLite/PostgreSQL 双模式）
+│   ├── models/     ← ORM 模型，按层组织（data_layer / content_layer / quality_layer / batch_layer / package_layer / user / prompt）
+│   ├── services/   ← 业务服务（auth / user / generation / production / review / qc / export / stats / prompt / audit）
+│   ├── generators/ ← 内容生成器（chunk / sentence / mnemonic×4 / syllable），base.py 含 AI 调用 + 熔断器
+│   └── qc/         ← 质检引擎：Layer 1（22条算法规则）+ Layer 2（AI语义校验），装饰器注册机制
+└── cli/            ← Typer CLI（qc_commands + review_commands + cleanup/create-admin）
+```
+
+**关键设计模式**：
+
+- **AI Gateway 适配**：`generators/base.py` 同时支持直连 OpenAI 格式 API 和 51talk AI Gateway（异步提交+轮询）模式，通过 `settings.ai_gateway_mode` 切换
+- **熔断器**：`circuit_breaker.py` 保护 AI 调用，连续失败超阈值自动熔断
+- **规则注册中心**：`qc/registry.py` 用装饰器自动注册 Layer 1/2 规则，`dimension_matches()` 处理 mnemonic 维度通配
+- **Prompt 三级 fallback**：DB → 文件（docs/prompts/generation/）→ 硬编码
+
+### 前端（React 19 + TypeScript + Tailwind CSS v4）
+
+单页应用，7 个页面：数据看板、词表导入、生产监控、质检审核、总表管理、Prompt管理、用户管理（admin-only）。`lib/api.ts` 封装 fetch + JWT 自动注入，`lib/auth.ts` 管理认证状态。Vite 开发服务器代理 `/api/*` 到后端。
+
+### 数据库（PostgreSQL 16 / 测试用 SQLite 内存）
+
+ORM 模型分布在 `core/models/` 下，约 17 张表。测试通过 `conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离。Alembic 管理 15 个迁移版本。
 
 ## 关键业务规则
 
 1. **释义合并**：释义文本完全一致 → 合并来源；释义文本不同 → 保留为独立义项
 2. **内容按义项挂载**：语块、例句、助记均按义项生成（防止多义词张冠李戴），音节按单词生成
-3. **质量门禁**：未审核通过的内容不会出现在最终产出中
-4. **人工审核拥有重试权**：人工审核环节有 3 次重新生成未通过部分的机会，3 次后需人工手动修改
-5. **词包按词关联**：Package 通过 PackageWord（word_id）关联单词，导入/生产/统计均按词维度操作
-6. **生产中锁**：Package 状态为 processing 时，其关联词不会被批次领取（防止生产与审核并发冲突）
+3. **质量门禁**：Layer 1 算法规则 → Layer 2 AI 语义校验 → 人工审核（最多 3 次重新生成）→ 导出门禁（全部 approved 才放行）
+4. **词包按词关联**：Package 通过 PackageWord（word_id）关联单词，导入/生产/统计均按词维度操作
+5. **生产中锁**：Package 状态为 processing 时，其关联词不会被批次领取（防止生产与审核并发冲突）
+6. **生产编排**：`production_service.py` 按 Package 维度编排 生成→质检→入队审核 全流程，支持并发 AI 调用（`ai_max_concurrency` 控制）
 
-## 设计原则
+## 配置体系
 
-- **标准前置**：生产和审核看同一份标准
-- **事实与生成分离**：数据层（词/音标/释义）与内容层（语块/例句/助记）物理隔离
-- **单一职责**：每个维度独立生成、独立校验
-- **质量门禁**：fail-safe，未审核不放行
-- **审计可追溯**：每次操作可追溯
+所有配置通过环境变量注入，前缀 `VOCAB_QC_`。关键配置：
 
-## 安全加固（三轮审计，全部修复）
+- `DATABASE_URL_SYNC`：数据库连接串（默认 `postgresql://localhost:5432/vocab_qc`）
+- `AI_API_KEY` / `AI_API_BASE_URL` / `AI_MODEL`：AI 服务配置
+- `AI_GATEWAY_MODE` / `AI_GATEWAY_ASYNC`：51talk AI Gateway 模式开关
+- `JWT_SECRET_KEY`：生产环境必须替换默认值（≥32 字节）
+- `ALLOWED_EMAIL_DOMAINS`：邮箱域名白名单
+- `ENV`：`development` / `staging` / `production`，生产环境强制校验安全配置（`config.py:validate_production_config`）
 
-- JWT 4h 过期 + 邮箱域名白名单 + slowapi 60/min 全局限速
+## 安全加固
+
+- JWT 4h 过期 + Cookie httpOnly + 邮箱域名白名单 + slowapi 60/min 全局限速
 - Admin 禁止降级自身角色/停用自身 + Prompt API 限 admin-only
 - 文件上传 magic bytes 校验 + HTML 过滤 + SSRF 防护 + defusedxml 防 XXE
-- Prompt injection 防护（sanitize_prompt_input）+ AI 单任务超时（60s）
-- Prompt 文件→DB 自动同步（source/file_hash + sync API + 启动同步）
-- Docker 网络隔离 + 安全头 + 基础镜像 digest 固定
-- 前端全局 Toast 组件 + regenerate AbortController 防并发
-- Excel 导出分批查询 + async 桥接公共化 + httpx 客户端泄漏修复
-- 修复记录见 `docs/pending-fixes-v2.md`
+- Prompt injection 防护（`sanitize_prompt_input`）+ 熔断器 + AI 单任务超时
+- 生产环境禁用 Swagger/ReDoc，强制安全头（CSP / HSTS / X-Frame-Options）
+- Docker 网络隔离（internal + external），后端不直接暴露端口

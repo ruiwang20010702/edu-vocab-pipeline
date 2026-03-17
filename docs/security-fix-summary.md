@@ -90,3 +90,50 @@
 PYTHONPATH=backend .venv/bin/pytest tests/ -x -q --tb=short
 709 passed in 3.14s
 ```
+
+---
+
+## 对运维的回复（2026-03-17 代码审计核实）
+
+以下是对 `fix.md`（性能）和 `fix2.md`（安全）两份风险分析报告中所有问题的逐项代码核实结果。
+
+### fix.md — 性能风险 10 项：全部已实现 ✅
+
+| # | 问题 | 状态 | 核实证据 |
+|---|------|------|---------|
+| 1 | 大事务长时间持锁 | ✅ | `routers/batch.py:234-317` — `_run_production_bg()` 拆为 4 步，每步独立 session + commit |
+| 2 | AI 调用无熔断 | ✅ | `circuit_breaker.py:7-64` CircuitBreaker 三态类；`generators/base.py:15,22-25` 和 `ai_base.py:13,54-57` 均已接入 |
+| 3 | 导出全表加载 OOM | ✅ | `export_service.py:55-147` `_iter_approved_batches()` 分批生成器（500条/批）；`routers/export.py:62,79` StreamingResponse |
+| 4 | 同步/异步桥接开销 | ✅ | `async_bridge.py:7-19` `run_async_in_sync()` 函数，无 running loop 时零开销 |
+| 5 | 无缓存层 | ✅ | `cache.py:11-46` TTLCache 类（线程安全）；`stats_service.py:16` `stats_cache = TTLCache(default_ttl=10.0)` |
+| 6 | 连接池偏小 | ✅ | `db.py:22-26` pool_size=20, max_overflow=10, pool_pre_ping=True, pool_recycle=1800 |
+| 7 | 日志同步写 | ✅ | `main.py:5,23-31` QueueHandler + QueueListener，后台线程异步消费 |
+| 8 | 重试无抖动 | ✅ | `ai_base.py:117` 和 `generators/base.py:545,624` 均已加 `random.uniform(0, 1)` |
+| 9 | 临时对象 GC | ✅ | 导出服务已用分批生成器，每批处理完释放，内存 O(500) |
+| 10 | HTTP 客户端重建 | ✅ | `generators/base.py:322-391` 模块级单例 + 双检锁 + 事件循环缓存 + `close_http_clients()` 优雅关闭 |
+
+### fix2.md — 安全风险 10 项：全部已实现 ✅
+
+| # | 问题 | 状态 | 核实证据 |
+|---|------|------|---------|
+| 高1 | API Key 明文存库 | ✅ | `runner.py:60` 已从 `settings.ai_api_key`（环境变量）读取；`schemas/prompt.py` 响应模型已删除该字段；ORM 列保留是设计决策（避免数据库迁移），运行时不再从 DB 读取 Key |
+| 高2 | Nginx 无 TLS | ✅ | `deploy/nginx.conf:5-7` HTTP 80 → 301 重定向；`:12` listen 443 ssl http2；`:20-24` TLSv1.2/1.3 + 安全套件；`:31` HSTS |
+| 高3 | XSS HTML 过滤可绕过 | ✅ | `security.py:13` 正则含 `re.DOTALL`（覆盖换行绕过）；`:19` `reject_html_input()` 公共函数；`review.py:192-193` 已调用 |
+| 高4 | SSRF DNS Rebinding | ✅ | `config.py:32` `allowed_ai_hosts` 白名单；`security.py:50-52` 白名单优先检查（消除 TOCTOU 窗口） |
+| 中1 | JWT 存 localStorage | ✅ | `routers/auth.py:62-75` `_set_token_cookie()` httpOnly Cookie；`api.ts:30` `credentials:'include'` |
+| 中2 | 导出无限速 | ✅ | `routers/export.py:55,70` `@limiter.limit("5/minute")` |
+| 中3 | 健康检查无限速 | ✅ | `main.py:127` `@auth.limiter.limit("30/minute")` |
+| 中4 | 邮箱白名单可缺失 | ✅ | `config.py:74` staging 环境纳入校验；`auth_service.py:28-40` 白名单为空时 warning |
+| 低1 | 字段长度无限制 | ✅ | `import_service.py:12-16` 5 个长度常量；`:27-32` `_truncate_field()` 函数 |
+| 低2 | SMTP 密码泄日志 | ✅ | `routers/auth.py:54` 仅记录 `type(e).__name__`，不打完整 traceback |
+
+### 结论
+
+> **两份风险分析报告共 20 项问题，已全部在代码中落地实现。**
+> 709 个测试全部通过，前端编译无错。
+>
+> 部署注意事项：
+> 1. **TLS 证书**：`nginx.conf` 中引用了 `/etc/nginx/ssl/cert.pem` 和 `key.pem`，部署前需确保证书文件到位
+> 2. **环境变量**：`VOCAB_QC_AI_API_KEY` 必须通过环境变量设置，不再从数据库读取
+> 3. **白名单**：生产环境 `VOCAB_QC_ALLOWED_AI_HOSTS` 和 `VOCAB_QC_ALLOWED_EMAIL_DOMAINS` 必须非空
+> 4. **Cookie**：生产环境 `VOCAB_QC_COOKIE_SECURE=true`（需 HTTPS）
