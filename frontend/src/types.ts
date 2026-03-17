@@ -151,7 +151,6 @@ export interface DashboardStats {
 /* ===== 认证类型 ===== */
 
 export interface AuthUser {
-  access_token: string
   user_name: string
   user_role: 'admin' | 'reviewer' | 'viewer'
 }

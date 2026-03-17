@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { getAuth, clearAuth, isAuthenticated } from './lib/auth'
+import { api } from './lib/api'
 
 import { ToastProvider } from './components/Toast'
 import LoginPage from './pages/LoginPage'
@@ -51,7 +52,8 @@ export default function App() {
     ...(isAdmin ? [{ id: 'admin' as const, label: '用户管理', icon: Users }] : []),
   ]
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await api.post('/auth/logout') } catch { /* 忽略 */ }
     clearAuth()
     setAuthed(false)
   }

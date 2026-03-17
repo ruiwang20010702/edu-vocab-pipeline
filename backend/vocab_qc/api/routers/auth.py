@@ -4,12 +4,13 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_db
-from vocab_qc.api.schemas.auth import SendCodeRequest, TokenResponse, VerifyRequest
+from vocab_qc.api.schemas.auth import LoginResponse, SendCodeRequest, VerifyRequest
 from vocab_qc.core.config import settings
 from vocab_qc.core.services import auth_service, user_service
 
@@ -49,8 +50,8 @@ def send_code(request: Request, body: SendCodeRequest, db: Session = Depends(get
 
     try:
         auth_service.send_email(body.email, code)
-    except Exception:
-        logger.warning("验证码发送失败", exc_info=True)
+    except Exception as e:
+        logger.warning("验证码发送失败: %s", type(e).__name__)
         if settings.env != "development":
             raise HTTPException(status_code=503, detail="验证码发送失败，请稍后重试")
         # 开发环境下邮件发送失败不阻断，验证码已在日志中
@@ -58,7 +59,23 @@ def send_code(request: Request, body: SendCodeRequest, db: Session = Depends(get
     return {"message": "验证码已发送"}
 
 
-@router.post("/verify", response_model=TokenResponse)
+def _set_token_cookie(response: JSONResponse, token: str) -> None:
+    """将 JWT 写入 httpOnly cookie。"""
+    kwargs: dict = {
+        "key": settings.cookie_name,
+        "value": token,
+        "httponly": True,
+        "secure": settings.cookie_secure,
+        "samesite": settings.cookie_samesite,
+        "max_age": settings.jwt_expire_hours * 3600,
+        "path": settings.cookie_path,
+    }
+    if settings.cookie_domain:
+        kwargs["domain"] = settings.cookie_domain
+    response.set_cookie(**kwargs)
+
+
+@router.post("/verify", response_model=LoginResponse)
 @limiter.limit("5/minute")
 @limiter.limit("5/minute", key_func=_key_by_email)
 def verify(request: Request, body: VerifyRequest, db: Session = Depends(get_db)):
@@ -80,8 +97,17 @@ def verify(request: Request, body: VerifyRequest, db: Session = Depends(get_db))
 
     token = auth_service.create_jwt(user)
     db.commit()
-    return TokenResponse(
-        access_token=token,
-        user_name=user.name,
-        user_role=user.role,
+
+    response = JSONResponse(
+        content=LoginResponse(user_name=user.name, user_role=user.role).model_dump()
     )
+    _set_token_cookie(response, token)
+    return response
+
+
+@router.post("/logout")
+def logout(request: Request):
+    """退出登录，清除 cookie。"""
+    response = JSONResponse(content={"message": "已退出"})
+    response.delete_cookie(key=settings.cookie_name, path=settings.cookie_path)
+    return response

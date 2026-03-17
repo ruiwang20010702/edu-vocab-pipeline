@@ -249,7 +249,7 @@ class TestDeactivatedUserAccess:
             response = client.post("/api/auth/verify", json={"email": email, "code": correct_code})
             assert response.status_code == 200
             data = response.json()
-            assert "access_token" in data
             assert data["user_name"] == "Active"
+            assert "access_token" not in data  # JWT 通过 httpOnly cookie 下发
         finally:
             app.dependency_overrides.clear()

@@ -22,13 +22,17 @@ class Settings(BaseSettings):
     ai_max_retries: int = 3
     ai_task_timeout: int = 360
     ai_use_proxy: bool = False  # True=使用系统代理（GPT等海外API），False=直连（豆包等国内API）
-    ai_gateway_mode: bool = False  # True=51talk AI Gateway 格式（api_key 在 body，响应包裹在 res 中）
+    ai_gateway_mode: bool = True  # True=51talk AI Gateway 格式（api_key 在 body，响应包裹在 res 中）
     ai_gateway_provider: str = "OPENAI"  # Gateway provider: OPENAI/GEMINI/AZURE/DEEPSEEK 等
     ai_gateway_biz_type: str = "vocab_qc"  # Gateway biz_type 标识
-    ai_gateway_async: bool = False  # True=使用异步提交+轮询（仅 ai_gateway_mode=True 时生效）
+    ai_gateway_async: bool = True  # True=使用异步提交+轮询（仅 ai_gateway_mode=True 时生效）
     ai_gateway_poll_interval: float = 3.0  # 轮询间隔（秒）
     ai_gateway_poll_max_wait: int = 300  # 单任务最大轮询等待（秒）
     allow_private_ai_url: bool = False
+    allowed_ai_hosts: list[str] = []
+
+    ai_circuit_breaker_threshold: int = 5   # 连续失败次数触发熔断
+    ai_circuit_breaker_recovery: int = 30   # 熔断恢复冷却时间（秒）
 
     max_regenerate_retries: int = 3
     max_upload_size_mb: int = 10
@@ -37,6 +41,13 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "dev-secret-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expire_hours: int = 4
+
+    # Cookie
+    cookie_name: str = "access_token"
+    cookie_secure: bool = False  # 生产环境通过环境变量设 True
+    cookie_samesite: str = "lax"
+    cookie_domain: str = ""  # 空=当前域名
+    cookie_path: str = "/"
 
     # SMTP
     smtp_host: str = ""
@@ -60,7 +71,7 @@ settings = Settings()
 
 def validate_production_config() -> None:
     """生产环境启动时校验关键安全配置。"""
-    if settings.env != "production":
+    if settings.env not in ("production", "staging"):
         return
 
     errors: list[str] = []
@@ -89,8 +100,14 @@ def validate_production_config() -> None:
     if settings.jwt_expire_hours > 4:
         errors.append(f"VOCAB_QC_JWT_EXPIRE_HOURS={settings.jwt_expire_hours} 建议 ≤4")
 
+    if not settings.cookie_secure:
+        errors.append("VOCAB_QC_COOKIE_SECURE 必须为 True（生产环境需要 Secure Cookie）")
+
     if settings.allow_private_ai_url:
         errors.append("生产环境禁止 VOCAB_QC_ALLOW_PRIVATE_AI_URL=True（SSRF 风险）")
+
+    if not settings.allowed_ai_hosts:
+        errors.append("VOCAB_QC_ALLOWED_AI_HOSTS 不能为空（SSRF 防护需要白名单）")
 
     if settings.ai_gateway_async and not settings.ai_gateway_mode:
         errors.append("VOCAB_QC_AI_GATEWAY_ASYNC=True 需要 VOCAB_QC_AI_GATEWAY_MODE=True")

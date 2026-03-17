@@ -3,10 +3,11 @@
 from collections.abc import Generator
 from typing import Callable
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from vocab_qc.core.config import settings
 from vocab_qc.core.db import SyncSessionLocal
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import auth_service
@@ -28,14 +29,18 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
-    """从 Bearer token 解析当前用户。"""
-    if credentials is None:
+    """从 Cookie 或 Bearer token 解析当前用户。Cookie 优先，Header 兼容。"""
+    token: str | None = request.cookies.get(settings.cookie_name)
+    if not token and credentials:
+        token = credentials.credentials
+    if not token:
         raise HTTPException(status_code=401, detail="未提供认证令牌")
     try:
-        payload = auth_service.decode_jwt(credentials.credentials)
+        payload = auth_service.decode_jwt(token)
     except Exception:
         raise HTTPException(status_code=401, detail="认证令牌无效或已过期")
 

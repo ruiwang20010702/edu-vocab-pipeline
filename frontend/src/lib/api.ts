@@ -1,5 +1,5 @@
 /**
- * API 客户端 — 封装 fetch，自动注入 JWT + 错误处理。
+ * API 客户端 — 封装 fetch，自动携带 httpOnly cookie + 错误处理。
  */
 
 const BASE_URL = '/api'
@@ -14,33 +14,20 @@ class ApiError extends Error {
   }
 }
 
-function getToken(): string | null {
-  const raw = localStorage.getItem('auth')
-  if (!raw) return null
-  try {
-    return JSON.parse(raw).access_token ?? null
-  } catch {
-    return null
-  }
-}
-
 async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token = getToken()
   const isFormData = options.body instanceof FormData
   const headers: Record<string, string> = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string> ?? {}),
   }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
 
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers,
+    credentials: 'include',
   })
 
   if (res.status === 401) {
@@ -104,10 +91,7 @@ export const api = {
 
   /** 下载二进制文件（Excel 等），返回 Blob。 */
   blob: async (path: string): Promise<Blob> => {
-    const token = getToken()
-    const headers: Record<string, string> = {}
-    if (token) headers['Authorization'] = `Bearer ${token}`
-    const res = await fetch(`${BASE_URL}${path}`, { headers })
+    const res = await fetch(`${BASE_URL}${path}`, { credentials: 'include' })
     if (res.status === 401) {
       localStorage.removeItem('auth')
       window.location.href = '/'

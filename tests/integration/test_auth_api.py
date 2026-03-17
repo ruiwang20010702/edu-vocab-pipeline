@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from vocab_qc.api.deps import get_db
 from vocab_qc.api.main import app
 from vocab_qc.api.routers.auth import limiter
+from vocab_qc.core.config import settings
 from vocab_qc.core.db import Base
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import auth_service
@@ -77,9 +78,11 @@ class TestVerify:
         resp = client.post("/api/auth/verify", json={"email": "admin@test.com", "code": code})
         assert resp.status_code == 200
         data = resp.json()
-        assert "access_token" in data
         assert data["user_name"] == "Admin"
         assert data["user_role"] == "admin"
+        # JWT 通过 httpOnly cookie 下发，不在 JSON body 中
+        assert "access_token" not in data
+        assert settings.cookie_name in resp.cookies
 
     def test_verify_wrong_code(self, auth_app):
         client, _ = auth_app
@@ -97,8 +100,59 @@ class TestVerify:
         resp = client.post("/api/auth/verify", json={"email": "nobody@test.com", "code": code})
         assert resp.status_code == 200
         data = resp.json()
-        assert "access_token" in data
         assert data["user_name"] == "nobody"
+        assert "access_token" not in data
+        assert settings.cookie_name in resp.cookies
+
+    def test_verify_sets_httponly_cookie(self, auth_app):
+        """验证 Set-Cookie header 含 httponly 标志。"""
+        client, test_session_factory = auth_app
+        session = test_session_factory()
+        code = auth_service.generate_code(session, "admin@test.com")
+        session.commit()
+        session.close()
+
+        resp = client.post("/api/auth/verify", json={"email": "admin@test.com", "code": code})
+        assert resp.status_code == 200
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "httponly" in set_cookie.lower()
+
+    def test_cookie_auth_works(self, auth_app):
+        """用 cookie 访问受保护端点。"""
+        client, test_session_factory = auth_app
+        session = test_session_factory()
+        code = auth_service.generate_code(session, "admin@test.com")
+        session.commit()
+        session.close()
+
+        resp = client.post("/api/auth/verify", json={"email": "admin@test.com", "code": code})
+        token = resp.cookies[settings.cookie_name]
+
+        # 用 cookie 访问 /users/me（不带 Authorization header）
+        client.cookies.set(settings.cookie_name, token)
+        resp2 = client.get("/api/users/me")
+        assert resp2.status_code == 200
+        assert resp2.json()["email"] == "admin@test.com"
+
+    def test_logout_clears_cookie(self, auth_app):
+        """/logout 后 cookie 被清除。"""
+        client, test_session_factory = auth_app
+        session = test_session_factory()
+        code = auth_service.generate_code(session, "admin@test.com")
+        session.commit()
+        session.close()
+
+        # 先登录
+        resp = client.post("/api/auth/verify", json={"email": "admin@test.com", "code": code})
+        assert settings.cookie_name in resp.cookies
+
+        # 退出
+        resp2 = client.post("/api/auth/logout")
+        assert resp2.status_code == 200
+        assert resp2.json()["message"] == "已退出"
+        # 检查 Set-Cookie 中 max-age=0（删除 cookie）
+        set_cookie = resp2.headers.get("set-cookie", "")
+        assert 'max-age=0' in set_cookie.lower() or '="";' in set_cookie
 
 
 class TestAdminEndpoints:
@@ -108,7 +162,7 @@ class TestAdminEndpoints:
         session.commit()
         session.close()
         resp = client.post("/api/auth/verify", json={"email": "admin@test.com", "code": code})
-        return resp.json()["access_token"]
+        return resp.cookies[settings.cookie_name]
 
     def test_create_user(self, auth_app):
         client, test_session_factory = auth_app
