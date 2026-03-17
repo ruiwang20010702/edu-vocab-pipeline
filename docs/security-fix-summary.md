@@ -1,6 +1,6 @@
 # 安全与性能风险修复总结
 
-两份风险分析报告（`fix.md` 性能风险 10 项 + `fix2.md` 安全风险 10 项）共计 **20 项问题**，已修复 **19 项**，推迟 1 项。全量测试 706 个全部通过。
+两份风险分析报告（`fix.md` 性能风险 10 项 + `fix2.md` 安全风险 10 项）共计 **20 项问题**，已**全部修复**。全量测试 709 个全部通过。
 
 ---
 
@@ -33,7 +33,7 @@
 
 ---
 
-## fix2.md — 安全风险（9/10 已修复，1 项推迟）
+## fix2.md — 安全风险（10/10 已修复）
 
 ### 高风险
 
@@ -48,7 +48,7 @@
 
 | # | 问题 | 修复方式 | 涉及文件（行数） |
 |---|------|---------|----------------|
-| 中1 | JWT 存 localStorage | **推迟**。需前后端联动改造（cookie 认证 + CSRF 防护），影响面覆盖全部 API 测试。本轮已修复 XSS 入口（高3），攻击链被切断 | — |
+| 中1 | JWT 存 localStorage | JWT 迁移到 httpOnly Cookie（`SameSite=Lax`）。`/verify` 通过 `Set-Cookie` 下发 token，JSON body 仅返回 user_name/user_role；新增 `/logout` 清除 cookie；`deps.py` Cookie 优先 + Authorization header 兼容；前端删除 `getToken()` 改用 `credentials:'include'`；config 新增 5 个 cookie 配置字段 + 生产环境 `cookie_secure` 校验 | `routers/auth.py`、`deps.py`、`schemas/auth.py`、`config.py`、`frontend/src/lib/api.ts`、`frontend/src/App.tsx`、`frontend/src/types.ts` |
 | 中2 | 导出无限速 | `/download` 和 `/excel` 添加 `@limiter.limit("5/minute")` | `routers/export.py:55,70`（+2 行装饰器 + 函数签名加 `request: Request`） |
 | 中3 | 健康检查无限速 | `/health` 添加 `@auth.limiter.limit("30/minute")` | `main.py:127`（+1 行装饰器 + 函数签名加 `request: Request`） |
 | 中4 | 邮箱白名单可缺失 | `validate_production_config()` 的守卫条件从 `!= "production"` 改为 `not in ("production", "staging")`，staging 也纳入安全校验。`validate_email_domain()` 白名单为空时发出 warning（仅首次） | `config.py:67`（改 1 行）、`auth_service.py:25-37`（+13 行） |
@@ -68,6 +68,7 @@
 |---------|--------|---------|
 | `tests/unit/test_security_html.py` | 14 | `reject_html_input()` 全场景：标签/不闭合标签/换行绕过/事件处理器/实体编码/javascript:/data: URI |
 | `tests/unit/test_import_field_length.py` | 7 | 字段截断/超长 word 跳过/正常数据不受影响 |
+| `tests/integration/test_auth_api.py`（新增 3 个） | 3 | httpOnly cookie 标志验证 / cookie 认证端点访问 / logout 清除 cookie |
 
 （fix.md 轮次另新增 `test_circuit_breaker.py` 9 个 + `test_ttl_cache.py` 8 个测试）
 
@@ -77,11 +78,5 @@
 
 ```
 PYTHONPATH=backend .venv/bin/pytest tests/ -x -q --tb=short
-706 passed in 3.23s
+709 passed in 3.11s
 ```
-
-## 未修复项
-
-| 问题 | 原因 | 风险缓解 |
-|------|------|---------|
-| JWT 存 localStorage（中1） | 需前后端联动改造 cookie 认证 + CSRF 防护，影响面覆盖全部 API 测试 | XSS 入口已封堵（高3），攻击链被切断 |
