@@ -68,7 +68,7 @@ def import_file(
     request: Request,
     file: UploadFile,
     batch_name: str = "",
-    model: str = "gemini-3-flash-preview",
+    model: str = "gemini-3-flash-preview|efficiency",
     force: bool = False,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin", "reviewer")),

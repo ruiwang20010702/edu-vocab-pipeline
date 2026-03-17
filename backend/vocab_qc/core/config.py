@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     ai_api_key: str = ""
     ai_api_base_url: str = ""
-    ai_model: str = "gemini-3-flash-preview"
+    ai_model: str = "gemini-3-flash-preview|efficiency"
     ai_max_concurrency: int = 20
     ai_max_retries: int = 3
     ai_task_timeout: int = 360

@@ -15,8 +15,8 @@ interface Prompt {
 type StatusTab = 'active' | 'archived'
 
 const MODEL_OPTIONS = [
-  { value: 'gpt-5.2', label: 'OpenAI / gpt-5.2' },
-  { value: 'gemini-3-flash-preview', label: 'Gemini / gemini-3-flash-preview' },
+  { value: 'gpt-5.2|efficiency', label: 'OpenAI / gpt-5.2' },
+  { value: 'gemini-3-flash-preview|efficiency', label: 'Gemini / gemini-3-flash-preview' },
   { value: 'doubao-seed-1-8-251228', label: '豆包 / doubao-seed-1-8-251228' },
 ]
 
@@ -136,7 +136,7 @@ export default function PromptPage() {
         name: '新 Prompt',
         category: categoryTab,
         dimension: categoryTab === 'generation' ? 'chunk' : 'chunk',
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3-flash-preview|efficiency',
         content: '',
       })
       setPrompts(prev => [...prev, created])

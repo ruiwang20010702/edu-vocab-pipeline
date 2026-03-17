@@ -32,7 +32,7 @@ class PromptCreateRequest(BaseModel):
     name: str
     category: Literal["generation", "quality"]
     dimension: _DIMENSION_LITERAL
-    model: str = "gemini-3-flash-preview"
+    model: str = "gemini-3-flash-preview|efficiency"
     content: str = ""
     ai_api_base_url: Optional[str] = None
 

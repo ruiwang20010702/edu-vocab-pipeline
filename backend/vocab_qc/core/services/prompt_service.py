@@ -24,15 +24,15 @@ _PROMPT_FILE_MAP: list[tuple[str, str, str]] = [
 
 # 维度→模型映射（例句用 GPT，其余用 Gemini）
 _DIMENSION_MODEL_MAP: dict[str, str] = {
-    "chunk": "gemini-3-flash-preview",
-    "sentence": "gpt-5.2",
-    "syllable": "gemini-3-flash-preview",
-    "mnemonic_root_affix": "gemini-3-flash-preview",
-    "mnemonic_word_in_word": "gemini-3-flash-preview",
-    "mnemonic_sound_meaning": "gemini-3-flash-preview",
-    "mnemonic_exam_app": "gemini-3-flash-preview",
+    "chunk": "gemini-3-flash-preview|efficiency",
+    "sentence": "gpt-5.2|efficiency",
+    "syllable": "gemini-3-flash-preview|efficiency",
+    "mnemonic_root_affix": "gemini-3-flash-preview|efficiency",
+    "mnemonic_word_in_word": "gemini-3-flash-preview|efficiency",
+    "mnemonic_sound_meaning": "gemini-3-flash-preview|efficiency",
+    "mnemonic_exam_app": "gemini-3-flash-preview|efficiency",
 }
-DEFAULT_MODEL = "gemini-3-flash-preview"
+DEFAULT_MODEL = "gemini-3-flash-preview|efficiency"
 
 
 def _model_for_dimension(dimension: str) -> str:
