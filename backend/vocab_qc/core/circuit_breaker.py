@@ -53,11 +53,14 @@ class CircuitBreaker:
             self._state = self.CLOSED
 
     def record_failure(self, error: str = "") -> None:
-        """记录失败，达阈值则熔断。"""
+        """记录失败，达阈值则熔断；HALF_OPEN 下任何失败立即回到 OPEN。"""
         with self._lock:
             self._failure_count += 1
             if error:
                 self._last_error = error
-            if self._failure_count >= self._failure_threshold:
+            if self._state == self.HALF_OPEN:
+                self._state = self.OPEN
+                self._last_failure_time = time.monotonic()
+            elif self._failure_count >= self._failure_threshold:
                 self._state = self.OPEN
                 self._last_failure_time = time.monotonic()

@@ -14,6 +14,7 @@ from vocab_qc.core.circuit_breaker import CircuitBreaker
 from vocab_qc.core.config import settings
 from vocab_qc.core.generators.base import (
     AiRequestError,
+    _is_transient_error,
     _strip_markdown_fences,
     build_ai_request,
     parse_ai_response,
@@ -103,7 +104,9 @@ class AiClient:
                 return result
             except Exception as e:
                 last_error = e
-                self._circuit_breaker.record_failure(str(e))
+                # 临时性错误（429/502-504/parse_error）不计入熔断
+                if not _is_transient_error(e):
+                    self._circuit_breaker.record_failure(str(e))
                 logger.warning(
                     "AI 质检调用失败 [%s] attempt=%d/%d: %s",
                     self.model, attempt + 1, self.max_retries, e,

@@ -170,3 +170,43 @@ class TestExamAppMnemonicGenerator:
     def test_dimension(self):
         gen = ExamAppMnemonicGenerator()
         assert gen.dimension == "mnemonic_exam_app"
+
+
+class TestIsTransientError:
+    """F4+F5: _is_transient_error 判断临时性错误不触发熔断。"""
+
+    def test_429_is_transient(self):
+        from vocab_qc.core.generators.base import AiRequestError, _is_transient_error
+
+        e = AiRequestError("http_error", status_code=429)
+        assert _is_transient_error(e) is True
+
+    def test_502_503_504_are_transient(self):
+        from vocab_qc.core.generators.base import AiRequestError, _is_transient_error
+
+        for code in (502, 503, 504):
+            e = AiRequestError("http_error", status_code=code)
+            assert _is_transient_error(e) is True, f"HTTP {code} should be transient"
+
+    def test_parse_error_is_transient(self):
+        from vocab_qc.core.generators.base import AiRequestError, _is_transient_error
+
+        e = AiRequestError("parse_error", detail="JSON decode error")
+        assert _is_transient_error(e) is True
+
+    def test_500_is_not_transient(self):
+        from vocab_qc.core.generators.base import AiRequestError, _is_transient_error
+
+        e = AiRequestError("http_error", status_code=500)
+        assert _is_transient_error(e) is False
+
+    def test_timeout_is_not_transient(self):
+        from vocab_qc.core.generators.base import AiRequestError, _is_transient_error
+
+        e = AiRequestError("timeout", detail="read timeout")
+        assert _is_transient_error(e) is False
+
+    def test_non_ai_error_is_not_transient(self):
+        from vocab_qc.core.generators.base import _is_transient_error
+
+        assert _is_transient_error(RuntimeError("boom")) is False

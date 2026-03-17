@@ -75,3 +75,30 @@ class TestCircuitBreaker:
         cb = CircuitBreaker(failure_threshold=10, recovery_timeout=60.0)
         assert cb._failure_threshold == 10
         assert cb._recovery_timeout == 60.0
+
+    def test_half_open_failure_reopens_high_threshold(self):
+        """F3: HALF_OPEN 下即使 failure_count 远低于阈值，也应立即回到 OPEN。"""
+        cb = CircuitBreaker(failure_threshold=15, recovery_timeout=0.1)
+        # 先触发熔断
+        for _ in range(15):
+            cb.record_failure()
+        assert cb.state == CircuitBreaker.OPEN
+
+        # 冷却后进入 HALF_OPEN
+        time.sleep(0.15)
+        assert cb.state == CircuitBreaker.HALF_OPEN
+
+        # record_success 重置 failure_count → 只需 1 次失败就应回到 OPEN
+        cb.record_success()
+        assert cb.state == CircuitBreaker.CLOSED
+
+        # 再次触发熔断并冷却
+        for _ in range(15):
+            cb.record_failure()
+        time.sleep(0.15)
+        assert cb.state == CircuitBreaker.HALF_OPEN
+
+        # 单次失败立即回到 OPEN（不需累积到 15 次）
+        cb.record_failure()
+        assert cb.state == CircuitBreaker.OPEN
+        assert cb.allow_request() is False

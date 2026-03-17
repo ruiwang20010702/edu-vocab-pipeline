@@ -59,6 +59,19 @@ class AiRequestError(Exception):
         return " | ".join(parts)
 
 
+def _is_transient_error(e: Exception) -> bool:
+    """判断是否为临时性错误（不应触发熔断）。
+
+    429 限流、502/503/504 网关临时错误、parse_error（Prompt 问题非服务故障）。
+    """
+    if isinstance(e, AiRequestError):
+        if e.status_code in (429, 502, 503, 504):
+            return True
+        if e.error_type == "parse_error":
+            return True
+    return False
+
+
 def build_ai_request(
     base_url: str,
     api_key: str,
@@ -213,6 +226,11 @@ async def poll_gateway_task_async(
             elapsed = int((time.monotonic() - t0) * 1000)
             raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e), task_no=task_no) from e
 
+        # 429 限流：等待双倍间隔后继续轮询（deadline 检查兜底防无限循环）
+        if response.status_code == 429:
+            logger.warning("轮询遭遇 429 限流，等待后重试 task_no=%s", task_no)
+            await asyncio.sleep(settings.ai_gateway_poll_interval * 2)
+            continue
         if response.status_code >= 400:
             raise AiRequestError(
                 "http_error",
@@ -274,6 +292,11 @@ def poll_gateway_task_sync(
             elapsed = int((time.monotonic() - t0) * 1000)
             raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e), task_no=task_no) from e
 
+        # 429 限流：等待双倍间隔后继续轮询（deadline 检查兜底防无限循环）
+        if response.status_code == 429:
+            logger.warning("轮询遭遇 429 限流，等待后重试 task_no=%s", task_no)
+            time.sleep(settings.ai_gateway_poll_interval * 2)
+            continue
         if response.status_code >= 400:
             raise AiRequestError(
                 "http_error",
@@ -534,7 +557,9 @@ class ContentGenerator:
                 return result
             except Exception as e:
                 last_error = e
-                _generator_circuit_breaker.record_failure(str(e))
+                # 临时性错误（429/502-504/parse_error）不计入熔断
+                if not _is_transient_error(e):
+                    _generator_circuit_breaker.record_failure(str(e))
                 logger.warning(
                     "AI 调用失败 [%s] attempt=%d/%d: %s",
                     actual_model, attempt + 1, settings.ai_max_retries, e,
@@ -613,7 +638,9 @@ class ContentGenerator:
                     ) from e
             except Exception as e:
                 last_error = e
-                _generator_circuit_breaker.record_failure(str(e))
+                # 临时性错误（429/502-504/parse_error）不计入熔断
+                if not _is_transient_error(e):
+                    _generator_circuit_breaker.record_failure(str(e))
                 logger.warning(
                     "AI 调用失败 [%s] attempt=%d/%d: %s",
                     actual_model, attempt + 1, settings.ai_max_retries, e,
