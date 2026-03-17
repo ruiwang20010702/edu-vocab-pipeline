@@ -27,7 +27,6 @@ class Prompt(Base):
     dimension: Mapped[str] = mapped_column(String(50), nullable=False)  # chunk / sentence / mnemonic_*
     model: Mapped[str] = mapped_column(String(80), nullable=False, default="gemini-3-flash-preview|efficiency")
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    ai_api_key: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     ai_api_base_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, server_default="1")
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="file", server_default="file")

@@ -16,7 +16,9 @@ router = APIRouter(prefix="/api/export", tags=["导出"])
 
 
 @router.get("/word/{word_id}")
+@limiter.limit("30/minute")
 def export_word(
+    request: Request,
     word_id: int,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin")),
@@ -30,7 +32,9 @@ def export_word(
 
 
 @router.get("/readiness")
+@limiter.limit("30/minute")
 def export_readiness(
+    request: Request,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin")),
 ):

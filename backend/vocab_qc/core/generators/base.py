@@ -9,6 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -593,9 +594,16 @@ class ContentGenerator:
                 detail=f"熔断器已打开，跳过调用 | 触发原因: {_generator_circuit_breaker.last_error or '未知'}",
             )
 
-        self._validate_url(actual_url)
+        resolved_ip = self._validate_url(actual_url)
 
         url, headers, body = self._build_request(actual_url, actual_key, actual_model, system_prompt, user_prompt)
+
+        # DNS Rebinding 防护：非白名单主机用解析后的 IP 直连 + Host header
+        if resolved_ip is not None:
+            parsed = urlparse(url)
+            url = url.replace(f"://{parsed.hostname}", f"://{resolved_ip}", 1)
+            headers["Host"] = parsed.hostname
+
         client = _get_async_http_client()
         last_error = None
         for attempt in range(settings.ai_max_retries):
@@ -660,11 +668,15 @@ class ContentGenerator:
         return system_prompt
 
     @staticmethod
-    def _validate_url(base_url: str) -> None:
-        """校验 AI API URL 防止 SSRF（委托给统一安全模块）。"""
+    def _validate_url(base_url: str) -> str | None:
+        """校验 AI API URL 防止 SSRF，返回解析后的 IP（委托给统一安全模块）。
+
+        返回 None 表示白名单主机（直接使用原始 URL），
+        返回 IP 字符串表示非白名单主机（调用方应用 IP 直连 + Host header）。
+        """
         from vocab_qc.core.security import validate_ai_url
 
-        validate_ai_url(base_url)
+        return validate_ai_url(base_url)
 
     @staticmethod
     def _resolve_gateway_provider(model: str) -> str:
@@ -693,8 +705,15 @@ class ContentGenerator:
     def _do_request(
         self, base_url: str, api_key: str, model: str, system_prompt: str, user_prompt: str
     ) -> dict[str, Any]:
-        self._validate_url(base_url)
+        resolved_ip = self._validate_url(base_url)
         url, headers, body = self._build_request(base_url, api_key, model, system_prompt, user_prompt)
+
+        # DNS Rebinding 防护：非白名单主机用解析后的 IP 直连 + Host header
+        if resolved_ip is not None:
+            parsed = urlparse(url)
+            url = url.replace(f"://{parsed.hostname}", f"://{resolved_ip}", 1)
+            headers["Host"] = parsed.hostname
+
         client = _get_http_client()
         t0 = time.monotonic()
         try:

@@ -31,13 +31,21 @@ def reject_html_input(text: str | None, field_name: str = "content") -> None:
         raise HTTPException(status_code=400, detail=f"{field_name} 不允许包含危险 URI")
 
 
-def validate_ai_url(base_url: str) -> None:
-    """校验 AI API URL 防止 SSRF。
+def _check_ip_safety(ip_str: str, hostname: str) -> None:
+    """检查 IP 地址是否为私有/环回/链路本地/保留地址。"""
+    ip = ipaddress.ip_address(ip_str)
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+        raise ValueError(f"禁止使用内网 AI API 地址: {hostname} -> {ip_str}")
 
-    解析 DNS 后检查 IP 是否为私有/环回/链路本地地址。
+
+def validate_ai_url(base_url: str) -> str | None:
+    """校验 AI API URL 防止 SSRF，返回解析后的 IP 地址。
+
+    白名单主机返回 None（直接使用原始 URL），非白名单主机返回解析后的 IP，
+    调用方应用 IP 直连并设置 Host header（消除 DNS Rebinding TOCTOU）。
     """
     if getattr(settings, "allow_private_ai_url", False):
-        return
+        return None
 
     parsed = urlparse(base_url)
     if parsed.scheme not in ("http", "https"):
@@ -47,14 +55,13 @@ def validate_ai_url(base_url: str) -> None:
     if not hostname:
         raise ValueError("AI API URL 缺少主机名")
 
-    # Fix 9: 白名单内主机直接放行，跳过 DNS 解析（防 TOCTOU）
+    # 白名单内主机直接放行，返回 None 表示无需 IP 直连
     if hostname in settings.allowed_ai_hosts:
-        return
+        return None
 
     try:
         resolved_ip = socket.gethostbyname(hostname)
-        ip = ipaddress.ip_address(resolved_ip)
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            raise ValueError(f"禁止使用内网 AI API 地址: {hostname} -> {resolved_ip}")
+        _check_ip_safety(resolved_ip, hostname)
+        return resolved_ip
     except socket.gaierror:
         raise ValueError(f"无法解析 AI API 主机名: {hostname}")
