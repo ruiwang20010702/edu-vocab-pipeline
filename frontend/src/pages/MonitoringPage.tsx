@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Activity, CheckCircle2, AlertCircle, Clock, Loader2, ArrowRight, Database } from 'lucide-react'
+import { Activity, CheckCircle2, AlertCircle, Clock, Loader2, ArrowRight, Database, RotateCcw } from 'lucide-react'
 import { api } from '../lib/api'
 import type { BatchInfo } from '../types'
 
@@ -16,6 +16,7 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
   const [logs, setLogs] = useState<string[]>([])
   const [activeWord, setActiveWord] = useState('')
   const [activeGate, setActiveGate] = useState(1)
+  const [retrying, setRetrying] = useState(false)
   const pollingRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
   useEffect(() => {
@@ -53,6 +54,34 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
     pollingRef.current = setInterval(poll, 3000)
     return () => clearInterval(pollingRef.current)
   }, [batchId])
+
+  const handleRetryProduce = async () => {
+    if (!batchId || retrying) return
+    setRetrying(true)
+    try {
+      await api.post(`/batches/${batchId}/produce`)
+      setBatch(prev => prev ? { ...prev, status: 'processing' } : prev)
+      // 重启轮询
+      const now = () => new Date().toLocaleTimeString()
+      setLogs(prev => [...prev, `[${now()}] 重试生产...`])
+      pollingRef.current = setInterval(async () => {
+        try {
+          const b = await api.get<BatchInfo>(`/batches/info/${batchId}`)
+          setBatch(b)
+          if (b.status === 'completed' || b.status === 'failed') {
+            setLogs(prev => [...prev, `[${now()}] 生产${b.status === 'completed' ? '完成' : '异常终止'}`])
+            clearInterval(pollingRef.current)
+          }
+        } catch (e) {
+          console.error('轮询批次状态失败', e)
+        }
+      }, 3000)
+    } catch (e) {
+      console.error('重试生产失败', e)
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   const progress = batch ? Math.round((batch.processed_words / Math.max(batch.total_words, 1)) * 100) : 0
   const isRunning = batch != null && batch.status !== 'completed' && batch.status !== 'failed'
@@ -234,7 +263,41 @@ export default function MonitoringPage({ batchId, onGoToReview }: Props) {
 
           {/* 操作区 */}
           <AnimatePresence>
-            {failedCount > 0 && !isRunning && (
+            {batch?.status === 'failed' && !isRunning && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="w-full max-w-2xl mx-auto p-6 bg-rose-50 border border-rose-100 rounded-[32px] flex items-center justify-between gap-6 shadow-xl shadow-rose-100"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-rose-100 rounded-2xl flex items-center justify-center text-rose-600">
+                    <AlertCircle size={24} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-rose-900">生产异常终止</h4>
+                    <p className="text-xs text-rose-600/70">可重试继续未完成的生产任务</p>
+                  </div>
+                </div>
+                <div className="flex gap-3 shrink-0">
+                  <button
+                    onClick={handleRetryProduce}
+                    disabled={retrying}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-200 disabled:opacity-50"
+                  >
+                    {retrying ? <Loader2 size={18} className="animate-spin" /> : <RotateCcw size={18} />}
+                    重试生产
+                  </button>
+                  <button
+                    onClick={onGoToReview}
+                    className="px-6 py-3 bg-rose-600 text-white rounded-2xl font-bold hover:bg-rose-700 transition-all flex items-center gap-2 shadow-lg shadow-rose-200"
+                  >
+                    前往质检审核
+                    <ArrowRight size={18} />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+            {failedCount > 0 && batch?.status !== 'failed' && !isRunning && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}

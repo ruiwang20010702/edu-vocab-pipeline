@@ -242,6 +242,21 @@ export default function DashboardPage({ onViewBatch }: Props) {
                   </div>
                 </div>
                 <div className="flex items-center gap-6">
+                  {batch.status === 'failed' && (
+                    <span className="px-2.5 py-1 bg-rose-100 text-rose-600 text-[10px] font-bold rounded-lg uppercase tracking-wider">
+                      异常
+                    </span>
+                  )}
+                  {batch.status === 'processing' && (
+                    <span className="px-2.5 py-1 bg-blue-100 text-blue-600 text-[10px] font-bold rounded-lg uppercase tracking-wider animate-pulse">
+                      生产中
+                    </span>
+                  )}
+                  {batch.status === 'completed' && (
+                    <span className="px-2.5 py-1 bg-emerald-100 text-emerald-600 text-[10px] font-bold rounded-lg uppercase tracking-wider">
+                      完成
+                    </span>
+                  )}
                   <div className="text-right">
                     <p className="text-xs font-bold">{batch.total_words}</p>
                     <p className="text-[10px] text-slate-400 uppercase">总词数</p>

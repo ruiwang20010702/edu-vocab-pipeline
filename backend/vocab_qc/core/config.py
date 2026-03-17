@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     ai_circuit_breaker_threshold: int = 15  # 连续失败次数触发熔断
     ai_circuit_breaker_recovery: int = 30   # 熔断恢复冷却时间（秒）
 
+    production_batch_size: int = 50  # 大批量生产时每批处理的词数
+    package_processing_timeout_hours: int = 6  # Package processing 状态超时（小时）
+
     max_regenerate_retries: int = 3
     max_upload_size_mb: int = 10
 

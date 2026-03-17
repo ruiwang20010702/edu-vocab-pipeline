@@ -119,12 +119,20 @@ class Layer2Runner:
                 results = await self.check_item_unified(item, word_text, meaning_text, **extra)
             return item.id, results
 
-        tasks = [_check_one(item) for item in items]
-        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+        # 分批 gather，避免一次创建过多 asyncio Task（大批量时数万个）
+        from vocab_qc.core.config import settings as _settings
+
+        gather_batch_size = _settings.production_batch_size * 8  # ~1600 items/batch
+        all_gathered: list = []
+        for batch_start in range(0, len(items), gather_batch_size):
+            batch_items = items[batch_start:batch_start + gather_batch_size]
+            batch_tasks = [_check_one(item) for item in batch_items]
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            all_gathered.extend(batch_results)
 
         results_map: dict[int, list[RuleResult]] = {}
         error_logs: list[AiErrorLog] = []
-        for i, r in enumerate(gathered):
+        for i, r in enumerate(all_gathered):
             if isinstance(r, Exception):
                 logger.warning("AI 质检任务异常: %s", r, exc_info=True)
                 failed_item = items[i]

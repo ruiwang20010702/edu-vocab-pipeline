@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time as _time
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/batches", tags=["批次"])
 
 # 线程池用于在后台执行同步生产任务，避免阻塞事件循环
-_production_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="production")
+_production_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="production")
 
 
 def _bulk_query_package_stats(
@@ -231,21 +232,63 @@ def release_batch(
     return {"message": "批次已释放"}
 
 
-def _run_production_bg(batch_id: int) -> None:
-    """后台执行生产流水线，每步使用独立 session 避免长事务占用连接。
+def _handle_batch_failure(
+    session,
+    batch_id: int,
+    word_ids: set[int],
+) -> None:
+    """善后处理：将指定词的僵尸 ContentItem 标记为 LAYER1_FAILED 并入队审核。"""
+    from vocab_qc.core.models import ContentItem, QcStatus
+    from vocab_qc.core.models.enums import ReviewReason
+    from vocab_qc.core.services.review_service import ReviewService
 
-    流程拆分为 3 步，每步独立事务：
-    1. 生成内容 → commit
-    2. Layer 1 质检 + 失败项入队 → commit
-    3. Layer 2 AI 质检 + 失败项入队 → commit
+    if not word_ids:
+        return
+
+    zombie_items = (
+        session.query(ContentItem)
+        .filter(
+            ContentItem.word_id.in_(word_ids),
+            ContentItem.qc_status == QcStatus.PENDING.value,
+            ContentItem.content == "",
+        )
+        .all()
+    )
+    review_svc = ReviewService()
+    for item in zombie_items:
+        item.qc_status = QcStatus.LAYER1_FAILED.value
+        review_svc.create_review_item(
+            session, item, ReviewReason.LAYER1_FAILED, priority=10
+        )
+
+
+def _run_production_bg(batch_id: int) -> None:
+    """后台执行生产流水线，按词分批处理避免超时。
+
+    每批词独立走完 generate→L1→L2→commit，单批在 1200s 超时内可完成。
+    单批失败不影响其他批次，天然支持断点恢复。
     """
+    from vocab_qc.core.circuit_breaker import CircuitBreaker
+    from vocab_qc.core.config import settings
     from vocab_qc.core.db import SyncSessionLocal
+    from vocab_qc.core.generators.base import _generator_circuit_breaker
     from vocab_qc.core.services.production_service import (
+        _get_word_ids_for_package,
         step_finalize,
         step_generate,
         step_qc_layer1,
         step_qc_layer2,
     )
+
+    # 获取全部 word_ids 并排序（确保分批稳定）
+    session = SyncSessionLocal()
+    try:
+        all_word_ids = sorted(_get_word_ids_for_package(session, batch_id))
+    finally:
+        session.close()
+
+    batch_size = settings.production_batch_size
+    total_batches = max(1, (len(all_word_ids) + batch_size - 1) // batch_size)
 
     steps = [
         ("generate", step_generate),
@@ -253,63 +296,95 @@ def _run_production_bg(batch_id: int) -> None:
         ("qc_layer2", step_qc_layer2),
     ]
 
-    for step_name, step_fn in steps:
-        session = SyncSessionLocal()
-        try:
-            step_fn(session, batch_id)
-            session.commit()
-        except Exception:
-            session.rollback()
-            logger.exception(
-                "后台生产流水线失败 batch_id=%s step=%s", batch_id, step_name
+    any_failed = False
+    consecutive_failures = 0  # 连续失败批次计数
+    max_consecutive_failures = 3  # 连续失败超过此数则终止整个生产
+
+    for batch_idx in range(total_batches):
+        word_batch = set(all_word_ids[batch_idx * batch_size : (batch_idx + 1) * batch_size])
+
+        # 熔断器打开时等待冷却，避免下一批立刻白白失败
+        if _generator_circuit_breaker.state == CircuitBreaker.OPEN:
+            wait_sec = settings.ai_circuit_breaker_recovery + 5  # 多等 5s 留余量
+            logger.warning(
+                "熔断器已打开，等待 %ds 冷却后继续 batch %d/%d",
+                wait_sec, batch_idx + 1, total_batches,
             )
-            # 标记 Package 为 failed + 善后处理僵尸 ContentItem
+            _time.sleep(wait_sec)
+
+        logger.info(
+            "生产进度: batch %d/%d (%d词) batch_id=%s",
+            batch_idx + 1, total_batches, len(word_batch), batch_id,
+        )
+
+        batch_ok = True
+        for step_name, step_fn in steps:
+            session = SyncSessionLocal()
             try:
-                from vocab_qc.core.models import ContentItem, QcStatus
-                from vocab_qc.core.models.enums import ReviewReason
-                from vocab_qc.core.services.production_service import _get_word_ids_for_package
-                from vocab_qc.core.services.review_service import ReviewService
-
-                pkg = session.query(Package).filter_by(id=batch_id).first()
-                if pkg:
-                    pkg.status = "failed"
-
-                # 将该批次中 PENDING+空content 的项标记为 LAYER1_FAILED 并入队审核
-                word_ids = _get_word_ids_for_package(session, batch_id)
-                if word_ids:
-                    zombie_items = (
-                        session.query(ContentItem)
-                        .filter(
-                            ContentItem.word_id.in_(word_ids),
-                            ContentItem.qc_status == QcStatus.PENDING.value,
-                            ContentItem.content == "",
-                        )
-                        .all()
-                    )
-                    review_svc = ReviewService()
-                    for item in zombie_items:
-                        item.qc_status = QcStatus.LAYER1_FAILED.value
-                        review_svc.create_review_item(
-                            session, item, ReviewReason.LAYER1_FAILED, priority=10
-                        )
-
+                step_fn(session, batch_id, word_ids=word_batch)
                 session.commit()
             except Exception:
                 session.rollback()
                 logger.exception(
-                    "善后处理僵尸 ContentItem 失败 batch_id=%s", batch_id
+                    "生产失败 batch_id=%s sub_batch=%d/%d step=%s",
+                    batch_id, batch_idx + 1, total_batches, step_name,
                 )
+                # 善后：标记本批僵尸项
+                try:
+                    _handle_batch_failure(session, batch_id, word_batch)
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    logger.exception(
+                        "善后处理僵尸 ContentItem 失败 batch_id=%s sub_batch=%d",
+                        batch_id, batch_idx + 1,
+                    )
+                batch_ok = False
+                break  # 本批失败，跳到下一批
             finally:
                 session.close()
-            return
-        finally:
-            session.close()
 
-    # 所有步骤成功 → 标记完成
+        # 每批完成后更新 processed_words，用绝对值避免重试时重复累加
+        if batch_ok:
+            completed_words = min(
+                (batch_idx + 1) * batch_size,
+                len(all_word_ids),
+            )
+            session = SyncSessionLocal()
+            try:
+                pkg = session.query(Package).filter_by(id=batch_id).first()
+                if pkg:
+                    pkg.processed_words = completed_words
+                session.commit()
+            except Exception:
+                session.rollback()
+            finally:
+                session.close()
+
+        if not batch_ok:
+            any_failed = True
+            consecutive_failures += 1
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    "连续 %d 批失败，终止生产 batch_id=%s",
+                    consecutive_failures, batch_id,
+                )
+                break
+            continue  # 继续下一批
+        else:
+            consecutive_failures = 0  # 成功则重置计数
+
+    # 全部批次完成 → finalize（有失败批次时标记 failed）
     session = SyncSessionLocal()
     try:
-        step_finalize(session, batch_id)
-        session.commit()
+        if any_failed:
+            pkg = session.query(Package).filter_by(id=batch_id).first()
+            if pkg:
+                pkg.status = "failed"
+            session.commit()
+        else:
+            step_finalize(session, batch_id)
+            session.commit()
     except Exception:
         session.rollback()
         logger.exception("后台生产流水线 finalize 失败 batch_id=%s", batch_id)
@@ -333,12 +408,45 @@ def produce_batch(
     _current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """触发生产流水线（后台执行）: 生成内容→Layer1 质检→失败项入队审核。"""
+    from datetime import datetime, timedelta, timezone
+
+    from vocab_qc.core.config import settings
+
     pkg = db.query(Package).filter_by(id=batch_id).first()
     if pkg is None:
         raise HTTPException(status_code=404, detail="批次不存在")
+
+    # P3: processing 超时保护——卡住超过阈值时强制重置为 failed
     if pkg.status == "processing":
-        raise HTTPException(status_code=409, detail="该批次正在生产中")
+        if pkg.updated_at and (
+            datetime.now(timezone.utc)
+            - pkg.updated_at.replace(tzinfo=timezone.utc)
+            > timedelta(hours=settings.package_processing_timeout_hours)
+        ):
+            logger.warning("Package %d processing 超时，强制重置为 failed", batch_id)
+            pkg.status = "failed"
+            db.commit()
+        else:
+            raise HTTPException(status_code=409, detail="该批次正在生产中")
+
+    # P4: failed 状态下重置僵尸项，支持断点恢复
+    if pkg.status == "failed":
+        from vocab_qc.core.models import ContentItem, QcStatus
+        from vocab_qc.core.services.production_service import _get_word_ids_for_package
+
+        word_ids = _get_word_ids_for_package(db, batch_id)
+        if word_ids:
+            db.query(ContentItem).filter(
+                ContentItem.word_id.in_(word_ids),
+                ContentItem.qc_status == QcStatus.LAYER1_FAILED.value,
+                ContentItem.content == "",
+            ).update(
+                {ContentItem.qc_status: QcStatus.PENDING.value},
+                synchronize_session=False,
+            )
+
     pkg.status = "processing"
+    pkg.processed_words = 0  # 重置进度，_run_production_bg 会用绝对值重新计算
     db.commit()
     background_tasks.add_task(_run_production_bg_async, batch_id)
     return ProduceResponse(batch_id=batch_id, status="processing")

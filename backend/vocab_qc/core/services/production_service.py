@@ -45,8 +45,17 @@ def _get_word_ids_for_package(session: Session, package_id: int) -> set[int]:
     }
 
 
-def step_generate(session: Session, package_id: int) -> int:
-    """Step 1: 为 Package 生成内容（独立事务）。"""
+def step_generate(
+    session: Session,
+    package_id: int,
+    word_ids: set[int] | None = None,
+) -> int:
+    """Step 1: 为 Package 生成内容（独立事务）。
+
+    Args:
+        word_ids: 可选，仅处理指定的 word_id 子集（分批模式）。
+                  为 None 时处理整个 Package。
+    """
     pkg = session.query(Package).filter_by(id=package_id).first()
     if pkg is None:
         raise ValueError(f"Package {package_id} 不存在")
@@ -54,7 +63,8 @@ def step_generate(session: Session, package_id: int) -> int:
     pkg.status = "processing"
     session.flush()
 
-    word_ids = _get_word_ids_for_package(session, package_id)
+    if word_ids is None:
+        word_ids = _get_word_ids_for_package(session, package_id)
     if not word_ids:
         return 0
 
@@ -69,10 +79,20 @@ def step_generate(session: Session, package_id: int) -> int:
     return generated
 
 
-def step_qc_layer1(session: Session, package_id: int, qc_service: Optional[QcService] = None) -> dict:
-    """Step 2: Layer 1 质检 + 失败项入队审核（批量，独立事务）。"""
+def step_qc_layer1(
+    session: Session,
+    package_id: int,
+    qc_service: Optional[QcService] = None,
+    word_ids: set[int] | None = None,
+) -> dict:
+    """Step 2: Layer 1 质检 + 失败项入队审核（批量，独立事务）。
+
+    Args:
+        word_ids: 可选，仅处理指定的 word_id 子集（分批模式）。
+    """
     qc = qc_service or QcService()
-    word_ids = _get_word_ids_for_package(session, package_id)
+    if word_ids is None:
+        word_ids = _get_word_ids_for_package(session, package_id)
 
     result = qc.run_layer1_batch(session, word_ids)
     if result.get("run_id"):
@@ -82,10 +102,20 @@ def step_qc_layer1(session: Session, package_id: int, qc_service: Optional[QcSer
     return {"passed": result["passed"], "failed": result["failed"]}
 
 
-def step_qc_layer2(session: Session, package_id: int, qc_service: Optional[QcService] = None) -> dict:
-    """Step 3: Layer 2 AI 质检 + 失败项入队审核（批量，独立事务）。"""
+def step_qc_layer2(
+    session: Session,
+    package_id: int,
+    qc_service: Optional[QcService] = None,
+    word_ids: set[int] | None = None,
+) -> dict:
+    """Step 3: Layer 2 AI 质检 + 失败项入队审核（批量，独立事务）。
+
+    Args:
+        word_ids: 可选，仅处理指定的 word_id 子集（分批模式）。
+    """
     qc = qc_service or QcService()
-    word_ids = _get_word_ids_for_package(session, package_id)
+    if word_ids is None:
+        word_ids = _get_word_ids_for_package(session, package_id)
 
     result = qc.run_layer2_batch(session, word_ids)
     if result.get("run_id"):
