@@ -73,6 +73,55 @@ class ReviewService:
         session.flush()
         return review
 
+    def create_review_items_batch(
+        self,
+        session: Session,
+        content_items: list[ContentItem],
+        reason: ReviewReason,
+        priority: int = 0,
+    ) -> int:
+        """批量创建审核项（入队），自动去重已有 PENDING 项.
+
+        分批 900 条查询，兼容 SQLite 999 参数限制。
+
+        Returns:
+            实际新增的审核项数量
+        """
+        if not content_items:
+            return 0
+
+        ci_ids = [item.id for item in content_items]
+
+        # 分批查询已存在的 PENDING 审核项
+        existing_ids: set[int] = set()
+        for i in range(0, len(ci_ids), 900):
+            chunk = ci_ids[i:i + 900]
+            existing_ids.update(
+                row[0] for row in session.query(ReviewItem.content_item_id)
+                .filter(
+                    ReviewItem.content_item_id.in_(chunk),
+                    ReviewItem.status == ReviewStatus.PENDING.value,
+                )
+                .all()
+            )
+
+        new_reviews = [
+            ReviewItem(
+                content_item_id=item.id,
+                word_id=item.word_id,
+                meaning_id=item.meaning_id,
+                dimension=item.dimension,
+                reason=reason.value,
+                priority=priority,
+                status=ReviewStatus.PENDING.value,
+            )
+            for item in content_items if item.id not in existing_ids
+        ]
+        if new_reviews:
+            session.add_all(new_reviews)
+            session.flush()
+        return len(new_reviews)
+
     def approve(
         self,
         session: Session,

@@ -376,8 +376,63 @@ export default function ReviewPage({ onBack }: Props) {
             onClick={async () => {
               setBatchFixing(true)
               const canRetryItems = filtered.filter(i => (i.content_item?.retry_count ?? 0) < 3)
-              for (const item of canRetryItems) {
-                await handleRegenerate(item.id)
+
+              // 静默版 regenerate：不设 actionLoading 锁，不弹 toast，支持并发
+              const handleRegenerateSilent = async (id: number) => {
+                const res = await api.post<{
+                  success: boolean; qc_passed: boolean; retry_count: number; message: string
+                  new_content: string | null; new_content_cn: string | null
+                  new_issues: Array<{ rule_id: string; field: string; message: string }>
+                }>(`/reviews/${id}/regenerate`)
+                if (res.qc_passed) {
+                  setResolvedIds(prev => new Set(prev).add(id))
+                  safeTimeout(() => {
+                    setItems(prev => prev.filter(i => i.id !== id))
+                    setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+                  }, 1500)
+                } else {
+                  setItems(prev => prev.map(item =>
+                    item.id === id
+                      ? {
+                          ...item,
+                          content_item: item.content_item ? {
+                            ...item.content_item,
+                            content: res.new_content ?? item.content_item.content,
+                            content_cn: res.new_content_cn ?? item.content_item.content_cn,
+                            retry_count: res.retry_count,
+                          } : item.content_item,
+                          issues: res.new_issues.map((iss, idx) => ({
+                            id: -(idx + 1),
+                            content_item_id: item.content_item_id,
+                            rule_id: iss.rule_id,
+                            field: iss.field,
+                            message: iss.message,
+                            severity: 'error',
+                          })),
+                        }
+                      : item
+                  ))
+                }
+              }
+
+              // 分批并发，每批 5 个，防止一次性打过多请求
+              const BATCH_SIZE = 5
+              let succeeded = 0
+              let failed = 0
+              for (let i = 0; i < canRetryItems.length; i += BATCH_SIZE) {
+                const batch = canRetryItems.slice(i, i + BATCH_SIZE)
+                const results = await Promise.allSettled(
+                  batch.map(item => handleRegenerateSilent(item.id))
+                )
+                succeeded += results.filter(r => r.status === 'fulfilled').length
+                failed += results.filter(r => r.status === 'rejected').length
+              }
+
+              loadBatch()
+              if (failed > 0) {
+                showToast('warning', `AI修复完成: ${succeeded} 成功, ${failed} 失败`)
+              } else if (succeeded > 0) {
+                showToast('success', `AI修复完成: ${succeeded} 项已处理`)
               }
               setBatchFixing(false)
             }}

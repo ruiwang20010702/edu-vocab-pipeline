@@ -190,21 +190,18 @@ class QcService:
         return {"run_id": run_id, "total": len(items), "passed": passed, "failed": failed}
 
     def enqueue_layer2_failed_for_review(self, session: Session, run_id: str) -> int:
-        """将 Layer 2 失败项加入审核队列."""
+        """将 Layer 2 失败项批量加入审核队列."""
         failed_items = (
             session.query(ContentItem)
             .filter_by(qc_status=QcStatus.LAYER2_FAILED.value, last_qc_run_id=run_id)
             .all()
         )
-        count = 0
-        for item in failed_items:
-            self.review_service.create_review_item(session, item, ReviewReason.LAYER2_FAILED, priority=5)
-            count += 1
-        session.flush()
-        return count
+        return self.review_service.create_review_items_batch(
+            session, failed_items, ReviewReason.LAYER2_FAILED, priority=5,
+        )
 
     def enqueue_failed_for_review(self, session: Session, run_id: str) -> int:
-        """将 Layer 1 失败项加入审核队列.
+        """将 Layer 1 失败项批量加入审核队列.
 
         Returns:
             入队数量
@@ -214,14 +211,9 @@ class QcService:
             .filter_by(qc_status=QcStatus.LAYER1_FAILED.value, last_qc_run_id=run_id)
             .all()
         )
-
-        count = 0
-        for item in failed_items:
-            self.review_service.create_review_item(session, item, ReviewReason.LAYER1_FAILED, priority=10)
-            count += 1
-
-        session.flush()
-        return count
+        return self.review_service.create_review_items_batch(
+            session, failed_items, ReviewReason.LAYER1_FAILED, priority=10,
+        )
 
     def enqueue_sampling(self, session: Session, run_id: str, sample_rate: float = 0.1) -> int:
         """将 Layer 1 通过项按比例抽样入审核队列.
@@ -240,13 +232,9 @@ class QcService:
         sample_size = max(1, int(len(passed_items) * sample_rate))
         sampled = random.sample(passed_items, min(sample_size, len(passed_items)))
 
-        count = 0
-        for item in sampled:
-            self.review_service.create_review_item(session, item, ReviewReason.SAMPLING, priority=0)
-            count += 1
-
-        session.flush()
-        return count
+        return self.review_service.create_review_items_batch(
+            session, sampled, ReviewReason.SAMPLING, priority=0,
+        )
 
     def _build_extra_kwargs(self, session: Session, items: list[ContentItem]) -> dict[int, dict]:
         """为规则检查器构建额外参数（如音标、音节信息）."""

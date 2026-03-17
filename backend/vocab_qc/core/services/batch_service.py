@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Optional
 
-from sqlalchemy import distinct, func
+from sqlalchemy import distinct, func, update
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models.batch_layer import ReviewBatch
@@ -129,18 +129,21 @@ def skip_word(session: Session, batch_id: int, word_id: int, user_id: int) -> No
     if batch.user_id != user_id:
         raise ValueError("无权操作该批次")
 
-    items = (
-        session.query(ReviewItem)
+    # 先验证该词是否在此批次中
+    exists = (
+        session.query(ReviewItem.id)
         .filter_by(batch_id=batch_id, word_id=word_id)
-        .all()
+        .first()
     )
-    if not items:
+    if not exists:
         raise ValueError("该词不在此批次中")
 
-    for item in items:
-        item.batch_id = None
-        item.assigned_to_id = None
-
+    # 批量 UPDATE 替代逐条修改
+    session.execute(
+        update(ReviewItem)
+        .where(ReviewItem.batch_id == batch_id, ReviewItem.word_id == word_id)
+        .values(batch_id=None, assigned_to_id=None)
+    )
     session.flush()
     update_batch_progress(session, batch_id)
 
@@ -206,15 +209,15 @@ def release_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
     if batch.status != BatchStatus.IN_PROGRESS.value:
         raise ValueError("该批次不可释放")
 
-    # 释放所有 PENDING 状态的 ReviewItem
-    pending_items = (
-        session.query(ReviewItem)
-        .filter_by(batch_id=batch_id, status=ReviewStatus.PENDING.value)
-        .all()
+    # 批量释放所有 PENDING 状态的 ReviewItem（直接 UPDATE，省去 SELECT）
+    session.execute(
+        update(ReviewItem)
+        .where(
+            ReviewItem.batch_id == batch_id,
+            ReviewItem.status == ReviewStatus.PENDING.value,
+        )
+        .values(batch_id=None, assigned_to_id=None)
     )
-    for item in pending_items:
-        item.batch_id = None
-        item.assigned_to_id = None
 
     batch.status = BatchStatus.COMPLETED.value
     batch.completed_at = datetime.now(UTC)

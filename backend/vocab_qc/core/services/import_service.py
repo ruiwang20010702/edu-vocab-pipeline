@@ -50,6 +50,10 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
     imported_words: list[Word] = []
     imported_meanings: list[tuple[Word, Meaning]] = []
 
+    # 收集待批量处理的来源和词映射
+    pending_sources: list[tuple[int, str]] = []  # (meaning_id, source_name)
+    pending_word_ids: list[int] = []  # word_ids for PackageWord
+
     for entry in data:
         word_text = entry.get("word", "").strip()
         if not word_text:
@@ -58,6 +62,7 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
         word = _get_or_create_word(session, word_text)
         word_count += 1
         imported_words.append(word)
+        pending_word_ids.append(word.id)
 
         # 音标（IPA）— 从 Excel/JSON 导入
         ipa = entry.get("ipa", "").strip()
@@ -73,24 +78,53 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
             meaning = _find_or_create_meaning(session, word, pos, definition)
             imported_meanings.append((word, meaning))
 
-            # 来源
+            # 收集来源（延迟到循环后批量处理）
             for src_name in m_data.get("sources", []):
-                existing = (
-                    session.query(Source)
-                    .filter_by(meaning_id=meaning.id, source_name=src_name)
-                    .first()
-                )
-                if existing is None:
-                    session.add(Source(meaning_id=meaning.id, source_name=src_name))
+                pending_sources.append((meaning.id, src_name))
 
-        # 包-词映射（每个词一条，去重）
-        existing_pw = (
-            session.query(PackageWord)
-            .filter_by(package_id=package.id, word_id=word.id)
-            .first()
-        )
-        if existing_pw is None:
-            session.add(PackageWord(package_id=package.id, word_id=word.id))
+    # 批量去重 Source：一次查询已有的 → add_all 新增的
+    if pending_sources:
+        # 分批查询已存在的 (meaning_id, source_name) 对
+        existing_source_pairs: set[tuple[int, str]] = set()
+        unique_meaning_ids = list({mid for mid, _ in pending_sources})
+        for i in range(0, len(unique_meaning_ids), 900):
+            chunk = unique_meaning_ids[i:i + 900]
+            for row in session.query(Source.meaning_id, Source.source_name).filter(
+                Source.meaning_id.in_(chunk),
+            ).all():
+                existing_source_pairs.add((row[0], row[1]))
+
+        new_sources = []
+        seen_pairs: set[tuple[int, str]] = set()
+        for mid, sname in pending_sources:
+            pair = (mid, sname)
+            if pair not in existing_source_pairs and pair not in seen_pairs:
+                new_sources.append(Source(meaning_id=mid, source_name=sname))
+                seen_pairs.add(pair)
+        if new_sources:
+            session.add_all(new_sources)
+
+    # 批量去重 PackageWord：一次查询已有的 → add_all 新增的
+    if pending_word_ids:
+        existing_pw_word_ids: set[int] = set()
+        for i in range(0, len(pending_word_ids), 900):
+            chunk = pending_word_ids[i:i + 900]
+            existing_pw_word_ids.update(
+                row[0] for row in session.query(PackageWord.word_id).filter(
+                    PackageWord.package_id == package.id,
+                    PackageWord.word_id.in_(chunk),
+                ).all()
+            )
+        new_pws = []
+        seen_word_ids: set[int] = set()
+        for wid in pending_word_ids:
+            if wid not in existing_pw_word_ids and wid not in seen_word_ids:
+                new_pws.append(PackageWord(package_id=package.id, word_id=wid))
+                seen_word_ids.add(wid)
+        if new_pws:
+            session.add_all(new_pws)
+
+    session.flush()
 
     # 创建 ContentItem 占位记录（chunk/sentence/mnemonic 均按义项）
     _create_content_placeholders(session, imported_words, imported_meanings)
@@ -378,41 +412,46 @@ def _create_content_placeholders(
 
     per_meaning_dims = ("chunk", "sentence", *MNEMONIC_DIMENSIONS)
 
+    # 批量预查已存在的 ContentItem (word_id, meaning_id, dimension) 三元组
+    all_word_ids = list({w.id for w in words})
+    existing_triples: set[tuple[int, int | None, str]] = set()
+
+    for i in range(0, len(all_word_ids), 900):
+        chunk = all_word_ids[i:i + 900]
+        for row in session.query(
+            ContentItem.word_id, ContentItem.meaning_id, ContentItem.dimension,
+        ).filter(ContentItem.word_id.in_(chunk)).all():
+            existing_triples.add((row[0], row[1], row[2]))
+
+    new_items: list[ContentItem] = []
+
     for word, meaning in meanings:
         for dim in per_meaning_dims:
-            exists = (
-                session.query(ContentItem)
-                .filter_by(word_id=word.id, meaning_id=meaning.id, dimension=dim)
-                .first()
-            )
-            if exists is None:
-                session.add(
-                    ContentItem(
-                        word_id=word.id,
-                        meaning_id=meaning.id,
-                        dimension=dim,
-                        content="",
-                        qc_status=QcStatus.PENDING.value,
-                    )
-                )
+            if (word.id, meaning.id, dim) not in existing_triples:
+                new_items.append(ContentItem(
+                    word_id=word.id,
+                    meaning_id=meaning.id,
+                    dimension=dim,
+                    content="",
+                    qc_status=QcStatus.PENDING.value,
+                ))
+                existing_triples.add((word.id, meaning.id, dim))
 
     # 词级维度: syllable（每个单词一条，meaning_id=None）
     for word in words:
-        exists = (
-            session.query(ContentItem)
-            .filter_by(word_id=word.id, dimension="syllable", meaning_id=None)
-            .first()
-        )
-        if exists is None:
-            session.add(
-                ContentItem(
-                    word_id=word.id,
-                    meaning_id=None,
-                    dimension="syllable",
-                    content="",
-                    qc_status=QcStatus.PENDING.value,
-                )
-            )
+        if (word.id, None, "syllable") not in existing_triples:
+            new_items.append(ContentItem(
+                word_id=word.id,
+                meaning_id=None,
+                dimension="syllable",
+                content="",
+                qc_status=QcStatus.PENDING.value,
+            ))
+            existing_triples.add((word.id, None, "syllable"))
+
+    if new_items:
+        session.add_all(new_items)
+        session.flush()
 
 
 def _upsert_phonetic_ipa(session: Session, word: Word, ipa: str) -> None:

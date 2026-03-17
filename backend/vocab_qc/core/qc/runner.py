@@ -80,7 +80,9 @@ class Layer1Runner:
 
         passed_count = 0
         failed_count = 0
+        all_results: list[QcRuleResult] = []
 
+        # Phase A+B: 批量检查所有 item，收集结果
         for item in items:
             word_text = word_texts.get(item.word_id, "")
             meaning_text = meaning_texts.get(item.meaning_id, "") if item.meaning_id else None
@@ -88,9 +90,9 @@ class Layer1Runner:
 
             check_result = self.check_item(item, word_text, meaning_text, **extra)
 
-            # 写入规则结果
+            # 收集规则结果对象
             for rule_result in check_result.results:
-                qc_rule_result = QcRuleResult(
+                all_results.append(QcRuleResult(
                     content_item_id=item.id,
                     word_id=item.word_id,
                     meaning_id=item.meaning_id,
@@ -100,8 +102,7 @@ class Layer1Runner:
                     passed=rule_result.passed,
                     detail=rule_result.detail,
                     run_id=run_id,
-                )
-                session.add(qc_rule_result)
+                ))
 
             # 更新内容项状态
             if check_result.all_passed:
@@ -112,7 +113,9 @@ class Layer1Runner:
                 failed_count += 1
             item.last_qc_run_id = run_id
 
-        # 更新运行记录
+        # Phase C: 批量写入所有结果 + 更新运行记录
+        session.add_all(all_results)
+
         qc_run.passed_items = passed_count
         qc_run.failed_items = failed_count
         qc_run.finished_at = datetime.now(UTC)

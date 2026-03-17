@@ -142,7 +142,7 @@ class TestLayer2Failure:
 
         # 第二次入队（同一 run_id），不应重复创建
         count2 = qc_service.enqueue_layer2_failed_for_review(db_session, run_id)
-        assert count2 == 1  # create_review_item 内部防重复
+        assert count2 == 0  # 批量去重：已有 pending 项，不重复创建
 
         total = db_session.query(ReviewItem).filter_by(content_item_id=item.id).count()
         assert total == 1
