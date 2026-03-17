@@ -12,10 +12,17 @@ from typing import Any, Optional
 
 import httpx
 
+from vocab_qc.core.circuit_breaker import CircuitBreaker
 from vocab_qc.core.config import settings
 from vocab_qc.core.generators import _find_project_root
 
 logger = logging.getLogger(__name__)
+
+# 生成器共享熔断器（模块级单例）
+_generator_circuit_breaker = CircuitBreaker(
+    failure_threshold=settings.ai_circuit_breaker_threshold,
+    recovery_timeout=settings.ai_circuit_breaker_recovery,
+)
 
 
 class AiRequestError(Exception):
@@ -512,17 +519,25 @@ class ContentGenerator:
         if not actual_key or not actual_url:
             return {}
 
+        if not _generator_circuit_breaker.allow_request():
+            raise AiRequestError("circuit_open", detail="熔断器已打开，跳过调用")
+
         last_error = None
         for attempt in range(settings.ai_max_retries):
             try:
-                return self._do_request(actual_url, actual_key, actual_model, system_prompt, user_prompt)
+                result = self._do_request(actual_url, actual_key, actual_model, system_prompt, user_prompt)
+                _generator_circuit_breaker.record_success()
+                return result
             except Exception as e:
                 last_error = e
+                _generator_circuit_breaker.record_failure()
                 logger.warning(
                     "AI 调用失败 [%s] attempt=%d/%d: %s",
                     actual_model, attempt + 1, settings.ai_max_retries, e,
                 )
                 if attempt < settings.ai_max_retries - 1:
+                    if not _generator_circuit_breaker.allow_request():
+                        raise AiRequestError("circuit_open", detail="熔断器已打开，跳过调用") from e
                     time.sleep(2**attempt + random.uniform(0, 1))
 
         raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")
@@ -542,6 +557,9 @@ class ContentGenerator:
 
         if not actual_key or not actual_url:
             return {}
+
+        if not _generator_circuit_breaker.allow_request():
+            raise AiRequestError("circuit_open", detail="熔断器已打开，跳过调用")
 
         self._validate_url(actual_url)
 
@@ -578,7 +596,9 @@ class ContentGenerator:
 
                 content = _strip_markdown_fences(self._parse_response(data))
                 try:
-                    return json.loads(content)
+                    result = json.loads(content)
+                    _generator_circuit_breaker.record_success()
+                    return result
                 except json.JSONDecodeError as e:
                     raise AiRequestError(
                         "parse_error", elapsed_ms=elapsed,
@@ -586,11 +606,14 @@ class ContentGenerator:
                     ) from e
             except Exception as e:
                 last_error = e
+                _generator_circuit_breaker.record_failure()
                 logger.warning(
                     "AI 调用失败 [%s] attempt=%d/%d: %s",
                     actual_model, attempt + 1, settings.ai_max_retries, e,
                 )
                 if attempt < settings.ai_max_retries - 1:
+                    if not _generator_circuit_breaker.allow_request():
+                        raise AiRequestError("circuit_open", detail="熔断器已打开，跳过调用") from e
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
 
         raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")

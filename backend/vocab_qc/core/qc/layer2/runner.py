@@ -51,11 +51,13 @@ class Layer2Runner:
         """从 DB 加载质检维度的 AI 配置，为不同维度创建独立 AiClient。"""
         from vocab_qc.core.services.prompt_service import get_active_prompt
 
+        from vocab_qc.core.config import settings as _settings
+
         for dim in self._unified_checkers:
             prompt = get_active_prompt(session, "quality", dim)
-            if prompt and (prompt.ai_api_key or prompt.ai_api_base_url or prompt.model):
+            if prompt and (prompt.ai_api_base_url or prompt.model):
                 self._dimension_clients[dim] = AiClient(
-                    api_key=prompt.ai_api_key,
+                    api_key=_settings.ai_api_key,
                     base_url=prompt.ai_api_base_url,
                     model=prompt.model,
                 )

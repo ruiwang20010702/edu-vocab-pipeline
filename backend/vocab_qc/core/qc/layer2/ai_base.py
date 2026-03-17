@@ -3,12 +3,14 @@
 import asyncio
 import json
 import logging
+import random
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import httpx
 
+from vocab_qc.core.circuit_breaker import CircuitBreaker
 from vocab_qc.core.config import settings
 from vocab_qc.core.generators.base import (
     AiRequestError,
@@ -49,6 +51,10 @@ class AiClient:
         self.model = model if model is not None else settings.ai_model
         self.max_retries = max_retries
         self._max_concurrency = max_concurrency
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=settings.ai_circuit_breaker_threshold,
+            recovery_timeout=settings.ai_circuit_breaker_recovery,
+        )
         self._semaphore: asyncio.Semaphore | None = None
         self._semaphore_loop: asyncio.AbstractEventLoop | None = None
         self._http_client: httpx.AsyncClient | None = None
@@ -82,18 +88,26 @@ class AiClient:
             return await self._call_with_retry(system_prompt, user_prompt)
 
     async def _call_with_retry(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+        if not self._circuit_breaker.allow_request():
+            raise AiRequestError("circuit_open", detail="质检熔断器已打开，跳过调用")
+
         last_error = None
         for attempt in range(self.max_retries):
             try:
-                return await self._call_api(system_prompt, user_prompt)
+                result = await self._call_api(system_prompt, user_prompt)
+                self._circuit_breaker.record_success()
+                return result
             except Exception as e:
                 last_error = e
+                self._circuit_breaker.record_failure()
                 logger.warning(
                     "AI 质检调用失败 [%s] attempt=%d/%d: %s",
                     self.model, attempt + 1, self.max_retries, e,
                 )
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(2**attempt)
+                    if not self._circuit_breaker.allow_request():
+                        raise AiRequestError("circuit_open", detail="质检熔断器已打开，跳过调用") from e
+                    await asyncio.sleep(2**attempt + random.uniform(0, 1))
         raise RuntimeError(f"AI API 调用失败（{self.max_retries}次重试后）: {last_error}")
 
     async def _call_api(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:

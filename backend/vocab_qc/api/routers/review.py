@@ -1,7 +1,6 @@
 """审核 API 路由."""
 
 import logging
-import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -22,21 +21,8 @@ from vocab_qc.api.schemas.review import (
 )
 from vocab_qc.core.models import ContentItem, QcRuleResult, Word
 from vocab_qc.core.models.user import User
+from vocab_qc.core.security import reject_html_input
 from vocab_qc.core.services.review_service import ReviewService
-
-_HTML_TAG_RE = re.compile(r"<\s*/?[a-zA-Z][^>]*>")
-_HTML_ENTITY_RE = re.compile(r"&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);")
-_EVENT_HANDLER_RE = re.compile(r"\bon\w+\s*=", re.IGNORECASE)
-
-
-def _reject_html(text: Optional[str], field_name: str = "content") -> None:
-    """拒绝包含 HTML 标签、实体编码或事件处理器的输入，防止 XSS。"""
-    if not text:
-        return
-    if _HTML_TAG_RE.search(text) or _EVENT_HANDLER_RE.search(text):
-        raise HTTPException(status_code=400, detail=f"{field_name} 不允许包含 HTML 标签")
-    if _HTML_ENTITY_RE.search(text):
-        raise HTTPException(status_code=400, detail=f"{field_name} 不允许包含 HTML 实体编码")
 
 
 logger = logging.getLogger(__name__)
@@ -203,8 +189,8 @@ def manual_edit(
     current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """人工修改 + 自动质检."""
-    _reject_html(request.content, "content")
-    _reject_html(request.content_cn, "content_cn")
+    reject_html_input(request.content, "content")
+    reject_html_input(request.content_cn, "content_cn")
     try:
         result = service.manual_edit(
             db,

@@ -3,7 +3,17 @@
 import csv
 import io
 import json
+import logging
 from typing import Any
+
+_logger = logging.getLogger(__name__)
+
+# 字段长度限制
+_MAX_WORD_LEN = 100
+_MAX_POS_LEN = 20
+_MAX_DEFINITION_LEN = 500
+_MAX_SOURCE_LEN = 200
+_MAX_IPA_LEN = 200
 
 from sqlalchemy.orm import Session
 
@@ -12,6 +22,14 @@ from vocab_qc.core.models.data_layer import Meaning, Phonetic, Source, Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import RetryCounter, ReviewItem
+
+
+def _truncate_field(value: str, max_len: int, field_name: str, word: str) -> str:
+    """截断超长字段并记录警告。"""
+    if len(value) > max_len:
+        _logger.warning("字段 %s 超长截断 (len=%d>%d) word=%s", field_name, len(value), max_len, word)
+        return value[:max_len]
+    return value
 
 
 def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: str, *, force: bool = False) -> dict:
@@ -94,12 +112,15 @@ def _parse_csv_text(text: str) -> list[dict[str, Any]]:
         word = row.get("word", "").strip()
         if not word:
             continue
+        if len(word) > _MAX_WORD_LEN:
+            _logger.warning("CSV 跳过超长单词 (len=%d): %s...", len(word), word[:30])
+            continue
         if word not in entries:
             entries[word] = {"word": word, "meanings": []}
-        pos = row.get("pos", "").strip()
-        definition = row.get("definition", "").strip()
-        source = row.get("source", "").strip()
-        ipa = row.get("ipa", "").strip()
+        pos = _truncate_field(row.get("pos", "").strip(), _MAX_POS_LEN, "pos", word)
+        definition = _truncate_field(row.get("definition", "").strip(), _MAX_DEFINITION_LEN, "definition", word)
+        source = _truncate_field(row.get("source", "").strip(), _MAX_SOURCE_LEN, "source", word)
+        ipa = _truncate_field(row.get("ipa", "").strip(), _MAX_IPA_LEN, "ipa", word)
         if ipa and not entries[word].get("ipa"):
             entries[word]["ipa"] = ipa
         if pos and definition:
@@ -158,12 +179,27 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
         word = str(row[col_map["word"]] or "").strip()
         if not word:
             continue
+        if len(word) > _MAX_WORD_LEN:
+            _logger.warning("Excel 跳过超长单词 (len=%d): %s...", len(word), word[:30])
+            continue
         if word not in entries:
             entries[word] = {"word": word, "meanings": []}
-        pos = str(row[col_map.get("pos", -1)] or "").strip() if "pos" in col_map else ""
-        definition = str(row[col_map.get("definition", -1)] or "").strip() if "definition" in col_map else ""
-        source = str(row[col_map.get("source", -1)] or "").strip() if "source" in col_map else ""
-        ipa = str(row[col_map.get("ipa", -1)] or "").strip() if "ipa" in col_map else ""
+        pos = _truncate_field(
+            str(row[col_map.get("pos", -1)] or "").strip() if "pos" in col_map else "",
+            _MAX_POS_LEN, "pos", word,
+        )
+        definition = _truncate_field(
+            str(row[col_map.get("definition", -1)] or "").strip() if "definition" in col_map else "",
+            _MAX_DEFINITION_LEN, "definition", word,
+        )
+        source = _truncate_field(
+            str(row[col_map.get("source", -1)] or "").strip() if "source" in col_map else "",
+            _MAX_SOURCE_LEN, "source", word,
+        )
+        ipa = _truncate_field(
+            str(row[col_map.get("ipa", -1)] or "").strip() if "ipa" in col_map else "",
+            _MAX_IPA_LEN, "ipa", word,
+        )
         if ipa and not entries[word].get("ipa"):
             entries[word]["ipa"] = ipa
         if pos and definition:

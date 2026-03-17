@@ -126,7 +126,6 @@ def create_prompt(session: Session, data: dict, user_id: Optional[int] = None) -
         dimension=data["dimension"],
         model=data.get("model", _model_for_dimension(data["dimension"])),
         content=data.get("content", ""),
-        ai_api_key=data.get("ai_api_key"),
         ai_api_base_url=data.get("ai_api_base_url"),
         created_by=user_id,
     )
@@ -139,7 +138,7 @@ def update_prompt(session: Session, prompt_id: int, data: dict) -> Optional[Prom
     prompt = session.query(Prompt).filter_by(id=prompt_id).first()
     if prompt is None:
         return None
-    for field in ("name", "model", "content", "is_active", "ai_api_key", "ai_api_base_url"):
+    for field in ("name", "model", "content", "is_active", "ai_api_base_url"):
         if field in data:
             setattr(prompt, field, data[field])
     # PM-H3: 用户手动编辑 content 后标记 source="manual"

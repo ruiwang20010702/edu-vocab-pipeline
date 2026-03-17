@@ -3,6 +3,7 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from vocab_qc.core.cache import TTLCache
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Word
 from vocab_qc.core.models.enums import QcStatus
@@ -10,6 +11,15 @@ from vocab_qc.core.models.quality_layer import QcRuleResult
 
 # 终态集合：approved 或 rejected
 _TERMINAL_STATUSES = [QcStatus.APPROVED.value, QcStatus.REJECTED.value]
+
+# Stats 缓存（10s TTL，减少前端轮询对数据库的压力）
+stats_cache = TTLCache(default_ttl=10.0)
+_STATS_CACHE_KEY = "dashboard_stats"
+
+
+def invalidate_stats_cache() -> None:
+    """主动失效 stats 缓存（导入/生产/审核等写操作后调用）。"""
+    stats_cache.invalidate(_STATS_CACHE_KEY)
 
 
 def get_dashboard_stats(session: Session) -> dict:
@@ -20,6 +30,10 @@ def get_dashboard_stats(session: Session) -> dict:
     - 待处理(pending_count) = total_words - approved_count（存在非终态项的词数）
     - 未通过(rejected_count) = 存在 layer1/2_failed 项的词数（信息性统计）
     """
+    cached = stats_cache.get(_STATS_CACHE_KEY)
+    if cached is not None:
+        return cached
+
     total_words = session.query(func.count()).select_from(Word).scalar() or 0
 
     # 已入库 = 有 ContentItem 且全部为终态的词数
@@ -80,7 +94,7 @@ def get_dashboard_stats(session: Session) -> dict:
         for row in issue_rows
     ]
 
-    return {
+    result = {
         "total_words": total_words,
         "approved_count": approved_count,
         "pending_count": pending_count,
@@ -88,3 +102,5 @@ def get_dashboard_stats(session: Session) -> dict:
         "pass_rate": pass_rate,
         "issues": issues,
     }
+    stats_cache.set(_STATS_CACHE_KEY, result)
+    return result

@@ -179,12 +179,14 @@ def manual_edit_content_item(
 
     old_content = item.content
 
-    # 基本 HTML 标签过滤（防止 XSS 存储攻击）
-    import re
-    clean_content = re.sub(r"<[^>]+>", "", body.content)
+    # XSS 防护：拒绝包含 HTML 的输入
+    from vocab_qc.core.security import reject_html_input
+    reject_html_input(body.content, "content")
+    if body.content_cn is not None:
+        reject_html_input(body.content_cn, "content_cn")
 
     # 写入用户提供的内容
-    item.content = clean_content
+    item.content = body.content
     if body.content_cn is not None:
         item.content_cn = body.content_cn
     item.qc_status = QcStatus.PENDING.value

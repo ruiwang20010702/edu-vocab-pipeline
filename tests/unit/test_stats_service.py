@@ -1,10 +1,19 @@
 """stats_service 单元测试."""
 
+import pytest
+
 from vocab_qc.core.models import ContentItem, QcStatus, Word
 from vocab_qc.core.services import stats_service
+from vocab_qc.core.services.stats_service import invalidate_stats_cache
 
 
 class TestGetDashboardStats:
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        invalidate_stats_cache()
+        yield
+        invalidate_stats_cache()
+
     def test_empty_db(self, db_session):
         result = stats_service.get_dashboard_stats(db_session)
         assert result["total_words"] == 0

@@ -22,9 +22,19 @@ def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode()).hexdigest()
 
 
+_warned_empty_whitelist = False
+
+
 def validate_email_domain(email: str) -> bool:
-    """检查邮箱是否在白名单域名中。白名单为空时允许所有域名。"""
+    """检查邮箱是否在白名单域名中。白名单为空时允许所有域名（并发出警告）。"""
+    global _warned_empty_whitelist  # noqa: PLW0603
     if not settings.allowed_email_domains:
+        if not _warned_empty_whitelist:
+            import logging
+            logging.getLogger(__name__).warning(
+                "ALLOWED_EMAIL_DOMAINS 为空，所有邮箱域名均可注册登录"
+            )
+            _warned_empty_whitelist = True
         return True
     domain = email.split("@")[-1]
     return domain in settings.allowed_email_domains

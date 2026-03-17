@@ -2,6 +2,8 @@
 
 import logging
 from contextlib import asynccontextmanager
+from logging.handlers import QueueHandler, QueueListener
+from queue import Queue
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,9 +20,21 @@ from vocab_qc.core.config import _INSECURE_JWT_SECRETS, settings, validate_produ
 logger = logging.getLogger(__name__)
 
 
+def _setup_async_logging() -> QueueListener:
+    """将日志写入队列，后台线程异步消费，避免 I/O 阻塞请求线程。"""
+    log_queue: Queue = Queue(-1)
+    root = logging.getLogger()
+    original_handlers = root.handlers[:]
+    root.handlers = [QueueHandler(log_queue)]
+    listener = QueueListener(log_queue, *original_handlers, respect_handler_level=True)
+    listener.start()
+    return listener
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- startup ---
+    log_listener = _setup_async_logging()
     if settings.jwt_secret_key in _INSECURE_JWT_SECRETS:
         if settings.env == "production":
             raise RuntimeError(
@@ -52,12 +66,14 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # --- shutdown: 关闭共享 HTTP 客户端 ---
+    # --- shutdown ---
     try:
         from vocab_qc.core.generators.base import close_http_clients
         await close_http_clients()
     except Exception:
         logger.warning("关闭 HTTP 客户端失败", exc_info=True)
+
+    log_listener.stop()
 
 
 _docs_kwargs = (
@@ -108,7 +124,8 @@ app.include_router(prompt.router)
 
 
 @app.get("/health")
-def health(db: Session = Depends(get_db)):
+@auth.limiter.limit("30/minute")
+def health(request: Request, db: Session = Depends(get_db)):
     """健康检查（含数据库探测）。"""
     try:
         db.execute(text("SELECT 1"))

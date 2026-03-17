@@ -269,10 +269,11 @@ class TestAiClientBackoff:
                 with pytest.raises(RuntimeError):
                     await client.check("sys", "usr")
 
-        # 3次重试：第0次失败 sleep(1)，第1次失败 sleep(2)，第2次失败不 sleep
+        # 3次重试：第0次失败 sleep(2**0 + jitter)，第1次失败 sleep(2**1 + jitter)，第2次失败不 sleep
         assert mock_sleep.call_count == 2
         sleep_args = [c.args[0] for c in mock_sleep.call_args_list]
-        assert sleep_args == [1, 2]  # 2**0, 2**1
+        assert 1.0 <= sleep_args[0] < 2.0  # 2**0 + uniform(0,1)
+        assert 2.0 <= sleep_args[1] < 3.0  # 2**1 + uniform(0,1)
 
     @pytest.mark.asyncio
     async def test_no_sleep_on_first_successful_call(self):

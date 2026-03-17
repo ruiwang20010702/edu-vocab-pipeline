@@ -9,6 +9,7 @@ from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
+from vocab_qc.api.routers.auth import limiter
 from vocab_qc.core.db import Base
 from vocab_qc.core.models import ContentItem, Meaning, Package, Phonetic, ReviewItem, Word
 from vocab_qc.core.models.user import User
@@ -81,10 +82,12 @@ def _make_app(role: str):
 @pytest.fixture(params=["admin", "reviewer", "viewer"])
 def role_client(request):
     role = request.param
+    limiter.enabled = False
     client, engine = _make_app(role)
     yield role, client
     app.dependency_overrides.clear()
     engine.dispose()
+    limiter.enabled = True
 
 
 @pytest.fixture
