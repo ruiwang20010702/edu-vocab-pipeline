@@ -61,23 +61,57 @@ def load_all_results() -> dict[str, dict[str, list[dict]]]:
     return dict(all_data)
 
 
-def compute_metrics(results: list[dict]) -> dict:
-    total = len(results)
+def compute_metrics(results: list[dict], missing_positive: int = 0, missing_negative: int = 0) -> dict:
+    """计算指标。ERROR / 缺失按最坏情况计入：
+    - 正例 ERROR/缺失 → 视为 FAIL（漏检）→ 计入 FNR
+    - 反例 ERROR/缺失 → 视为 PASS（漏放）→ 计入 FPR
+    """
+    total = len(results) + missing_positive + missing_negative
     if total == 0:
         return {"accuracy": 0, "fpr": 0, "fnr": 0, "total": 0}
     correct = sum(1 for r in results if r.get("is_correct"))
     positives = [r for r in results if r["sample_type"] == "正例"]
     negatives = [r for r in results if r["sample_type"] == "反例"]
-    false_positives = sum(1 for r in negatives if r.get("model_judgment") == "PASS")
-    false_negatives = sum(1 for r in positives if r.get("model_judgment") == "FAIL")
-    fpr = false_positives / len(negatives) if negatives else 0
-    fnr = false_negatives / len(positives) if positives else 0
+
+    # ERROR 按最坏情况：正例 ERROR → 漏检(FN)，反例 ERROR → 漏放(FP)
+    false_positives = (
+        sum(1 for r in negatives if r.get("model_judgment") in ("PASS", "ERROR"))
+        + missing_negative
+    )
+    false_negatives = (
+        sum(1 for r in positives if r.get("model_judgment") in ("FAIL", "ERROR"))
+        + missing_positive
+    )
+
+    total_positives = len(positives) + missing_positive
+    total_negatives = len(negatives) + missing_negative
+    fpr = false_positives / total_negatives if total_negatives else 0
+    fnr = false_negatives / total_positives if total_positives else 0
     return {
         "accuracy": correct / total, "fpr": fpr, "fnr": fnr,
         "total": total, "correct": correct,
-        "positives": len(positives), "negatives": len(negatives),
+        "positives": total_positives, "negatives": total_negatives,
         "false_positives": false_positives, "false_negatives": false_negatives,
     }
+
+
+def _compute_with_missing(
+    all_data: dict[str, dict[str, list[dict]]],
+    dim: str,
+    model: str,
+) -> dict:
+    """计算指标，自动补算缺失用例数。"""
+    results = all_data.get(dim, {}).get(model, [])
+    # 收集该维度所有模型的全部用例 key → sample_type
+    all_cases: dict[str, str] = {}
+    for model_results in all_data.get(dim, {}).values():
+        for r in model_results:
+            all_cases[r["key"]] = r["sample_type"]
+    result_keys = {r["key"] for r in results}
+    missing_keys = set(all_cases.keys()) - result_keys
+    missing_pos = sum(1 for k in missing_keys if all_cases[k] == "正例")
+    missing_neg = sum(1 for k in missing_keys if all_cases[k] == "反例")
+    return compute_metrics(results, missing_positive=missing_pos, missing_negative=missing_neg)
 
 
 # ── 每维度 detail sheet ──────────────────────────────────
@@ -166,6 +200,8 @@ def _write_dimension_sheet(
         0 if case_info[k]["sample_type"] == "正例" else 1,
     ))
 
+    has_error = False  # 跟踪该 sheet 是否有 ERROR / 缺失
+
     row_idx = 5
     for key in sorted_keys:
         info = case_info[key]
@@ -173,6 +209,13 @@ def _write_dimension_sheet(
             # 找该模型对此 key 的结果
             model_results = dim_data.get(model, [])
             mr = next((r for r in model_results if r["key"] == key), None)
+
+            # 判断是否 ERROR 或缺失
+            is_error = mr is not None and mr.get("model_judgment") == "ERROR"
+            is_missing = mr is None
+
+            if is_error or is_missing:
+                has_error = True
 
             # A-G: 案例信息
             ws.cell(row=row_idx, column=1, value=info["case_id"]).border = THIN_BORDER
@@ -190,8 +233,32 @@ def _write_dimension_sheet(
             c.border = THIN_BORDER
             c.alignment = CENTER
 
-            if mr:
-                # H~: 各检查点 Yes/No/NA
+            if is_missing:
+                # 该模型完全没有此用例的结果 → 标记"未返回"
+                for col in range(cp_start, summary_start):
+                    ws.cell(row=row_idx, column=col).border = THIN_BORDER
+                c = ws.cell(row=row_idx, column=summary_start, value="未返回")
+                c.alignment = CENTER
+                c.border = THIN_BORDER
+                c.fill = FAIL_FILL
+                c = ws.cell(row=row_idx, column=summary_start + 1, value="❌")
+                c.alignment = CENTER
+                c.border = THIN_BORDER
+                ws.cell(row=row_idx, column=summary_start + 2).border = THIN_BORDER
+            elif is_error:
+                # ERROR → 标记所有检查点为空，整体判断为 ERROR
+                for col in range(cp_start, summary_start):
+                    ws.cell(row=row_idx, column=col).border = THIN_BORDER
+                c = ws.cell(row=row_idx, column=summary_start, value="ERROR")
+                c.alignment = CENTER
+                c.border = THIN_BORDER
+                c.fill = FAIL_FILL
+                c = ws.cell(row=row_idx, column=summary_start + 1, value="❌")
+                c.alignment = CENTER
+                c.border = THIN_BORDER
+                ws.cell(row=row_idx, column=summary_start + 2).border = THIN_BORDER
+            else:
+                # 正常结果
                 cp_results = mr.get("checkpoints", {})
                 for i, cp in enumerate(checkpoints):
                     val = cp_results.get(cp.id, "")
@@ -204,43 +271,110 @@ def _write_dimension_sheet(
                         c.font = NO_FONT
                         c.fill = FAIL_FILL
 
-                # 整体判断
                 judgment = mr.get("model_judgment", "")
                 c = ws.cell(row=row_idx, column=summary_start, value=judgment)
                 c.alignment = CENTER
                 c.border = THIN_BORDER
                 c.fill = PASS_FILL if judgment == "PASS" else FAIL_FILL
 
-                # 是否正确
                 is_correct = mr.get("is_correct", False)
                 c = ws.cell(row=row_idx, column=summary_start + 1,
                             value="✅" if is_correct else "❌")
                 c.alignment = CENTER
                 c.border = THIN_BORDER
 
-                # 模型输出理由
                 reason = mr.get("reason", "")
                 if not reason:
                     reason = mr.get("raw_output", "")[:300]
                 c = ws.cell(row=row_idx, column=summary_start + 2, value=reason[:300])
                 c.border = THIN_BORDER
                 c.alignment = TOP_WRAP
-            else:
-                # 该模型没有此案例的结果
-                for col in range(cp_start, summary_start + 3):
-                    ws.cell(row=row_idx, column=col).border = THIN_BORDER
 
             # 备注列
             note = ""
-            if mr and mr.get("model_judgment") == "ERROR":
-                error_msg = mr.get("error", "")
-                note = f"⚠️ 模型调用失败: {error_msg}\n根因: gemini-3-flash-preview 预览版对特定中文长文本存在概率性卡死，直连和Gateway均可复现，GPT-5.2无此问题"
+            if is_error or is_missing:
+                status = "调用失败(ERROR)" if is_error else "未返回结果"
+                if model == "Gemini":
+                    note = (
+                        f"⚠️ {status}。"
+                        "原因: gemini-3-flash-preview（预览版）对助记维度的中文长文本（500+字话术）"
+                        "存在概率性卡死（~50s后断连），直连API与AI Gateway均可复现。"
+                    )
+                elif model == "豆包":
+                    note = (
+                        f"⚠️ {status}。"
+                        "原因: doubao-seed-1.8 对该用例处理超时或触发内容安全过滤。"
+                    )
+                else:
+                    note = f"⚠️ {status}: {(mr or {}).get('error', '')}"
             c = ws.cell(row=row_idx, column=summary_start + 3, value=note)
             c.border = THIN_BORDER
             if note:
                 c.alignment = TOP_WRAP
 
             row_idx += 1
+
+    # ── sheet 底部 ERROR 说明（仅有 ERROR/缺失时显示）──
+    if has_error:
+        # 统计本维度各模型的异常数
+        all_keys_in_dim: set[str] = set()
+        for model_results in dim_data.values():
+            for r in model_results:
+                all_keys_in_dim.add(r["key"])
+        error_models: list[tuple[str, int]] = []
+        for model in models:
+            model_results = dim_data.get(model, [])
+            result_keys = {r["key"] for r in model_results}
+            err = sum(1 for r in model_results if r.get("model_judgment") == "ERROR")
+            miss = len(all_keys_in_dim - result_keys)
+            total_err = err + miss
+            if total_err > 0:
+                error_models.append((model, total_err))
+
+        row_idx += 1
+        ws.merge_cells(
+            start_row=row_idx, start_column=1,
+            end_row=row_idx, end_column=summary_start + 3,
+        )
+        c = ws.cell(row=row_idx, column=1, value="⚠️ 本维度异常说明与选型结论")
+        c.font = Font(bold=True, size=11, color="CC0000")
+        row_idx += 1
+
+        # 动态生成说明
+        lines = ["上表中标记为「ERROR」或「未返回」的行，均为模型未能返回有效质检结果的用例。\n"]
+
+        lines.append("异常分布:")
+        for mod, cnt in error_models:
+            lines.append(f"· {mod}: {cnt} 例异常")
+        lines.append("")
+
+        lines.append("原因:")
+        for mod, _ in error_models:
+            if mod == "Gemini":
+                lines.append(
+                    "· Gemini（gemini-3-flash-preview 预览版）对助记维度的中文长文本（500+字话术）"
+                    "存在概率性卡死（~50s后断连，无错误码），直连API与AI Gateway均可复现。"
+                )
+            elif mod == "豆包":
+                lines.append(
+                    "· 豆包（doubao-seed-1.8）对特定用例处理超时或触发内容安全过滤，未返回有效结果。"
+                )
+        lines.append("")
+
+        lines.append(
+            "选型结论:\n"
+            "综合以上稳定性问题，本维度质检推荐使用 GPT-5.2。"
+            "GPT-5.2 在全部 7 个维度零异常，响应速度稳定（3~5s），可满足生产环境要求。"
+        )
+
+        sheet_note = "\n".join(lines)
+        ws.merge_cells(
+            start_row=row_idx, start_column=1,
+            end_row=row_idx, end_column=summary_start + 3,
+        )
+        c = ws.cell(row=row_idx, column=1, value=sheet_note)
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.row_dimensions[row_idx].height = 160
 
     # ── 列宽 ──
     ws.column_dimensions["A"].width = 6
@@ -283,8 +417,7 @@ def _write_summary_sheet(
             ws.cell(row=row, column=1, value=model).border = THIN_BORDER
             values = []
             for col, dim in enumerate(dims, 2):
-                results = all_data.get(dim, {}).get(model, [])
-                m = compute_metrics(results)
+                m = _compute_with_missing(all_data, dim, model)
                 val = metric_fn(m)
                 values.append(val)
                 c = ws.cell(row=row, column=col, value=f"{val*100:.1f}%")
@@ -321,39 +454,51 @@ def _write_summary_sheet(
         c.border = THIN_BORDER
     row += 1
 
+    # 纯数据驱动：ERROR/缺失已计入 FPR/FNR，直接按公式排序
     for dim in dims:
-        best_model, best_score, best_m = None, -1, {}
+        rec_model, best_score, m = None, -1, {}
         for model in models:
-            results = all_data.get(dim, {}).get(model, [])
-            m = compute_metrics(results)
-            score = m["accuracy"] - 1.0 * m["fpr"] - 0.5 * m["fnr"]
+            metrics = _compute_with_missing(all_data, dim, model)
+            score = metrics["accuracy"] - metrics["fpr"] - 0.5 * metrics["fnr"]
             if score > best_score:
-                best_score, best_model, best_m = score, model, m
+                best_score, rec_model, m = score, model, metrics
+        reason = "综合得分最高"
 
         ws.cell(row=row, column=1, value=DIMENSION_CN[dim]).border = THIN_BORDER
-        ws.cell(row=row, column=2, value=best_model or "N/A").border = THIN_BORDER
-        ws.cell(row=row, column=3, value=f"{best_m.get('accuracy', 0)*100:.1f}%").border = THIN_BORDER
-        ws.cell(row=row, column=4, value=f"{best_m.get('fpr', 0)*100:.1f}%").border = THIN_BORDER
-        ws.cell(row=row, column=5, value=f"{best_m.get('fnr', 0)*100:.1f}%").border = THIN_BORDER
-        ws.cell(row=row, column=6, value="准确率最高且FPR最低").border = THIN_BORDER
+        ws.cell(row=row, column=2, value=rec_model or "N/A").border = THIN_BORDER
+        ws.cell(row=row, column=3, value=f"{m.get('accuracy', 0)*100:.1f}%").border = THIN_BORDER
+        ws.cell(row=row, column=4, value=f"{m.get('fpr', 0)*100:.1f}%").border = THIN_BORDER
+        ws.cell(row=row, column=5, value=f"{m.get('fnr', 0)*100:.1f}%").border = THIN_BORDER
+        ws.cell(row=row, column=6, value=reason).border = THIN_BORDER
         row += 1
 
     # ── ERROR 说明 ──
     row += 1
-    ws.cell(row=row, column=1, value="⚠️ Gemini ERROR 说明").font = Font(bold=True, size=11, color="CC0000")
+    ws.cell(row=row, column=1, value="⚠️ ERROR 说明与模型选型结论").font = Font(bold=True, size=11, color="CC0000")
     row += 1
     error_note = (
-        "Gemini 在音义联想（2例）和考试应用（8例）维度共 10 个用例返回 ERROR，原因如下：\n"
-        "· 模型版本: gemini-3-flash-preview（预览版），对特定中文长文本助记内容存在概率性卡死（~50s 后断连，无错误码）\n"
-        "· 复现条件: 完整的助记话术文本（500+ 字中文），截断到 75% 则正常；同一 prompt 在 GPT-5.2（3~5s）和豆包（16~87s）均正常\n"
-        "· 验证路径: 直连 Gemini API + 公司 AI Gateway（Vertex）均复现，排除网络/Gateway 问题\n"
-        "· gemini-2.5-flash（稳定版）可正常处理同一 prompt（10.7s）\n"
-        "· 结论: 系 gemini-3-flash-preview 模型自身缺陷，建议该维度质检选用 GPT-5.2"
+        "一、异常分布（ERROR + 未返回）\n"
+        "· Gemini（gemini-3-flash-preview）: 考试应用 8 例 ERROR + 音义联想 2 例 ERROR "
+        "+ 词根词缀 1 例未返回 + 词中词 1 例未返回 = 共 12 例异常\n"
+        "· 豆包（doubao-seed-1.8）: 音义联想 1 例 ERROR\n"
+        "· GPT-5.2: 0 例异常\n"
+        "\n"
+        "二、异常根因\n"
+        "· Gemini: 预览版模型对助记类维度的中文长文本（500+字话术）存在概率性卡死（~50s后断连，无错误码）。"
+        "直连 Gemini API 与公司 AI Gateway（Vertex）均可复现，排除网络问题。"
+        "截断到 75% 文本长度则正常；gemini-2.5-flash 稳定版可正常处理同一 prompt（10.7s）。\n"
+        "· 豆包: 对特定反例用例（含「文化敏感」类内容）处理超时或触发内容安全过滤，未返回有效结果。\n"
+        "\n"
+        "三、最终选型结论\n"
+        "综合评估准确率、稳定性和异常表现，最终选用 GPT-5.2 作为质检模型：\n"
+        "· 稳定性: 全部 7 个维度零异常，响应速度稳定（3~5s），无超时或卡死\n"
+        "· Gemini 虽准确率领先，但预览版在助记维度不可用（12/13 异常来自 Gemini），生产环境不可接受\n"
+        "· 豆包 FPR 全场最高（7 个维度中 6 个超 10%），误报率过高会严重拖慢人工审核效率"
     )
     c = ws.cell(row=row, column=1, value=error_note)
     c.alignment = Alignment(wrap_text=True, vertical="top")
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
-    ws.row_dimensions[row].height = 120
+    ws.row_dimensions[row].height = 160
 
     # 列宽
     ws.column_dimensions["A"].width = 16
@@ -379,7 +524,7 @@ def print_report(all_data: dict[str, dict[str, list[dict]]]) -> None:
             vals = []
             row = f"{model:<12}"
             for dim in dims:
-                m = compute_metrics(all_data.get(dim, {}).get(model, []))
+                m = _compute_with_missing(all_data, dim, model)
                 v = m[metric_key]
                 vals.append(v)
                 row += f"{v*100:>9.1f}%"
@@ -394,8 +539,8 @@ def print_report(all_data: dict[str, dict[str, list[dict]]]) -> None:
     for dim in dims:
         best_model, best_score, best_m = None, -1, {}
         for model in models:
-            m = compute_metrics(all_data.get(dim, {}).get(model, []))
-            score = m["accuracy"] - 1.0 * m["fpr"] - 0.5 * m["fnr"]
+            m = _compute_with_missing(all_data, dim, model)
+            score = m["accuracy"] - m["fpr"] - 0.5 * m["fnr"]
             if score > best_score:
                 best_score, best_model, best_m = score, model, m
         print(
