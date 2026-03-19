@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
+import { AnimatePresence } from 'motion/react'
 import {
   Search, Download, ChevronLeft, ChevronRight, Loader2, MoreHorizontal,
 } from 'lucide-react'

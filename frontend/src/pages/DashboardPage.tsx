@@ -14,18 +14,6 @@ interface Props {
 
 /* ===== 维度映射与颜色 ===== */
 
-const DIMENSION_LABELS: Record<string, string> = {
-  phonetic: '语音 Sound',
-  syllable: '音节 Syllables',
-  meaning: '语义 Meaning',
-  chunk: '语境 Context',
-  sentence: '语境 Context',
-  mnemonic_root_affix: '助记·词根词缀',
-  mnemonic_word_in_word: '助记·词中词',
-  mnemonic_sound_meaning: '助记·谐音联想',
-  mnemonic_exam_app: '助记·考试应用',
-}
-
 const ALL_DIMENSIONS = [
   '语音 Sound', '释义 Definition', '音节 Syllables',
   '语块 Chunk', '例句 Sentence',

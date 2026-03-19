@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Copy, Trash2, Save, X, Loader2, RotateCcw, Archive, ChevronDown, Check } from 'lucide-react'
+import { Plus, Copy, Save, X, Loader2, RotateCcw, Archive, ChevronDown, Check } from 'lucide-react'
 import { api } from '../lib/api'
 
 interface Prompt {
@@ -159,7 +159,7 @@ export default function PromptPage() {
 
   const handleRestore = async (id: number) => {
     try {
-      const restored = await api.post<Prompt>(`/prompts/${id}/restore`)
+      await api.post<Prompt>(`/prompts/${id}/restore`)
       setPrompts(prev => prev.filter(p => p.id !== id))
       if (selectedId === id) {
         setSelectedId(prompts.find(p => p.id !== id)?.id ?? null)
