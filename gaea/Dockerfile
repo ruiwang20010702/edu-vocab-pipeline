@@ -20,7 +20,7 @@ RUN npm run build
 FROM python:3.12-slim-bookworm
 
 # ── 系统依赖 ──────────────────────────────────────────────────────────────────
-RUN echo 'APT::Update::Post-Invoke { "true"; };' > /etc/apt/apt.conf.d/99-no-post-invoke \
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         nginx \
