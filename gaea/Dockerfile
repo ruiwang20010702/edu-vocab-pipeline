@@ -20,7 +20,9 @@ RUN npm run build
 FROM python:3.12-slim-bookworm
 
 # ── 系统依赖 ──────────────────────────────────────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo 'APT::Update::Post-Invoke { "true"; };' > /etc/apt/apt.conf.d/99-no-post-invoke \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
         nginx \
         curl \
         xz-utils \
