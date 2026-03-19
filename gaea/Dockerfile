@@ -17,16 +17,10 @@ RUN npm run build
 
 
 # ── Stage 2: 最终镜像（Python + nginx + s6-overlay）──────────────────────────
-FROM python:3.12-slim-bookworm
+FROM python:3.12-alpine
 
-# ── 系统依赖 ──────────────────────────────────────────────────────────────────
-RUN rm -f /etc/apt/apt.conf.d/docker-clean \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        nginx \
-        curl \
-        xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+# ── 系统依赖（apk 用 gzip 压缩，不依赖 lzma）─────────────────────────────────
+RUN apk add --no-cache nginx xz
 
 # ── 安装 s6-overlay（自动识别 amd64 / arm64）─────────────────────────────────
 # s6-overlay version
