@@ -11,9 +11,9 @@ FROM node:20-slim AS frontend-build
 
 WORKDIR /app
 COPY frontend/package*.json ./
-RUN NODE_OPTIONS="--max-old-space-size=512" npm ci
+RUN UV_THREADPOOL_SIZE=1 NODE_OPTIONS="--v8-pool-size=1" npm ci
 COPY frontend/ ./
-RUN npm run build
+RUN UV_THREADPOOL_SIZE=1 NODE_OPTIONS="--v8-pool-size=1" npm run build
 
 
 # ── Stage 2: 最终镜像（Python + nginx + s6-overlay）──────────────────────────
