@@ -1405,22 +1405,6 @@
       "error": null
     },
     {
-      "key": "16_正例",
-      "case_id": 16,
-      "word": "lie  (v.) 躺；位于；撒谎",
-      "category": "不规则变形",
-      "sample_type": "正例",
-      "issue_desc": "",
-      "expected": "PASS",
-      "model_judgment": "ERROR",
-      "is_correct": false,
-      "checkpoints": {},
-      "reason": "",
-      "raw_output": "",
-      "elapsed_s": 0,
-      "error": "Gateway poll timeout (300s), task_no=185362794469918721y33sj"
-    },
-    {
       "key": "34_正例",
       "case_id": 34,
       "word": "affect  (v.) 影响；感动",
@@ -1434,7 +1418,23 @@
       "reason": "",
       "raw_output": "",
       "elapsed_s": 0,
-      "error": "Gateway poll timeout (300s), task_no=185363424232811527b0bka"
+      "error": "Server disconnected without sending a response."
+    },
+    {
+      "key": "16_正例",
+      "case_id": 16,
+      "word": "lie  (v.) 躺；位于；撒谎",
+      "category": "不规则变形",
+      "sample_type": "正例",
+      "issue_desc": "",
+      "expected": "PASS",
+      "model_judgment": "ERROR",
+      "is_correct": false,
+      "checkpoints": {},
+      "reason": "",
+      "raw_output": "",
+      "elapsed_s": 0,
+      "error": "Server disconnected without sending a response."
     }
   ]
 }
