@@ -64,13 +64,6 @@ def load_models() -> list[ModelConfig]:
             model=os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
         ),
         ModelConfig(
-            name="Gemini-GW",
-            api_key=os.getenv("GATEWAY_API_KEY", ""),
-            base_url=os.getenv("GATEWAY_BASE_URL", ""),
-            model=os.getenv("GATEWAY_GEMINI_MODEL", "gemini-3-flash-preview|efficiency"),
-            gateway=True,
-        ),
-        ModelConfig(
             name="豆包",
             api_key=os.getenv("DOUBAO_API_KEY", ""),
             base_url=os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),

@@ -47,7 +47,7 @@ DIMENSION_CN = {
     "mnemonic_exam_app": "考试应用",
 }
 
-MODEL_ORDER = ["GPT-5.2", "Gemini", "Gemini-GW", "豆包"]
+MODEL_ORDER = ["GPT-5.2", "Gemini", "豆包"]
 
 
 def load_all_results() -> dict[str, dict[str, list[dict]]]:
