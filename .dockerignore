@@ -10,6 +10,7 @@ frontend/dist
 coverage.json
 tests/
 docs/
+!docs/prompts/
 *.md
 .mypy_cache
 .pytest_cache
