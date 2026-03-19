@@ -11,7 +11,7 @@ FROM node:20-slim AS frontend-build
 
 WORKDIR /app
 COPY frontend/package*.json ./
-RUN npm ci
+RUN NODE_OPTIONS="--max-old-space-size=512" npm ci
 COPY frontend/ ./
 RUN npm run build
 
