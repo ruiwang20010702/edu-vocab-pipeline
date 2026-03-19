@@ -17,7 +17,7 @@ RUN npm run build
 
 
 # ── Stage 2: 最终镜像（Python + nginx + s6-overlay）──────────────────────────
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # ── 系统依赖 ──────────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
