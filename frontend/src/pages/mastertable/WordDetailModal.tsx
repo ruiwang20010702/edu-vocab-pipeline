@@ -17,7 +17,7 @@ type EditResult = { ok: boolean; text: string; issues?: QcIssue[] } | null
 function useContentEdit(itemId: number, onSaved: () => void) {
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState<EditResult>(null)
-  const timerRef = useRef<ReturnType<typeof setTimeout>>()
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -58,7 +58,7 @@ function useContentEdit(itemId: number, onSaved: () => void) {
 function groupIssuesByMeaning(
   issues: WordDetail['issues'],
   meanings: WordDetail['meanings'],
-  syllable?: ContentItem,
+  _syllable?: ContentItem,
 ) {
   const meaningIssuesMap = new Map<number, typeof issues>()
   const wordLevelIssues: typeof issues = []
