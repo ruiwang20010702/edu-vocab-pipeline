@@ -147,8 +147,8 @@ class TestLayer2Failure:
         total = db_session.query(ReviewItem).filter_by(content_item_id=item.id).count()
         assert total == 1
 
-    def test_layer2_ai_exception_failsafe(self, db_session):
-        """AI 调用抛异常时，item 不应被自动标记为通过（fail-safe）。"""
+    def test_layer2_ai_exception_failsafe_without_failed_ids(self, db_session):
+        """无 results 且不在 failed_item_ids 中时，保持原状态（兼容旧行为）。"""
         word = Word(word="dog")
         db_session.add(word)
         db_session.flush()
@@ -164,16 +164,14 @@ class TestLayer2Failure:
 
         runner = Layer2Runner(client=mock_client)
 
-        # 空的 results_map 模拟所有 AI 调用失败（被 gather 捕获为异常后跳过）
         empty_results_map: dict[int, list[RuleResult]] = {}
 
         import uuid
 
         from vocab_qc.core.models.enums import AiStrategy
+        from vocab_qc.core.models.quality_layer import QcRun
 
         run_id = str(uuid.uuid4())
-
-        from vocab_qc.core.models.quality_layer import QcRun
 
         qc_run = QcRun(
             id=run_id, layer=2, scope="batch",
@@ -188,10 +186,54 @@ class TestLayer2Failure:
         )
         db_session.flush()
 
-        # fail-safe: 无结果时不自动通过
         assert passed == 0
         assert failed == 0
         assert item.qc_status == QcStatus.LAYER1_PASSED.value  # 保持原状态
+
+    def test_layer2_ai_exception_marks_failed(self, db_session):
+        """AI 调用失败且 item 在 failed_item_ids 中时，应标记为 LAYER2_FAILED。"""
+        word = Word(word="fish")
+        db_session.add(word)
+        db_session.flush()
+
+        meaning = Meaning(word_id=word.id, pos="n.", definition="鱼")
+        db_session.add(meaning)
+        db_session.flush()
+
+        item = _create_layer1_passed_item(db_session, word, meaning)
+
+        mock_client = MagicMock()
+        mock_client.model = "test-model"
+
+        runner = Layer2Runner(client=mock_client)
+
+        empty_results_map: dict[int, list[RuleResult]] = {}
+
+        import uuid
+
+        from vocab_qc.core.models.enums import AiStrategy
+        from vocab_qc.core.models.quality_layer import QcRun
+
+        run_id = str(uuid.uuid4())
+
+        qc_run = QcRun(
+            id=run_id, layer=2, scope="batch",
+            ai_strategy=AiStrategy.PER_RULE.value,
+            ai_model="test-model", total_items=1, status="running",
+        )
+        db_session.add(qc_run)
+        db_session.flush()
+
+        passed, failed = runner._save_results(
+            db_session, [item], empty_results_map, AiStrategy.PER_RULE, run_id,
+            failed_item_ids=frozenset({item.id}),
+        )
+        db_session.flush()
+
+        assert passed == 0
+        assert failed == 1
+        assert item.qc_status == QcStatus.LAYER2_FAILED.value
+        assert item.last_qc_run_id == run_id
 
     def test_layer2_mixed_results(self, db_session):
         """多个 item 中部分通过部分失败，状态应正确区分。"""

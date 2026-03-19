@@ -176,6 +176,7 @@ class Layer2Runner:
         results_map: dict[int, list[RuleResult]],
         strategy: AiStrategy,
         run_id: str,
+        failed_item_ids: frozenset[int] = frozenset(),
     ) -> tuple[int, int]:
         """将 AI 结果写入数据库（主线程，session 安全）。"""
         passed_count = 0
@@ -183,8 +184,12 @@ class Layer2Runner:
 
         for item in items:
             results = results_map.get(item.id, [])
-            # fail-safe: 无规则结果时不自动通过，保持当前状态
             if not results:
+                if item.id in failed_item_ids:
+                    # AI 调用失败：标记为 LAYER2_FAILED，进入审核队列
+                    item.qc_status = QcStatus.LAYER2_FAILED.value
+                    item.last_qc_run_id = run_id
+                    failed_count += 1
                 continue
             all_passed = all(r.passed for r in results)
 
@@ -247,7 +252,12 @@ class Layer2Runner:
         )
 
         # DB 写入（session 安全）
-        passed_count, failed_count = self._save_results(session, items, results_map, strategy, run_id)
+        failed_ids = frozenset(
+            log.content_item_id for log in error_logs if log.content_item_id
+        )
+        passed_count, failed_count = self._save_results(
+            session, items, results_map, strategy, run_id, failed_item_ids=failed_ids,
+        )
 
         for log in error_logs:
             session.add(log)
@@ -292,7 +302,12 @@ class Layer2Runner:
         results_map, error_logs = run_async_in_sync(coro)
 
         # Step 2: DB 写入（主线程，session 安全）
-        passed_count, failed_count = self._save_results(session, items, results_map, strategy, run_id)
+        failed_ids = frozenset(
+            log.content_item_id for log in error_logs if log.content_item_id
+        )
+        passed_count, failed_count = self._save_results(
+            session, items, results_map, strategy, run_id, failed_item_ids=failed_ids,
+        )
 
         for log in error_logs:
             session.add(log)
