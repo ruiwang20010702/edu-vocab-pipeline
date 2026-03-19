@@ -1,0 +1,10 @@
+#!/bin/sh
+# backend (longrun): gunicorn + uvicorn worker
+# 绑定到 127.0.0.1 仅供容器内 nginx 访问
+cd /app || exit 1
+exec gunicorn \
+    -w 4 \
+    -k uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8000 \
+    --timeout 120 \
+    vocab_qc.api.main:app

@@ -1,0 +1,5 @@
+#!/bin/sh
+# migrate (oneshot): 运行 Alembic 数据库迁移
+# migrate 失败 → backend/nginx-svc 不会启动 → 容器以非零码退出
+cd /app || exit 1
+exec alembic upgrade head

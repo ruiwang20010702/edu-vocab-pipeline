@@ -1,0 +1,3 @@
+#!/bin/sh
+# nginx-svc (longrun): 前端静态资源 + API 反代
+exec nginx -g "daemon off;"
