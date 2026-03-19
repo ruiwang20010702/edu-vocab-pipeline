@@ -319,7 +319,7 @@ def _write_summary_sheet(
         for model in models:
             results = all_data.get(dim, {}).get(model, [])
             m = compute_metrics(results)
-            score = m["accuracy"] - 2 * m["fpr"]
+            score = m["accuracy"] - 1.0 * m["fpr"] - 0.5 * m["fnr"]
             if score > best_score:
                 best_score, best_model, best_m = score, model, m
 
@@ -371,7 +371,7 @@ def print_report(all_data: dict[str, dict[str, list[dict]]]) -> None:
         best_model, best_score, best_m = None, -1, {}
         for model in models:
             m = compute_metrics(all_data.get(dim, {}).get(model, []))
-            score = m["accuracy"] - 2 * m["fpr"]
+            score = m["accuracy"] - 1.0 * m["fpr"] - 0.5 * m["fnr"]
             if score > best_score:
                 best_score, best_model, best_m = score, model, m
         print(
