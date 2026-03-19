@@ -81,11 +81,20 @@ def build_ai_request(
     user_prompt: str,
     *,
     temperature: float = 0.7,
+    use_json_format: bool = True,
 ) -> tuple[str, dict[str, str], dict[str, Any]]:
-    """构造 AI 请求参数（模块级公共函数，生成 + 质检共用）。"""
+    """构造 AI 请求参数（模块级公共函数，生成 + 质检共用）。
+
+    use_json_format=False 时不添加 response_format 且不追加 JSON 提示，
+    适用于期望纯文本输出的质检场景（避免 Gemini 超时）。
+    """
     import uuid
 
-    safe_prompt = ContentGenerator._ensure_json_hint(system_prompt)
+    safe_prompt = (
+        ContentGenerator._ensure_json_hint(system_prompt)
+        if use_json_format
+        else system_prompt
+    )
 
     if settings.ai_gateway_mode:
         headers = {"Content-Type": "application/json"}
@@ -101,9 +110,10 @@ def build_ai_request(
                 {"role": "system", "content": [{"type": "text", "text": safe_prompt}]},
                 {"role": "user", "content": [{"type": "text", "text": user_prompt}]},
             ],
-            "response_format": {"type": "json_object"},
             "temperature": temperature,
         }
+        if use_json_format:
+            body["response_format"] = {"type": "json_object"}
     else:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         body = {
@@ -112,9 +122,10 @@ def build_ai_request(
                 {"role": "system", "content": safe_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "response_format": {"type": "json_object"},
             "temperature": temperature,
         }
+        if use_json_format:
+            body["response_format"] = {"type": "json_object"}
 
     url = f"{base_url}/chat/completions"
     return url, headers, body

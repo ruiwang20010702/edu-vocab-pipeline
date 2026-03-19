@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     ai_api_base_url: str = ""
     ai_model: str = "gemini-3-flash-preview|efficiency"
     ai_max_concurrency: int = 20
+    ai_request_stagger: float = 0.2  # 并发请求启动间隔（秒），0 表示不错开
     ai_max_retries: int = 3
     ai_task_timeout: int = 360
     ai_use_proxy: bool = False  # True=使用系统代理（GPT等海外API），False=直连（豆包等国内API）

@@ -564,14 +564,14 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
                 formula={editFormula} chant={editChant} script={editScript}
                 onFormulaChange={setEditFormula} onChantChange={setEditChant} onScriptChange={setEditScript}
               />
-              {regenMsg?.id === mn.id && <QcResultBanner passed={regenMsg.ok} message={regenMsg.msg} issues={regenMsg.issues} />}
+              {regenMsg && regenMsg.id === mn.id && <QcResultBanner passed={regenMsg.ok} message={regenMsg.msg} issues={regenMsg.issues} />}
               <div className="flex items-center gap-2">
                 <button onClick={() => handleSaveEdit(mn)} disabled={saving || !editFormula.trim()}
                   className="flex-1 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border border-yellow-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
                   {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                   保存并质检
                 </button>
-                {regenMsg?.id === mn.id && !regenMsg.ok && (
+                {regenMsg && regenMsg.id === mn.id && !regenMsg.ok && (
                   <button onClick={() => handleSaveEdit(mn, true)} disabled={saving}
                     className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
                     <CheckCircle2 size={12} /> 强制通过
@@ -592,7 +592,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
               </span>
             </div>
             <div className="flex items-center gap-2">
-              {regenMsg?.id === mn.id && (
+              {regenMsg && regenMsg.id === mn.id && (
                 <span className={`text-[10px] font-medium ${regenMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{regenMsg.msg}</span>
               )}
               <button
