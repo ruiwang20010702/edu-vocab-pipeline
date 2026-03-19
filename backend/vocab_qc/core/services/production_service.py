@@ -314,11 +314,15 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
     async def _generate_all() -> dict[int, dict]:
         semaphore = asyncio.Semaphore(settings.ai_max_concurrency)
 
-        async def _call_one(task: tuple) -> tuple[int, dict]:
+        stagger = settings.ai_request_stagger
+
+        async def _call_one(task: tuple, index: int = 0) -> tuple[int, dict]:
             item_id, dimension, word_text, meaning_text, pos = task
             generator = _GENERATORS[dimension]
             config = ai_configs[dimension]
             async with semaphore:
+                if stagger > 0 and index > 0:
+                    await asyncio.sleep((index % settings.ai_max_concurrency) * stagger)
                 result = await asyncio.wait_for(
                     generator.generate_async(
                         word=word_text, meaning=meaning_text, pos=pos,
@@ -328,7 +332,7 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
                 )
             return item_id, result
 
-        async_tasks = [asyncio.create_task(_call_one(t)) for t in tasks]
+        async_tasks = [asyncio.create_task(_call_one(t, i)) for i, t in enumerate(tasks)]
         try:
             gathered = await asyncio.wait_for(
                 asyncio.gather(*async_tasks, return_exceptions=True),

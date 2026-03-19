@@ -84,12 +84,19 @@ class AiClient:
             self._semaphore_loop = loop
         return self._semaphore
 
-    async def check(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        """发送 AI 校验请求，返回 JSON 结果."""
-        async with self._get_semaphore():
-            return await self._call_with_retry(system_prompt, user_prompt)
+    async def check(
+        self, system_prompt: str, user_prompt: str, *, use_json_format: bool = True,
+    ) -> dict[str, Any]:
+        """发送 AI 校验请求。
 
-    async def _call_with_retry(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+        use_json_format=False 时返回 {"raw_text": "..."} 而非解析后的 JSON。
+        """
+        async with self._get_semaphore():
+            return await self._call_with_retry(system_prompt, user_prompt, use_json_format=use_json_format)
+
+    async def _call_with_retry(
+        self, system_prompt: str, user_prompt: str, *, use_json_format: bool = True,
+    ) -> dict[str, Any]:
         if not self._circuit_breaker.allow_request():
             raise AiRequestError(
                 "circuit_open",
@@ -99,7 +106,7 @@ class AiClient:
         last_error = None
         for attempt in range(self.max_retries):
             try:
-                result = await self._call_api(system_prompt, user_prompt)
+                result = await self._call_api(system_prompt, user_prompt, use_json_format=use_json_format)
                 self._circuit_breaker.record_success()
                 return result
             except Exception as e:
@@ -120,7 +127,9 @@ class AiClient:
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
         raise RuntimeError(f"AI API 调用失败（{self.max_retries}次重试后）: {last_error}")
 
-    async def _call_api(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    async def _call_api(
+        self, system_prompt: str, user_prompt: str, *, use_json_format: bool = True,
+    ) -> dict[str, Any]:
         if not self.api_key or not self.base_url:
             logger.warning("AI API 未配置，占位模式跳过校验")
             return {"passed": True, "detail": "占位模式 - 未配置 AI API"}
@@ -128,6 +137,7 @@ class AiClient:
         url, headers, body = build_ai_request(
             self.base_url, self.api_key, self.model,
             system_prompt, user_prompt, temperature=0,
+            use_json_format=use_json_format,
         )
         client = self._get_http_client()
         t0 = time.monotonic()
@@ -157,6 +167,8 @@ class AiClient:
             data = await poll_gateway_task_async(client, self.base_url, task_no, body)
 
         content = _strip_markdown_fences(parse_ai_response(data))
+        if not use_json_format:
+            return {"raw_text": content}
         try:
             return json.loads(content)
         except json.JSONDecodeError as e:

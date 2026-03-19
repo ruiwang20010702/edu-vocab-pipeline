@@ -1,6 +1,10 @@
-"""Layer2 unified checkers mock 测试."""
+"""Layer2 unified checkers mock 测试.
 
-from unittest.mock import AsyncMock, MagicMock
+注意：这些测试验证精简 prompt（JSON 格式）fallback 路径，
+通过 mock load_full_prompt 返回 None 来触发 fallback。
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from vocab_qc.core.qc.base import RuleResult
@@ -27,6 +31,17 @@ def make_failing_client(exc: Exception) -> MagicMock:
     return client
 
 
+# Mock load_full_prompt 返回 None，测试精简 prompt 的 fallback 路径
+_patch_sentence = patch(
+    "vocab_qc.core.qc.layer2.unified.sentence_unified.load_full_prompt",
+    return_value=None,
+)
+_patch_chunk = patch(
+    "vocab_qc.core.qc.layer2.unified.chunk_unified.load_full_prompt",
+    return_value=None,
+)
+
+
 # ---------------------------------------------------------------------------
 # UnifiedSentenceChecker
 # ---------------------------------------------------------------------------
@@ -51,9 +66,10 @@ class TestUnifiedSentenceChecker:
             ]
         }
         client = make_client(payload)
-        results = await self.checker.check(
-            client, content="She goes to school.", word="go", meaning="去", content_cn="她去上学。"
-        )
+        with _patch_sentence:
+            results = await self.checker.check(
+                client, content="She goes to school.", word="go", meaning="去", content_cn="她去上学。"
+            )
         assert len(results) == 9
         assert all(isinstance(r, RuleResult) for r in results)
 
@@ -65,9 +81,10 @@ class TestUnifiedSentenceChecker:
             ]
         }
         client = make_client(payload)
-        results = await self.checker.check(
-            client, content="Never have I seen this.", word="never", meaning="从不"
-        )
+        with _patch_sentence:
+            results = await self.checker.check(
+                client, content="Never have I seen this.", word="never", meaning="从不"
+            )
         assert len(results) == 1
         assert results[0].rule_id == "E5"
         assert results[0].passed is False
@@ -76,9 +93,10 @@ class TestUnifiedSentenceChecker:
     @pytest.mark.asyncio
     async def test_client_called_with_word_and_meaning_in_prompt(self):
         client = make_client({"results": []})
-        await self.checker.check(
-            client, content="He runs fast.", word="run", meaning="跑", content_cn="他跑得很快。"
-        )
+        with _patch_sentence:
+            await self.checker.check(
+                client, content="He runs fast.", word="run", meaning="跑", content_cn="他跑得很快。"
+            )
         client.check.assert_called_once()
         _, user_prompt = client.check.call_args[0]
         assert "run" in user_prompt
@@ -87,17 +105,19 @@ class TestUnifiedSentenceChecker:
     @pytest.mark.asyncio
     async def test_empty_results_list_returns_empty(self):
         client = make_client({"results": []})
-        results = await self.checker.check(
-            client, content="She sings.", word="sing", meaning="唱歌"
-        )
+        with _patch_sentence:
+            results = await self.checker.check(
+                client, content="She sings.", word="sing", meaning="唱歌"
+            )
         assert results == []
 
     @pytest.mark.asyncio
     async def test_ai_exception_returns_all_failed_results(self):
         client = make_failing_client(RuntimeError("network error"))
-        results = await self.checker.check(
-            client, content="She sings.", word="sing", meaning="唱歌"
-        )
+        with _patch_sentence:
+            results = await self.checker.check(
+                client, content="She sings.", word="sing", meaning="唱歌"
+            )
         assert len(results) == len(self.checker.rule_ids)
         assert all(r.passed is False for r in results)
         assert all("AI 调用失败" in r.detail for r in results)
@@ -105,7 +125,8 @@ class TestUnifiedSentenceChecker:
     @pytest.mark.asyncio
     async def test_missing_meaning_uses_placeholder(self):
         client = make_client({"results": []})
-        await self.checker.check(client, content="He runs.", word="run")
+        with _patch_sentence:
+            await self.checker.check(client, content="He runs.", word="run")
         _, user_prompt = client.check.call_args[0]
         assert "无" in user_prompt
 
@@ -113,7 +134,8 @@ class TestUnifiedSentenceChecker:
     async def test_result_detail_none_when_not_provided(self):
         payload = {"results": [{"rule_id": "E1", "passed": True}]}
         client = make_client(payload)
-        results = await self.checker.check(client, content="x", word="x")
+        with _patch_sentence:
+            results = await self.checker.check(client, content="x", word="x")
         assert results[0].detail is None
 
     def test_dimension_attribute(self):
@@ -136,9 +158,10 @@ class TestUnifiedChunkChecker:
     async def test_returns_c3_result_on_success(self):
         payload = {"results": [{"rule_id": "C3", "passed": True, "detail": "高频搭配"}]}
         client = make_client(payload)
-        results = await self.checker.check(
-            client, content="take care of", word="take", meaning="照顾"
-        )
+        with _patch_chunk:
+            results = await self.checker.check(
+                client, content="take care of", word="take", meaning="照顾"
+            )
         assert len(results) == 1
         assert results[0].rule_id == "C3"
         assert results[0].passed is True
@@ -147,17 +170,19 @@ class TestUnifiedChunkChecker:
     async def test_failed_chunk_propagated(self):
         payload = {"results": [{"rule_id": "C3", "passed": False, "detail": "非固定搭配"}]}
         client = make_client(payload)
-        results = await self.checker.check(
-            client, content="some random words", word="some", meaning="一些"
-        )
+        with _patch_chunk:
+            results = await self.checker.check(
+                client, content="some random words", word="some", meaning="一些"
+            )
         assert results[0].passed is False
 
     @pytest.mark.asyncio
     async def test_ai_exception_returns_failed_c3(self):
         client = make_failing_client(RuntimeError("timeout"))
-        results = await self.checker.check(
-            client, content="give up", word="give", meaning="放弃"
-        )
+        with _patch_chunk:
+            results = await self.checker.check(
+                client, content="give up", word="give", meaning="放弃"
+            )
         assert len(results) == 1
         assert results[0].rule_id == "C3"
         assert results[0].passed is False
@@ -166,9 +191,10 @@ class TestUnifiedChunkChecker:
     @pytest.mark.asyncio
     async def test_client_receives_word_and_content(self):
         client = make_client({"results": []})
-        await self.checker.check(
-            client, content="look after", word="look", meaning="照料"
-        )
+        with _patch_chunk:
+            await self.checker.check(
+                client, content="look after", word="look", meaning="照料"
+            )
         client.check.assert_called_once()
         _, user_prompt = client.check.call_args[0]
         assert "look" in user_prompt
@@ -177,7 +203,8 @@ class TestUnifiedChunkChecker:
     @pytest.mark.asyncio
     async def test_empty_results_returns_empty_list(self):
         client = make_client({"results": []})
-        results = await self.checker.check(client, content="x", word="x")
+        with _patch_chunk:
+            results = await self.checker.check(client, content="x", word="x")
         assert results == []
 
     def test_dimension_attribute(self):

@@ -94,7 +94,10 @@ class Layer2Runner:
         checker = self._unified_checkers.get(item.dimension)
         if checker is None:
             return []
-        return await checker.check(client, item.content, word_text, meaning_text, **extra)
+        return await checker.check(
+            client, item.content, word_text, meaning_text,
+            item_dimension=item.dimension, **extra,
+        )
 
     async def _collect_ai_results(
         self,
@@ -108,7 +111,12 @@ class Layer2Runner:
         # item_id → ContentItem 映射，用于错误日志填充 word_id / dimension
         {item.id: item for item in items}
 
-        async def _check_one(item: ContentItem) -> tuple[int, list[RuleResult]]:
+        from vocab_qc.core.config import settings as _settings
+        stagger = _settings.ai_request_stagger
+
+        async def _check_one(item: ContentItem, index: int = 0) -> tuple[int, list[RuleResult]]:
+            if stagger > 0 and index > 0:
+                await asyncio.sleep((index % _settings.ai_max_concurrency) * stagger)
             word_text = word_texts.get(item.word_id, "")
             meaning_text = meaning_texts.get(item.meaning_id, "") if item.meaning_id else None
             extra = extra_kwargs.get(item.id, {})
@@ -120,13 +128,13 @@ class Layer2Runner:
             return item.id, results
 
         # 分批 gather，避免一次创建过多 asyncio Task（大批量时数万个）
-        from vocab_qc.core.config import settings as _settings
-
         gather_batch_size = _settings.production_batch_size * 8  # ~1600 items/batch
         all_gathered: list = []
+        global_index = 0
         for batch_start in range(0, len(items), gather_batch_size):
             batch_items = items[batch_start:batch_start + gather_batch_size]
-            batch_tasks = [_check_one(item) for item in batch_items]
+            batch_tasks = [_check_one(item, global_index + i) for i, item in enumerate(batch_items)]
+            global_index += len(batch_items)
             batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
             all_gathered.extend(batch_results)
 
