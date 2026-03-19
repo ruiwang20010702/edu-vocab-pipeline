@@ -1,4 +1,4 @@
 .env
-results/
+results/*.xlsx
 __pycache__/
 *.pyc
