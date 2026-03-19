@@ -34,14 +34,14 @@ def _load_existing_keys(path: Path) -> set[str]:
     if not path.exists():
         return set()
     data = json.loads(path.read_text(encoding="utf-8"))
-    return {r["key"] for r in data.get("results", [])}
+    return {r["key"] for r in data.get("results", []) if r.get("model_judgment") != "ERROR"}
 
 
 def _load_existing_results(path: Path) -> list[dict]:
     if not path.exists():
         return []
     data = json.loads(path.read_text(encoding="utf-8"))
-    return data.get("results", [])
+    return [r for r in data.get("results", []) if r.get("model_judgment") != "ERROR"]
 
 
 def _save_results(path: Path, dimension: str, model_name: str, results: list[dict]) -> None:

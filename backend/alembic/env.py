@@ -1,5 +1,6 @@
 """Alembic 迁移环境配置."""
 
+import os
 from logging.config import fileConfig
 
 # 确保所有模型被导入，否则 autogenerate 检测不到
@@ -11,6 +12,11 @@ from vocab_qc.core.db import Base
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# 优先使用环境变量（VOCAB_QC_DATABASE_URL_MIGRATE > VOCAB_QC_DATABASE_URL_SYNC > alembic.ini）
+db_url = os.getenv("VOCAB_QC_DATABASE_URL_MIGRATE") or os.getenv("VOCAB_QC_DATABASE_URL_SYNC")
+if db_url:
+    config.set_main_option("sqlalchemy.url", db_url)
 
 target_metadata = Base.metadata
 

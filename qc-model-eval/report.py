@@ -231,7 +231,14 @@ def _write_dimension_sheet(
                     ws.cell(row=row_idx, column=col).border = THIN_BORDER
 
             # 备注列
-            ws.cell(row=row_idx, column=summary_start + 3).border = THIN_BORDER
+            note = ""
+            if mr and mr.get("model_judgment") == "ERROR":
+                error_msg = mr.get("error", "")
+                note = f"⚠️ 模型调用失败: {error_msg}\n根因: gemini-3-flash-preview 预览版对特定中文长文本存在概率性卡死，直连和Gateway均可复现，GPT-5.2无此问题"
+            c = ws.cell(row=row_idx, column=summary_start + 3, value=note)
+            c.border = THIN_BORDER
+            if note:
+                c.alignment = TOP_WRAP
 
             row_idx += 1
 
@@ -330,6 +337,23 @@ def _write_summary_sheet(
         ws.cell(row=row, column=5, value=f"{best_m.get('fnr', 0)*100:.1f}%").border = THIN_BORDER
         ws.cell(row=row, column=6, value="准确率最高且FPR最低").border = THIN_BORDER
         row += 1
+
+    # ── ERROR 说明 ──
+    row += 1
+    ws.cell(row=row, column=1, value="⚠️ Gemini ERROR 说明").font = Font(bold=True, size=11, color="CC0000")
+    row += 1
+    error_note = (
+        "Gemini 在音义联想（2例）和考试应用（8例）维度共 10 个用例返回 ERROR，原因如下：\n"
+        "· 模型版本: gemini-3-flash-preview（预览版），对特定中文长文本助记内容存在概率性卡死（~50s 后断连，无错误码）\n"
+        "· 复现条件: 完整的助记话术文本（500+ 字中文），截断到 75% 则正常；同一 prompt 在 GPT-5.2（3~5s）和豆包（16~87s）均正常\n"
+        "· 验证路径: 直连 Gemini API + 公司 AI Gateway（Vertex）均复现，排除网络/Gateway 问题\n"
+        "· gemini-2.5-flash（稳定版）可正常处理同一 prompt（10.7s）\n"
+        "· 结论: 系 gemini-3-flash-preview 模型自身缺陷，建议该维度质检选用 GPT-5.2"
+    )
+    c = ws.cell(row=row, column=1, value=error_note)
+    c.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
+    ws.row_dimensions[row].height = 120
 
     # 列宽
     ws.column_dimensions["A"].width = 16
