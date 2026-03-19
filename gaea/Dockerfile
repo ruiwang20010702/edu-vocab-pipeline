@@ -7,13 +7,13 @@
 #                     → nginx-svc (longrun, :80 对外)
 
 # ── Stage 1: 构建前端静态资源 ─────────────────────────────────────────────────
-FROM node:20-slim AS frontend-build
+FROM node:20-alpine AS frontend-build
 
 WORKDIR /app
 COPY frontend/package*.json ./
-RUN UV_THREADPOOL_SIZE=1 NODE_OPTIONS="--v8-pool-size=1" npm ci
+RUN npm ci
 COPY frontend/ ./
-RUN UV_THREADPOOL_SIZE=1 NODE_OPTIONS="--v8-pool-size=1" npm run build
+RUN npm run build
 
 
 # ── Stage 2: 最终镜像（Python + nginx + s6-overlay）──────────────────────────
