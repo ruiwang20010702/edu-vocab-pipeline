@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     env: str = "development"
 
     database_url_sync: str = "postgresql://localhost:5432/vocab_qc"
+    database_url_migrate: str = ""  # Alembic 迁移专用连接串（可选，env.py 单独读取）
     db_echo: bool = False
 
     ai_api_key: str = ""
