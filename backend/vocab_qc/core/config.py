@@ -2,6 +2,7 @@
 
 import logging
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,12 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     model_config = {"env_prefix": "VOCAB_QC_", "env_file": ".env"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def strip_whitespace(cls, values: dict) -> dict:
+        """Gaea 平台注入的环境变量值末尾带换行符，统一 strip。"""
+        return {k: v.strip() if isinstance(v, str) else v for k, v in values.items()}
 
 
 settings = Settings()
