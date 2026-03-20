@@ -52,8 +52,8 @@ RUN pip install --no-cache-dir --no-deps .
 COPY --from=frontend-build /app/dist /usr/share/nginx/html
 
 # ── Nginx 配置（单容器版：proxy_pass 指向 127.0.0.1:8000）───────────────────
-RUN rm -f /etc/nginx/sites-enabled/default
-COPY gaea/nginx.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/sites-enabled/default /etc/nginx/http.d/default.conf
+COPY gaea/nginx.conf /etc/nginx/http.d/default.conf
 
 # ── s6-overlay 服务定义 ───────────────────────────────────────────────────────
 COPY gaea/s6-overlay/ /etc/s6-overlay/
