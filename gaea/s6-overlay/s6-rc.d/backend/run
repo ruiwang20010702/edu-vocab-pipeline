@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/command/execlineb -P
 # backend (longrun): gunicorn + uvicorn worker
 # 绑定到 127.0.0.1 仅供容器内 nginx 访问
 cd /app || exit 1

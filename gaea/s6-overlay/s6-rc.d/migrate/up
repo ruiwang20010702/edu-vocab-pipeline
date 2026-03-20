@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/command/execlineb -P
 # migrate (oneshot): 运行 Alembic 数据库迁移
 # migrate 失败 → backend/nginx-svc 不会启动 → 容器以非零码退出
 execline-cd /app alembic upgrade head
