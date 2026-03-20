@@ -13,10 +13,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# 优先使用环境变量（VOCAB_QC_DATABASE_URL_MIGRATE > VOCAB_QC_DATABASE_URL_SYNC > alembic.ini）
-db_url = os.getenv("VOCAB_QC_DATABASE_URL_MIGRATE") or os.getenv("VOCAB_QC_DATABASE_URL_SYNC")
-if db_url:
-    config.set_main_option("sqlalchemy.url", db_url)
+# 优先使用 Settings（pydantic-settings 统一读取环境变量 + .env 文件）
+from vocab_qc.core.config import settings
+
+db_url = settings.database_url_migrate or settings.database_url_sync
+config.set_main_option("sqlalchemy.url", db_url)
 
 target_metadata = Base.metadata
 
