@@ -17,7 +17,13 @@ from vocab_qc.core.services import auth_service
 
 @pytest.fixture
 def auth_app():
-    """创建带测试数据库的认证测试客户端."""
+    """创建带测试数据库的认证测试客户端.
+
+    覆盖生产配置，确保测试环境下 Cookie/白名单正常工作：
+    - cookie_secure=False（TestClient 用 HTTP，Secure Cookie 不生效）
+    - cookie_domain=""（避免域名不匹配）
+    - allowed_email_domains=[]（允许 test.com 等测试邮箱）
+    """
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     test_session_factory = sessionmaker(bind=engine)
@@ -43,9 +49,21 @@ def auth_app():
     session.commit()
     session.close()
 
+    # 覆盖生产配置：关闭 Secure Cookie + 清空域名限制 + 清空白名单
+    original_secure = settings.cookie_secure
+    original_domain = settings.cookie_domain
+    original_domains = settings.allowed_email_domains
+    settings.cookie_secure = False
+    settings.cookie_domain = ""
+    settings.allowed_email_domains = []
+
     client = TestClient(app)
     yield client, test_session_factory
 
+    # 恢复配置
+    settings.cookie_secure = original_secure
+    settings.cookie_domain = original_domain
+    settings.allowed_email_domains = original_domains
     app.dependency_overrides.clear()
     limiter.enabled = True
     engine.dispose()

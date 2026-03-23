@@ -1,4 +1,4 @@
-"""质量层模型: QcRun, QcRuleResult, RetryCounter, ReviewItem, AuditLogV2."""
+"""质量层模型: QcRun, QcRuleResult, RetryCounter, ReviewItem, AiUsageLog, AuditLogV2."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -181,6 +182,36 @@ class AiErrorLog(Base):
 
     def __repr__(self) -> str:
         return f"<AiErrorLog id={self.id} phase={self.phase} type={self.error_type}>"
+
+
+class AiUsageLog(Base):
+    """AI 调用用量日志（生产 + 质检）."""
+
+    __tablename__ = "ai_usage_logs"
+    __table_args__ = (
+        Index("ix_ai_usage_logs_phase", "phase"),
+        Index("ix_ai_usage_logs_dimension", "dimension"),
+        Index("ix_ai_usage_logs_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phase: Mapped[str] = mapped_column(String(20), nullable=False)  # generation / qc_layer2
+    dimension: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    ai_model: Mapped[str] = mapped_column(String(100), nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    estimated_cost_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    elapsed_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    word_id: Mapped[Optional[int]] = mapped_column(ForeignKey("words.id"), nullable=True)
+    content_item_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("content_items.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    gateway_task_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<AiUsageLog id={self.id} phase={self.phase} tokens={self.total_tokens}>"
 
 
 def classify_ai_error(e: Exception) -> str:

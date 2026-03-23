@@ -1,13 +1,15 @@
 """仪表板统计服务."""
 
-from sqlalchemy import func
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import cast, func, literal_column
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.cache import TTLCache
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Word
 from vocab_qc.core.models.enums import QcStatus
-from vocab_qc.core.models.quality_layer import QcRuleResult
+from vocab_qc.core.models.quality_layer import AiUsageLog, QcRuleResult
 
 # 终态集合：approved 或 rejected
 _TERMINAL_STATUSES = [QcStatus.APPROVED.value, QcStatus.REJECTED.value]
@@ -103,4 +105,87 @@ def get_dashboard_stats(session: Session) -> dict:
         "issues": issues,
     }
     stats_cache.set(_STATS_CACHE_KEY, result)
+    return result
+
+
+def get_ai_usage_stats(session: Session, days: int = 7) -> dict:
+    """AI 用量统计：总量 + 按维度×阶段分组 + 日趋势。"""
+    cache_key = f"ai_usage_stats_{days}"
+    cached = stats_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    since = datetime.now(UTC) - timedelta(days=days)
+
+    # 聚合总量
+    totals = session.query(
+        func.coalesce(func.sum(AiUsageLog.total_tokens), 0),
+        func.sum(AiUsageLog.estimated_cost_usd),
+        func.count(),
+    ).filter(AiUsageLog.created_at >= since).one()
+
+    total_tokens = int(totals[0])
+    total_cost = round(float(totals[1]), 6) if totals[1] is not None else None
+    total_calls = int(totals[2])
+
+    # 按维度 + 阶段分组
+    by_dim_rows = (
+        session.query(
+            AiUsageLog.dimension,
+            AiUsageLog.phase,
+            func.coalesce(func.sum(AiUsageLog.total_tokens), 0).label("total_tokens"),
+            func.sum(AiUsageLog.estimated_cost_usd).label("cost"),
+            func.count().label("call_count"),
+        )
+        .filter(AiUsageLog.created_at >= since)
+        .group_by(AiUsageLog.dimension, AiUsageLog.phase)
+        .all()
+    )
+    by_dimension = [
+        {
+            "dimension": row.dimension,
+            "phase": row.phase,
+            "total_tokens": int(row.total_tokens),
+            "estimated_cost_usd": round(float(row.cost), 6) if row.cost is not None else None,
+            "call_count": int(row.call_count),
+        }
+        for row in by_dim_rows
+    ]
+
+    # 日趋势（兼容 PostgreSQL date_trunc 和 SQLite strftime）
+    bind = session.bind
+    dialect = bind.dialect.name if bind else "sqlite"
+    if dialect == "postgresql":
+        day_col = func.date_trunc(literal_column("'day'"), AiUsageLog.created_at).label("day")
+    else:
+        day_col = func.strftime("%Y-%m-%d", AiUsageLog.created_at).label("day")
+
+    trend_rows = (
+        session.query(
+            day_col,
+            func.coalesce(func.sum(AiUsageLog.total_tokens), 0).label("total_tokens"),
+            func.count().label("call_count"),
+        )
+        .filter(AiUsageLog.created_at >= since)
+        .group_by("day")
+        .order_by("day")
+        .all()
+    )
+    daily_trend = [
+        {
+            "date": str(row.day)[:10],
+            "total_tokens": int(row.total_tokens),
+            "call_count": int(row.call_count),
+        }
+        for row in trend_rows
+    ]
+
+    result = {
+        "total_tokens": total_tokens,
+        "total_cost_usd": total_cost,
+        "total_calls": total_calls,
+        "by_dimension": by_dimension,
+        "daily_trend": daily_trend,
+    }
+    stats_cache.set(cache_key, result)
     return result

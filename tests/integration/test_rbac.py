@@ -2,6 +2,7 @@
 
 import io
 import json
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -217,7 +218,9 @@ class TestRolePermissions:
     def test_batch_produce(self, role_client):
         """POST /api/batches/{id}/produce — admin + reviewer 可触发生产。"""
         role, client = role_client
-        resp = client.post("/api/batches/1/produce")
+        # mock 后台生产任务，避免通过 SyncSessionLocal 连接真实数据库
+        with patch("vocab_qc.api.routers.batch._run_production_bg_async"):
+            resp = client.post("/api/batches/1/produce")
         if role in ("admin", "reviewer"):
             # 能触发，返回 200、404（批次不存在）或 409（正在处理）
             assert resp.status_code in (200, 404, 409)

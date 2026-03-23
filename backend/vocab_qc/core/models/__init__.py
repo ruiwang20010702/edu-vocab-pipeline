@@ -19,6 +19,7 @@ from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.prompt import Prompt
 from vocab_qc.core.models.quality_layer import (
     AiErrorLog,
+    AiUsageLog,
     AuditLogV2,
     QcRuleResult,
     QcRun,
@@ -30,6 +31,7 @@ from vocab_qc.core.models.user import User, VerificationCode
 
 __all__ = [
     "AiErrorLog",
+    "AiUsageLog",
     "AiStrategy",
     "AuditLogV2",
     "classify_ai_error",

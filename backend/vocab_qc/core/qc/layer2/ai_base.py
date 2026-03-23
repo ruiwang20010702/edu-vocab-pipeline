@@ -14,9 +14,11 @@ from vocab_qc.core.circuit_breaker import CircuitBreaker
 from vocab_qc.core.config import settings
 from vocab_qc.core.generators.base import (
     AiRequestError,
+    AiUsageInfo,
     _is_transient_error,
     _strip_markdown_fences,
     build_ai_request,
+    extract_usage,
     parse_ai_response,
     parse_async_submit_response,
     poll_gateway_task_async,
@@ -60,6 +62,8 @@ class AiClient:
         self._semaphore_loop: asyncio.AbstractEventLoop | None = None
         self._http_client: httpx.AsyncClient | None = None
         self._http_client_loop: asyncio.AbstractEventLoop | None = None
+        # 用量累加器：每次成功调用 append，由 drain_usage_records 收割
+        self._usage_records: list[AiUsageInfo] = []
 
     def _get_http_client(self) -> httpx.AsyncClient:
         """延迟创建 AsyncClient，事件循环变化时自动重建。"""
@@ -166,6 +170,11 @@ class AiClient:
             logger.info("Gateway async 质检提交 task_no=%s model=%s", task_no, self.model)
             data = await poll_gateway_task_async(client, self.base_url, task_no, body)
 
+        # 提取 usage 信息
+        usage = extract_usage(data)
+        if usage.total_tokens > 0:
+            self._usage_records.append(usage)
+
         content = _strip_markdown_fences(parse_ai_response(data))
         if not use_json_format:
             return {"raw_text": content}
@@ -176,6 +185,12 @@ class AiClient:
                 "parse_error", elapsed_ms=elapsed,
                 response_body=content[:500], detail=str(e),
             ) from e
+
+    def drain_usage_records(self) -> list[AiUsageInfo]:
+        """取出并清空累积的用量记录。"""
+        records = self._usage_records[:]
+        self._usage_records = []
+        return records
 
 
 class AiRuleChecker:

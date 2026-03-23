@@ -271,7 +271,9 @@ class ReviewService:
     @staticmethod
     def _do_regenerate(session: Session, content_item: ContentItem) -> None:
         """调用生成器重新生成单个 ContentItem 的内容。"""
+        from vocab_qc.core.generators.base import estimate_cost
         from vocab_qc.core.models.data_layer import Meaning, Word
+        from vocab_qc.core.models.quality_layer import AiUsageLog
         from vocab_qc.core.services.production_service import _GENERATORS
 
         generator = _GENERATORS.get(content_item.dimension)
@@ -293,6 +295,22 @@ class ReviewService:
         result = generator.generate(
             word=word.word, meaning=meaning_text, pos=pos, session=session,
         )
+
+        # 提取并记录 AI 用量（由 _do_request 附着 __usage__）
+        usage = result.pop("__usage__", None)
+        if usage and usage.total_tokens > 0:
+            ai_config = generator.get_ai_config(session)
+            session.add(AiUsageLog(
+                phase="generation",
+                dimension=content_item.dimension,
+                ai_model=ai_config.model,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                estimated_cost_usd=estimate_cost(ai_config.model, usage),
+                word_id=content_item.word_id,
+                content_item_id=content_item.id,
+            ))
 
         if result.get("valid") is False:
             content_item.content = ""

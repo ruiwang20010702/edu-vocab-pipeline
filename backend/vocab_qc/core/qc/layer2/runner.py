@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 import vocab_qc.core.qc.layer2.per_rule  # noqa: F401
 from vocab_qc.core.models import ContentItem, QcRuleResult, QcRun, QcStatus
 from vocab_qc.core.models.enums import AiStrategy
-from vocab_qc.core.models.quality_layer import AiErrorLog, classify_ai_error
+from vocab_qc.core.models.quality_layer import AiErrorLog, AiUsageLog, classify_ai_error
 from vocab_qc.core.qc.base import RuleResult
 from vocab_qc.core.qc.layer2.ai_base import AiClient, AiRuleChecker
 from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
@@ -61,6 +61,30 @@ class Layer2Runner:
                     base_url=prompt.ai_api_base_url,
                     model=prompt.model,
                 )
+
+    def _flush_usage_logs(self, session: Session) -> None:
+        """从所有 client drain usage 记录，聚合后写入 AiUsageLog。"""
+        from vocab_qc.core.generators.base import AiUsageInfo, estimate_cost
+
+        all_clients = {self.client} | set(self._dimension_clients.values())
+        for client in all_clients:
+            records = client.drain_usage_records()
+            if not records:
+                continue
+            agg = AiUsageInfo(
+                prompt_tokens=sum(r.prompt_tokens for r in records),
+                completion_tokens=sum(r.completion_tokens for r in records),
+                total_tokens=sum(r.total_tokens for r in records),
+            )
+            session.add(AiUsageLog(
+                phase="qc_layer2",
+                dimension=None,
+                ai_model=client.model,
+                prompt_tokens=agg.prompt_tokens,
+                completion_tokens=agg.completion_tokens,
+                total_tokens=agg.total_tokens,
+                estimated_cost_usd=estimate_cost(client.model, agg),
+            ))
 
     async def check_item_per_rule(
         self,
@@ -262,6 +286,9 @@ class Layer2Runner:
         for log in error_logs:
             session.add(log)
 
+        # 收集所有 client 的 usage 记录并写入
+        self._flush_usage_logs(session)
+
         qc_run.passed_items = passed_count
         qc_run.failed_items = failed_count
         qc_run.finished_at = datetime.now(UTC)
@@ -311,6 +338,9 @@ class Layer2Runner:
 
         for log in error_logs:
             session.add(log)
+
+        # 收集所有 client 的 usage 记录并写入
+        self._flush_usage_logs(session)
 
         qc_run.passed_items = passed_count
         qc_run.failed_items = failed_count

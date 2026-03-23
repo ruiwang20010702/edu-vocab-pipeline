@@ -434,6 +434,54 @@ def load_prompt_file(filename: str) -> Optional[str]:
 
 
 @dataclass(frozen=True)
+class AiUsageInfo:
+    """AI 调用 token 用量."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+def extract_usage(data: dict[str, Any]) -> AiUsageInfo:
+    """从 AI 响应提取 usage，兼容 Gateway 包裹格式。
+
+    不改 parse_ai_response 签名，对同一个 data dict 独立调用。
+    """
+    effective = data
+    if "res" in data and "choices" not in data:
+        inner = data.get("res")
+        if isinstance(inner, dict):
+            effective = inner
+    usage = effective.get("usage")
+    if not isinstance(usage, dict):
+        return AiUsageInfo()
+    return AiUsageInfo(
+        prompt_tokens=usage.get("prompt_tokens", 0) or 0,
+        completion_tokens=usage.get("completion_tokens", 0) or 0,
+        total_tokens=usage.get("total_tokens", 0) or 0,
+    )
+
+
+# 模型费用表（USD / 百万 token）: (input_price, output_price)
+_MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "gemini-2.0-flash": (0.10, 0.40),
+    "gemini-2.5-flash": (0.15, 0.60),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.0),
+}
+
+
+def estimate_cost(model: str, usage: AiUsageInfo) -> float | None:
+    """按模型费率表估算费用（USD），未知模型返回 None。"""
+    model_key = model.lower().split("|")[0]  # 去掉 "|efficiency" 后缀
+    for prefix, (inp_price, out_price) in _MODEL_PRICING.items():
+        if model_key.startswith(prefix):
+            cost = (usage.prompt_tokens * inp_price + usage.completion_tokens * out_price) / 1_000_000
+            return round(cost, 6)
+    return None
+
+
+@dataclass(frozen=True)
 class AiConfig:
     """AI 调用配置，支持 per-dimension 覆盖."""
 
@@ -645,9 +693,11 @@ class ContentGenerator:
                     logger.info("Gateway async 提交成功 task_no=%s model=%s", task_no, actual_model)
                     data = await poll_gateway_task_async(client, actual_url, task_no, body)
 
+                usage = extract_usage(data)
                 content = _strip_markdown_fences(self._parse_response(data))
                 try:
                     result = json.loads(content)
+                    result["__usage__"] = usage
                     _generator_circuit_breaker.record_success()
                     return result
                 except json.JSONDecodeError as e:
@@ -752,9 +802,12 @@ class ContentGenerator:
             logger.info("Gateway async 提交成功 task_no=%s model=%s", task_no, model)
             data = poll_gateway_task_sync(client, base_url, task_no, body)
 
+        usage = extract_usage(data)
         content = _strip_markdown_fences(self._parse_response(data))
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            result["__usage__"] = usage
+            return result
         except json.JSONDecodeError as e:
             raise AiRequestError(
                 "parse_error", elapsed_ms=elapsed,

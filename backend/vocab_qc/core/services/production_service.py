@@ -20,7 +20,7 @@ from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageWord
-from vocab_qc.core.models.quality_layer import AiErrorLog, classify_ai_error
+from vocab_qc.core.models.quality_layer import AiErrorLog, AiUsageLog, classify_ai_error
 from vocab_qc.core.services.qc_service import QcService
 
 # 维度→生成器映射
@@ -310,6 +310,7 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
 
     # --- Step B: asyncio 并发 AI 调用 ---
     error_logs: list[AiErrorLog] = []
+    usage_logs: list[AiUsageLog] = []
 
     async def _generate_all() -> dict[int, dict]:
         semaphore = asyncio.Semaphore(settings.ai_max_concurrency)
@@ -345,6 +346,8 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
             await asyncio.gather(*async_tasks, return_exceptions=True)
             raise
 
+        from vocab_qc.core.generators.base import AiUsageInfo, estimate_cost
+
         results: dict[int, dict] = {}
         for i, r in enumerate(gathered):
             item_id = tasks[i][0]
@@ -373,7 +376,24 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
                     retry_count=settings.ai_max_retries,
                 ))
             else:
-                results[r[0]] = r[1]
+                result_item_id, result_data = r
+                # 提取 usage 信息（由 _do_request/_call_ai_async 附着）
+                usage: AiUsageInfo | None = result_data.pop("__usage__", None)
+                if usage and usage.total_tokens > 0:
+                    item = item_map[result_item_id]
+                    dim_model = ai_configs[item.dimension].model
+                    usage_logs.append(AiUsageLog(
+                        phase="generation",
+                        dimension=item.dimension,
+                        ai_model=dim_model,
+                        prompt_tokens=usage.prompt_tokens,
+                        completion_tokens=usage.completion_tokens,
+                        total_tokens=usage.total_tokens,
+                        estimated_cost_usd=estimate_cost(dim_model, usage),
+                        word_id=item.word_id,
+                        content_item_id=result_item_id,
+                    ))
+                results[result_item_id] = result_data
 
         # P-H2: CLI 路径清理 HTTP 客户端
         from vocab_qc.core.generators.base import close_http_clients
@@ -409,8 +429,10 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
             item.content_cn = result["content_cn"]
         count += 1
 
-    # 持久化 AI 错误日志
+    # 持久化 AI 错误日志 + 用量日志
     for log in error_logs:
+        session.add(log)
+    for log in usage_logs:
         session.add(log)
 
     session.flush()
