@@ -62,7 +62,7 @@ class Layer2Runner:
                     model=prompt.model,
                 )
 
-    def _flush_usage_logs(self, session: Session) -> None:
+    def _flush_usage_logs(self, session: Session, *, package_id: int | None = None) -> None:
         """从所有 client drain usage 记录，聚合后写入 AiUsageLog。"""
         from vocab_qc.core.generators.base import AiUsageInfo, estimate_cost
 
@@ -84,6 +84,7 @@ class Layer2Runner:
                 completion_tokens=agg.completion_tokens,
                 total_tokens=agg.total_tokens,
                 estimated_cost_usd=estimate_cost(client.model, agg),
+                package_id=package_id,
             ))
 
     async def check_item_per_rule(
@@ -268,6 +269,7 @@ class Layer2Runner:
         meaning_texts: dict[int, str],
         strategy: AiStrategy = AiStrategy.UNIFIED,
         extra_kwargs: Optional[dict[int, dict]] = None,
+        package_id: int | None = None,
     ) -> str:
         """异步执行 Layer 2 批量校验."""
         self.load_dimension_configs(session)
@@ -303,7 +305,7 @@ class Layer2Runner:
             session.add(log)
 
         # 收集所有 client 的 usage 记录并写入
-        self._flush_usage_logs(session)
+        self._flush_usage_logs(session, package_id=package_id)
 
         qc_run.passed_items = passed_count
         qc_run.failed_items = failed_count
@@ -321,6 +323,7 @@ class Layer2Runner:
         meaning_texts: dict[int, str],
         strategy: AiStrategy = AiStrategy.UNIFIED,
         extra_kwargs: Optional[dict[int, dict]] = None,
+        package_id: int | None = None,
     ) -> str:
         """同步桥接：AI 调用在独立线程/事件循环，DB 操作在主线程."""
         self.load_dimension_configs(session)
@@ -356,7 +359,7 @@ class Layer2Runner:
             session.add(log)
 
         # 收集所有 client 的 usage 记录并写入
-        self._flush_usage_logs(session)
+        self._flush_usage_logs(session, package_id=package_id)
 
         qc_run.passed_items = passed_count
         qc_run.failed_items = failed_count

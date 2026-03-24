@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.config import settings
@@ -61,6 +62,7 @@ def step_generate(
         raise ValueError(f"Package {package_id} 不存在")
 
     pkg.status = "processing"
+    pkg.started_at = pkg.started_at or func.now()
     session.flush()
 
     if word_ids is None:
@@ -74,7 +76,7 @@ def step_generate(
         .filter_by(qc_status=QcStatus.PENDING.value)
         .all()
     )
-    generated = _generate_content(session, items)
+    generated = _generate_content(session, items, package_id=package_id)
     session.flush()
     return generated
 
@@ -117,7 +119,7 @@ def step_qc_layer2(
     if word_ids is None:
         word_ids = _get_word_ids_for_package(session, package_id)
 
-    result = qc.run_layer2_batch(session, word_ids)
+    result = qc.run_layer2_batch(session, word_ids, package_id=package_id)
     if result.get("run_id"):
         qc.enqueue_layer2_failed_for_review(session, result["run_id"])
 
@@ -134,6 +136,7 @@ def step_finalize(session: Session, package_id: int) -> None:
     word_ids = _get_word_ids_for_package(session, package_id)
     _auto_approve_passed(session, word_ids)
     pkg.processed_words = len(word_ids)
+    pkg.completed_at = func.now()
     pkg.status = "completed"
     session.flush()
 
@@ -201,6 +204,7 @@ def run_production(
         raise ValueError(f"Package {package_id} 不存在")
 
     pkg.status = "processing"
+    pkg.started_at = func.now()
     session.flush()
 
     # 获取 Package 关联的所有 word_id
@@ -221,7 +225,7 @@ def run_production(
     )
 
     # Step 1: 生成内容
-    generated = _generate_content(session, items)
+    generated = _generate_content(session, items, package_id=package_id)
     session.flush()
 
     # Step 2: 运行 Layer 1 质检（批量）
@@ -231,7 +235,7 @@ def run_production(
     session.flush()
 
     # Step 3: 运行 Layer 2 AI 质检（批量，仅针对 Layer 1 通过项）
-    l2_result = qc.run_layer2_batch(session, word_ids_from_package)
+    l2_result = qc.run_layer2_batch(session, word_ids_from_package, package_id=package_id)
     if l2_result.get("run_id"):
         qc.enqueue_layer2_failed_for_review(session, l2_result["run_id"])
 
@@ -240,6 +244,7 @@ def run_production(
 
     # 更新 Package 状态
     pkg.processed_words = len(word_ids_from_package)
+    pkg.completed_at = func.now()
     pkg.status = "completed"
     session.flush()
 
@@ -258,7 +263,7 @@ def run_production(
 logger = logging.getLogger(__name__)
 
 
-def _generate_content(session: Session, items: list[ContentItem]) -> int:
+def _generate_content(session: Session, items: list[ContentItem], *, package_id: int | None = None) -> int:
     """为空的 ContentItem 并发调用 AI 生成器填充内容。
 
     Step A: 预加载数据 + AI config，构造纯参数任务列表
@@ -394,6 +399,7 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
                         estimated_cost_usd=estimate_cost(dim_model, usage),
                         word_id=item.word_id,
                         content_item_id=result_item_id,
+                        package_id=package_id,
                     ))
                 results[result_item_id] = result_data
 

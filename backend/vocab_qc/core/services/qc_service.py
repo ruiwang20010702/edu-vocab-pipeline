@@ -158,6 +158,7 @@ class QcService:
         session: Session,
         word_ids: set[int],
         dimension: str | None = None,
+        package_id: int | None = None,
     ) -> dict:
         """批量 Layer 2 质检，所有项在同一个 asyncio 事件循环中并发。
 
@@ -182,7 +183,10 @@ class QcService:
         meaning_texts = {m.id: m.definition for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all()}
         extra_kwargs = self._build_extra_kwargs(session, items)
 
-        run_id = self.layer2_runner.run(session, items, word_texts, meaning_texts, extra_kwargs=extra_kwargs)
+        run_id = self.layer2_runner.run(
+            session, items, word_texts, meaning_texts,
+            extra_kwargs=extra_kwargs, package_id=package_id,
+        )
 
         passed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_PASSED.value)
         failed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_FAILED.value)

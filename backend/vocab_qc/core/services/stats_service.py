@@ -2,13 +2,14 @@
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import cast, func, literal_column
+from sqlalchemy import func, literal_column
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.cache import TTLCache
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Word
 from vocab_qc.core.models.enums import QcStatus
+from vocab_qc.core.models.package_layer import Package
 from vocab_qc.core.models.quality_layer import AiUsageLog, QcRuleResult
 
 # 终态集合：approved 或 rejected
@@ -189,3 +190,128 @@ def get_ai_usage_stats(session: Session, days: int = 7) -> dict:
     }
     stats_cache.set(cache_key, result)
     return result
+
+
+def get_production_records(session: Session) -> dict:
+    """按 Package 聚合 AI 用量，返回生产记录数据。"""
+    from sqlalchemy import case
+
+    gemini_filter = func.lower(AiUsageLog.ai_model).like("%gemini%")
+    gpt_filter = func.lower(AiUsageLog.ai_model).like("%gpt%")
+
+    rows = (
+        session.query(
+            Package.id,
+            Package.name,
+            Package.total_words,
+            Package.started_at,
+            Package.completed_at,
+            func.coalesce(
+                func.sum(case((gemini_filter, AiUsageLog.prompt_tokens), else_=0)), 0,
+            ).label("gemini_in"),
+            func.coalesce(
+                func.sum(case((gemini_filter, AiUsageLog.completion_tokens), else_=0)), 0,
+            ).label("gemini_out"),
+            func.coalesce(
+                func.sum(case((gpt_filter, AiUsageLog.prompt_tokens), else_=0)), 0,
+            ).label("gpt_in"),
+            func.coalesce(
+                func.sum(case((gpt_filter, AiUsageLog.completion_tokens), else_=0)), 0,
+            ).label("gpt_out"),
+        )
+        .outerjoin(AiUsageLog, AiUsageLog.package_id == Package.id)
+        .filter(Package.status.in_(["completed", "processing", "failed"]))
+        .group_by(Package.id, Package.name, Package.total_words, Package.started_at, Package.completed_at)
+        .order_by(Package.id)
+        .all()
+    )
+
+    records = []
+    totals = {"words": 0, "gemini_input": 0, "gemini_output": 0, "gpt_input": 0, "gpt_output": 0}
+
+    for row in rows:
+        rec = {
+            "batch_id": row[0],
+            "batch_name": row[1],
+            "word_count": row[2],
+            "started_at": row[3].isoformat() if row[3] else None,
+            "completed_at": row[4].isoformat() if row[4] else None,
+            "gemini_input_tokens": int(row[5]),
+            "gemini_output_tokens": int(row[6]),
+            "gpt_input_tokens": int(row[7]),
+            "gpt_output_tokens": int(row[8]),
+        }
+        records.append(rec)
+        totals["words"] += rec["word_count"]
+        totals["gemini_input"] += rec["gemini_input_tokens"]
+        totals["gemini_output"] += rec["gemini_output_tokens"]
+        totals["gpt_input"] += rec["gpt_input_tokens"]
+        totals["gpt_output"] += rec["gpt_output_tokens"]
+
+    return {"records": records, "totals": totals}
+
+
+def export_production_records_xlsx(session: Session):
+    """导出生产记录为 xlsx（BytesIO），列结构与成本估算表一致。"""
+    import io
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    data = get_production_records(session)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "生产记录"
+
+    # 样式
+    header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    headers = [
+        ("批次号", 8),
+        ("批次名称", 20),
+        ("词数", 8),
+        ("开始时间", 18),
+        ("结束时间", 18),
+        ("Gemini\nInput Tokens", 15),
+        ("Gemini\nOutput Tokens", 15),
+        ("GPT\nInput Tokens", 15),
+        ("GPT\nOutput Tokens", 15),
+        ("备注", 15),
+    ]
+
+    for col_idx, (title, width) in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=title)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_align
+        ws.column_dimensions[cell.column_letter].width = width
+
+    # 数据行
+    for row_idx, rec in enumerate(data["records"], 2):
+        ws.cell(row=row_idx, column=1, value=rec["batch_id"])
+        ws.cell(row=row_idx, column=2, value=rec["batch_name"])
+        ws.cell(row=row_idx, column=3, value=rec["word_count"])
+        ws.cell(row=row_idx, column=4, value=rec["started_at"] or "")
+        ws.cell(row=row_idx, column=5, value=rec["completed_at"] or "")
+        ws.cell(row=row_idx, column=6, value=rec["gemini_input_tokens"])
+        ws.cell(row=row_idx, column=7, value=rec["gemini_output_tokens"])
+        ws.cell(row=row_idx, column=8, value=rec["gpt_input_tokens"])
+        ws.cell(row=row_idx, column=9, value=rec["gpt_output_tokens"])
+
+    # 汇总行
+    if data["records"]:
+        total_row = len(data["records"]) + 2
+        ws.cell(row=total_row, column=1, value="汇总").font = Font(bold=True)
+        ws.cell(row=total_row, column=3, value=data["totals"]["words"]).font = Font(bold=True)
+        ws.cell(row=total_row, column=6, value=data["totals"]["gemini_input"]).font = Font(bold=True)
+        ws.cell(row=total_row, column=7, value=data["totals"]["gemini_output"]).font = Font(bold=True)
+        ws.cell(row=total_row, column=8, value=data["totals"]["gpt_input"]).font = Font(bold=True)
+        ws.cell(row=total_row, column=9, value=data["totals"]["gpt_output"]).font = Font(bold=True)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf

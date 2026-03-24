@@ -207,6 +207,9 @@ class AiUsageLog(Base):
     content_item_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("content_items.id", ondelete="CASCADE"), nullable=True, index=True,
     )
+    package_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("packages.id"), nullable=True, index=True,
+    )
     gateway_task_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
