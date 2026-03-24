@@ -102,7 +102,7 @@ Layer 1（算法规则 22 条）→ Layer 2（AI 语义校验，Unified 策略�
 |------|------|
 | 前端 | React 19 + Vite 7 + TypeScript 5.9 + Tailwind CSS 4 |
 | 后端 | Python 3.11 + FastAPI + SQLAlchemy 2.0 + AsyncPG + Typer (CLI) |
-| 数据库 | PostgreSQL 16+（17 张表），Alembic 迁移 |
+| 数据库 | PostgreSQL 16+（17 张表），Alembic 17 版迁移 |
 | AI 服务 | Gemini 3 Flash / GPT-5.2（内容生成 + 质检），可通过 Prompt 管理切换 |
 | 部署 | Docker Compose（前后端 + Nginx） |
 
@@ -132,7 +132,7 @@ S9-Vocab-Pipeline/
 │   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt
 │   │   │   └── schemas/         ← Pydantic 响应模型
 │   │   └── cli/                 ← Typer CLI 命令
-│   └── alembic/                 ← 数据库迁移脚本（15 个版本）
+│   └── alembic/                 ← 数据库迁移脚本（17 个版本）
 │
 ├── frontend/                    ← React 19 + TypeScript + Tailwind CSS v4
 │   ├── src/

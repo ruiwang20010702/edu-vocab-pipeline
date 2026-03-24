@@ -56,7 +56,7 @@ vocab_qc/
 │   ├── config.py   ← Pydantic Settings，所有配置项前缀 VOCAB_QC_（如 VOCAB_QC_DATABASE_URL_SYNC）
 │   ├── db.py       ← SQLAlchemy Engine + SyncSessionLocal（SQLite/PostgreSQL 双模式）
 │   ├── models/     ← ORM 模型，按层组织（data_layer / content_layer / quality_layer / batch_layer / package_layer / user / prompt）
-│   ├── services/   ← 业务服务（auth / user / generation / production / review / qc / export / stats / prompt / audit）
+│   ├── services/   ← 业务服务（auth / user / generation / production / review / qc / export / stats / prompt / audit / batch / import / word）
 │   ├── generators/ ← 内容生成器（chunk / sentence / mnemonic×4 / syllable），base.py 含 AI 调用 + 熔断器
 │   └── qc/         ← 质检引擎：Layer 1（22条算法规则）+ Layer 2（AI语义校验），装饰器注册机制
 └── cli/            ← Typer CLI（qc_commands + review_commands + cleanup/create-admin）
@@ -75,7 +75,7 @@ vocab_qc/
 
 ### 数据库（PostgreSQL 16 / 测试用 SQLite 内存）
 
-ORM 模型分布在 `core/models/` 下，约 17 张表。测试通过 `conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离。Alembic 管理 15 个迁移版本。
+ORM 模型分布在 `core/models/` 下，约 17 张表。测试通过 `conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离。Alembic 管理 17 个迁移版本。
 
 ## 关键业务规则
 
