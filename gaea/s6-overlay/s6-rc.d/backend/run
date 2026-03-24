@@ -7,4 +7,6 @@ exec gunicorn \
     -k uvicorn.workers.UvicornWorker \
     --bind 127.0.0.1:8000 \
     --timeout 120 \
+    --access-logfile - \
+    --log-level info \
     vocab_qc.api.main:app
