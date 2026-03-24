@@ -262,6 +262,67 @@ def _handle_batch_failure(
         )
 
 
+def _build_smart_batches(
+    session, all_word_ids: list[int], settings,
+) -> list[list[int]]:
+    """按每词 ContentItem 数量贪心分批，确保单批 AI 调用不超限。
+
+    如果无法查到 ContentItem 信息（如首次导入后尚未创建占位），
+    回退到按固定词数分批。
+    """
+    from sqlalchemy import func
+
+    from vocab_qc.core.models.content_layer import ContentItem
+    from vocab_qc.core.models.enums import QcStatus
+
+    max_items = settings.production_max_items_per_batch
+    fallback_size = settings.production_batch_size
+
+    # 分批 IN 查询每个词的 pending ContentItem 数量
+    word_item_counts: dict[int, int] = {}
+    for i in range(0, len(all_word_ids), 900):
+        chunk = all_word_ids[i:i + 900]
+        rows = (
+            session.query(ContentItem.word_id, func.count(ContentItem.id))
+            .filter(
+                ContentItem.word_id.in_(chunk),
+                ContentItem.qc_status == QcStatus.PENDING.value,
+            )
+            .group_by(ContentItem.word_id)
+            .all()
+        )
+        for wid, cnt in rows:
+            word_item_counts[wid] = cnt
+
+    # 如果查不到 ContentItem 数据，回退固定分批
+    if not word_item_counts:
+        return [
+            all_word_ids[i:i + fallback_size]
+            for i in range(0, len(all_word_ids), fallback_size)
+        ]
+
+    # 贪心分批：累加到阈值时开新批（同一个词的所有 item 不会拆分）
+    batches: list[list[int]] = []
+    current_batch: list[int] = []
+    current_count = 0
+    for wid in all_word_ids:
+        cnt = word_item_counts.get(wid, 7)  # 默认 7 维度
+        if current_count + cnt > max_items and current_batch:
+            batches.append(current_batch)
+            current_batch, current_count = [], 0
+        current_batch.append(wid)
+        current_count += cnt
+    if current_batch:
+        batches.append(current_batch)
+
+    logger.info(
+        "智能分批: %d 词 → %d 批 (max_items=%d, 平均 %.0f items/批)",
+        len(all_word_ids), len(batches), max_items,
+        sum(word_item_counts.get(w, 7) for w in all_word_ids) / max(len(batches), 1),
+    )
+    return batches
+
+
 def _run_production_bg(batch_id: int) -> None:
     """后台执行生产流水线，按词分批处理避免超时。
 
@@ -284,11 +345,12 @@ def _run_production_bg(batch_id: int) -> None:
     session = SyncSessionLocal()
     try:
         all_word_ids = sorted(_get_word_ids_for_package(session, batch_id))
+        # 智能分批：按每词 ContentItem 数量贪心分组，避免多义词导致单批 AI 调用爆炸
+        word_batches = _build_smart_batches(session, all_word_ids, settings)
     finally:
         session.close()
 
-    batch_size = settings.production_batch_size
-    total_batches = max(1, (len(all_word_ids) + batch_size - 1) // batch_size)
+    total_batches = len(word_batches)
 
     steps = [
         ("generate", step_generate),
@@ -301,7 +363,7 @@ def _run_production_bg(batch_id: int) -> None:
     max_consecutive_failures = 3  # 连续失败超过此数则终止整个生产
 
     for batch_idx in range(total_batches):
-        word_batch = set(all_word_ids[batch_idx * batch_size : (batch_idx + 1) * batch_size])
+        word_batch = set(word_batches[batch_idx])
 
         # 熔断器打开时等待冷却，避免下一批立刻白白失败
         if _generator_circuit_breaker.state == CircuitBreaker.OPEN:
@@ -346,10 +408,7 @@ def _run_production_bg(batch_id: int) -> None:
 
         # 每批完成后更新 processed_words，用绝对值避免重试时重复累加
         if batch_ok:
-            completed_words = min(
-                (batch_idx + 1) * batch_size,
-                len(all_word_ids),
-            )
+            completed_words = sum(len(word_batches[i]) for i in range(batch_idx + 1))
             session = SyncSessionLocal()
             try:
                 pkg = session.query(Package).filter_by(id=batch_id).first()

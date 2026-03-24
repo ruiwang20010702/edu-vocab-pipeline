@@ -334,10 +334,12 @@ def _generate_content(session: Session, items: list[ContentItem]) -> int:
             return item_id, result
 
         async_tasks = [asyncio.create_task(_call_one(t, i)) for i, t in enumerate(tasks)]
+        # 动态超时：每任务 5s 基准，下限 10 分钟，上限 30 分钟
+        _gather_timeout = min(max(600, len(tasks) * 5), 1800)
         try:
             gathered = await asyncio.wait_for(
                 asyncio.gather(*async_tasks, return_exceptions=True),
-                timeout=1200,  # 20 分钟总超时（推理模型较慢）
+                timeout=_gather_timeout,
             )
         except asyncio.TimeoutError:
             for t in async_tasks:

@@ -12,7 +12,7 @@ from vocab_qc.core.db import Base
 class Package(Base):
     __tablename__ = "packages"
     __table_args__ = (
-        CheckConstraint("status IN ('pending', 'processing', 'completed', 'failed')", name="ck_packages_status"),
+        CheckConstraint("status IN ('importing', 'pending', 'processing', 'completed', 'failed')", name="ck_packages_status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

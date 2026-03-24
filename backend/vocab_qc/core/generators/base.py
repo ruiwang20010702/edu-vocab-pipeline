@@ -214,6 +214,7 @@ async def poll_gateway_task_async(
     deadline = time.monotonic() + settings.ai_gateway_poll_max_wait
     start_time = time.monotonic()
     poll_count = 0
+    consecutive_429 = 0  # 连续 429 计数，用于指数退避
 
     while True:
         if time.monotonic() > deadline:
@@ -238,10 +239,15 @@ async def poll_gateway_task_async(
             elapsed = int((time.monotonic() - t0) * 1000)
             raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e), task_no=task_no) from e
 
-        # 429 限流：等待双倍间隔后继续轮询（deadline 检查兜底防无限循环）
+        # 429 限流：指数退避（3s → 6s → 12s → 24s，上限 30s）
         if response.status_code == 429:
-            logger.warning("轮询遭遇 429 限流，等待后重试 task_no=%s", task_no)
-            await asyncio.sleep(settings.ai_gateway_poll_interval * 2)
+            consecutive_429 += 1
+            backoff = min(settings.ai_gateway_poll_interval * (2 ** consecutive_429), 30.0)
+            logger.warning(
+                "轮询遭遇 429 限流 (连续%d次)，退避 %.1fs task_no=%s",
+                consecutive_429, backoff, task_no,
+            )
+            await asyncio.sleep(backoff)
             continue
         if response.status_code >= 400:
             raise AiRequestError(
@@ -250,6 +256,8 @@ async def poll_gateway_task_async(
                 response_body=response.text[:500],
                 task_no=task_no,
             )
+
+        consecutive_429 = 0  # 非 429 响应，重置计数
 
         status, result, failed_reason = parse_poll_response(response.json())
 
@@ -280,6 +288,7 @@ def poll_gateway_task_sync(
     deadline = time.monotonic() + settings.ai_gateway_poll_max_wait
     start_time = time.monotonic()
     poll_count = 0
+    consecutive_429 = 0
 
     while True:
         if time.monotonic() > deadline:
@@ -304,10 +313,15 @@ def poll_gateway_task_sync(
             elapsed = int((time.monotonic() - t0) * 1000)
             raise AiRequestError("connect_error", elapsed_ms=elapsed, detail=str(e), task_no=task_no) from e
 
-        # 429 限流：等待双倍间隔后继续轮询（deadline 检查兜底防无限循环）
+        # 429 限流：指数退避（3s → 6s → 12s → 24s，上限 30s）
         if response.status_code == 429:
-            logger.warning("轮询遭遇 429 限流，等待后重试 task_no=%s", task_no)
-            time.sleep(settings.ai_gateway_poll_interval * 2)
+            consecutive_429 += 1
+            backoff = min(settings.ai_gateway_poll_interval * (2 ** consecutive_429), 30.0)
+            logger.warning(
+                "轮询遭遇 429 限流 (连续%d次)，退避 %.1fs task_no=%s",
+                consecutive_429, backoff, task_no,
+            )
+            time.sleep(backoff)
             continue
         if response.status_code >= 400:
             raise AiRequestError(
@@ -316,6 +330,8 @@ def poll_gateway_task_sync(
                 response_body=response.text[:500],
                 task_no=task_no,
             )
+
+        consecutive_429 = 0  # 非 429 响应，重置计数
 
         status, result, failed_reason = parse_poll_response(response.json())
 

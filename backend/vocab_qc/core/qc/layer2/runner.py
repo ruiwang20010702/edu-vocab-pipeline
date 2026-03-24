@@ -152,14 +152,30 @@ class Layer2Runner:
             return item.id, results
 
         # 分批 gather，避免一次创建过多 asyncio Task（大批量时数万个）
-        gather_batch_size = _settings.production_batch_size * 8  # ~1600 items/batch
+        # 超时保护：与生成阶段一致，防止 L2 无限等待
+        _L2_GATHER_TIMEOUT = 1200  # 20 分钟
+        gather_batch_size = _settings.production_batch_size * 8  # ~400 items/batch
         all_gathered: list = []
         global_index = 0
         for batch_start in range(0, len(items), gather_batch_size):
             batch_items = items[batch_start:batch_start + gather_batch_size]
             batch_tasks = [_check_one(item, global_index + i) for i, item in enumerate(batch_items)]
             global_index += len(batch_items)
-            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            try:
+                batch_results = await asyncio.wait_for(
+                    asyncio.gather(*batch_tasks, return_exceptions=True),
+                    timeout=_L2_GATHER_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "L2 质检 gather 超时 (%ds)，batch %d-%d/%d 被跳过",
+                    _L2_GATHER_TIMEOUT, batch_start,
+                    min(batch_start + gather_batch_size, len(items)), len(items),
+                )
+                # 超时的任务标记为异常，后续统一处理为 LAYER2_FAILED
+                batch_results = [
+                    TimeoutError(f"L2 gather timeout after {_L2_GATHER_TIMEOUT}s")
+                ] * len(batch_tasks)
             all_gathered.extend(batch_results)
 
         results_map: dict[int, list[RuleResult]] = {}
