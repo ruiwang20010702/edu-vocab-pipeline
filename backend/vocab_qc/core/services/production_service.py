@@ -2,9 +2,9 @@
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any, Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.config import settings
@@ -62,7 +62,8 @@ def step_generate(
         raise ValueError(f"Package {package_id} 不存在")
 
     pkg.status = "processing"
-    pkg.started_at = pkg.started_at or func.now()
+    if pkg.started_at is None:
+        pkg.started_at = datetime.now(UTC)
     session.flush()
 
     if word_ids is None:
@@ -136,7 +137,7 @@ def step_finalize(session: Session, package_id: int) -> None:
     word_ids = _get_word_ids_for_package(session, package_id)
     _auto_approve_passed(session, word_ids)
     pkg.processed_words = len(word_ids)
-    pkg.completed_at = func.now()
+    pkg.completed_at = datetime.now(UTC)
     pkg.status = "completed"
     session.flush()
 
@@ -204,7 +205,7 @@ def run_production(
         raise ValueError(f"Package {package_id} 不存在")
 
     pkg.status = "processing"
-    pkg.started_at = func.now()
+    pkg.started_at = datetime.now(UTC)
     session.flush()
 
     # 获取 Package 关联的所有 word_id
@@ -244,7 +245,7 @@ def run_production(
 
     # 更新 Package 状态
     pkg.processed_words = len(word_ids_from_package)
-    pkg.completed_at = func.now()
+    pkg.completed_at = datetime.now(UTC)
     pkg.status = "completed"
     session.flush()
 

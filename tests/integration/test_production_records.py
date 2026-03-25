@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import AiUsageLog
 from vocab_qc.core.models.data_layer import Word
-from vocab_qc.core.services.stats_service import get_production_records
+from vocab_qc.core.services.stats_service import get_production_records, stats_cache
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """每个测试清空 production_records 缓存。"""
+    stats_cache.invalidate("production_records")
+    yield
+    stats_cache.invalidate("production_records")
 
 
 def _make_word(session: Session, word: str) -> Word:

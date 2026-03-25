@@ -20,10 +20,15 @@ from vocab_qc.core.services.batch_service import update_batch_progress
 
 
 def _lookup_package_id(session: Session, word_id: int) -> int | None:
-    """通过 word_id 反查所属 Package ID。"""
+    """通过 word_id 反查所属 Package ID（一词多包时取最新导入的）。"""
     from vocab_qc.core.models.package_layer import PackageWord
 
-    row = session.query(PackageWord.package_id).filter_by(word_id=word_id).first()
+    row = (
+        session.query(PackageWord.package_id)
+        .filter_by(word_id=word_id)
+        .order_by(PackageWord.id.desc())
+        .first()
+    )
     return row[0] if row else None
 
 

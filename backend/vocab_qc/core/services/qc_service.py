@@ -82,6 +82,7 @@ class QcService:
         session: Session,
         scope: Optional[str] = None,
         dimension: Optional[str] = None,
+        package_id: int | None = None,
     ) -> dict:
         """执行 Layer 2 AI 语义校验（仅针对 Layer 1 通过项）.
 
@@ -110,7 +111,10 @@ class QcService:
 
         extra_kwargs = self._build_extra_kwargs(session, items)
 
-        run_id = self.layer2_runner.run(session, items, word_texts, meaning_texts, extra_kwargs=extra_kwargs)
+        run_id = self.layer2_runner.run(
+            session, items, word_texts, meaning_texts,
+            extra_kwargs=extra_kwargs, package_id=package_id,
+        )
 
         passed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_PASSED.value)
         failed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_FAILED.value)

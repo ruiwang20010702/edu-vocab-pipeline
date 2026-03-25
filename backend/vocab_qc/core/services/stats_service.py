@@ -20,9 +20,13 @@ stats_cache = TTLCache(default_ttl=10.0)
 _STATS_CACHE_KEY = "dashboard_stats"
 
 
+_PRODUCTION_RECORDS_CACHE_KEY = "production_records"
+
+
 def invalidate_stats_cache() -> None:
     """主动失效 stats 缓存（导入/生产/审核等写操作后调用）。"""
     stats_cache.invalidate(_STATS_CACHE_KEY)
+    stats_cache.invalidate(_PRODUCTION_RECORDS_CACHE_KEY)
 
 
 def get_dashboard_stats(session: Session) -> dict:
@@ -194,6 +198,10 @@ def get_ai_usage_stats(session: Session, days: int = 7) -> dict:
 
 def get_production_records(session: Session) -> dict:
     """按 Package 聚合 AI 用量，返回生产记录数据。"""
+    cached = stats_cache.get(_PRODUCTION_RECORDS_CACHE_KEY)
+    if cached is not None:
+        return cached
+
     from sqlalchemy import case
 
     gemini_filter = func.lower(AiUsageLog.ai_model).like("%gemini%")
@@ -248,7 +256,9 @@ def get_production_records(session: Session) -> dict:
         totals["gpt_input"] += rec["gpt_input_tokens"]
         totals["gpt_output"] += rec["gpt_output_tokens"]
 
-    return {"records": records, "totals": totals}
+    result = {"records": records, "totals": totals}
+    stats_cache.set(_PRODUCTION_RECORDS_CACHE_KEY, result)
+    return result
 
 
 def export_production_records_xlsx(session: Session):
