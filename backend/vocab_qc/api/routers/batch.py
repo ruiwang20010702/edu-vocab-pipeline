@@ -417,6 +417,10 @@ def _run_production_bg(batch_id: int) -> None:
                 session.commit()
             except Exception:
                 session.rollback()
+                logger.exception(
+                    "更新生产进度失败 batch_id=%s sub_batch=%d/%d",
+                    batch_id, batch_idx + 1, total_batches,
+                )
             finally:
                 session.close()
 

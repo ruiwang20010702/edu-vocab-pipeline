@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -124,6 +125,12 @@ class ReviewItem(Base):
     __tablename__ = "review_items"
     __table_args__ = (
         Index("ix_review_items_status_assigned", "status", "assigned_to_id"),
+        Index(
+            "uq_review_item_pending",
+            "content_item_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
         CheckConstraint("status IN ('pending', 'in_progress', 'resolved')", name="ck_review_items_status"),
     )
 

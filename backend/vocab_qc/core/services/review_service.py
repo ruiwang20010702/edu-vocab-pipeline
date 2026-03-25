@@ -1,9 +1,11 @@
 """人工审核服务: approve/regenerate/manual_edit + 重试计数."""
 
+import logging
 from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models import (
@@ -17,6 +19,8 @@ from vocab_qc.core.models import (
 )
 from vocab_qc.core.services.audit_service import log_action
 from vocab_qc.core.services.batch_service import update_batch_progress
+
+logger = logging.getLogger(__name__)
 
 
 def _lookup_package_id(session: Session, word_id: int) -> int | None:
@@ -82,8 +86,22 @@ class ReviewService:
             priority=priority,
             status=ReviewStatus.PENDING.value,
         )
+        nested = session.begin_nested()  # SAVEPOINT
         session.add(review)
-        session.flush()
+        try:
+            nested.commit()
+        except IntegrityError:
+            # 并发创建：部分唯一索引拦截了重复 pending 项
+            nested.rollback()
+            logger.debug(
+                "ReviewItem 重复入队（已忽略）: content_item_id=%d",
+                content_item.id,
+            )
+            existing = session.query(ReviewItem).filter_by(
+                content_item_id=content_item.id,
+                status=ReviewStatus.PENDING.value,
+            ).first()
+            return existing  # type: ignore[return-value]
         return review
 
     def create_review_items_batch(
@@ -130,10 +148,33 @@ class ReviewService:
             )
             for item in content_items if item.id not in existing_ids
         ]
-        if new_reviews:
-            session.add_all(new_reviews)
+        if not new_reviews:
+            return 0
+
+        # 先尝试批量写入（快路径，无并发冲突时一次完成）
+        session.add_all(new_reviews)
+        try:
             session.flush()
-        return len(new_reviews)
+            return len(new_reviews)
+        except IntegrityError:
+            session.rollback()
+
+        # 慢路径：逐条用 savepoint 隔离，跳过重复项
+        created = 0
+        for review in new_reviews:
+            nested = session.begin_nested()  # SAVEPOINT
+            session.add(review)
+            try:
+                nested.commit()
+                created += 1
+            except IntegrityError:
+                nested.rollback()  # 仅回滚到 savepoint
+                logger.debug(
+                    "ReviewItem 批量入队重复（已忽略）: content_item_id=%d",
+                    review.content_item_id,
+                )
+        session.flush()
+        return created
 
     def approve(
         self,
@@ -449,7 +490,8 @@ class ReviewService:
 
         phonetic = session.query(Phonetic).filter_by(word_id=content_item.word_id).first()
         if phonetic:
-            extra["ipa"] = phonetic.ipa
+            extra["ipa_uk"] = phonetic.ipa_uk or ""
+            extra["ipa_us"] = phonetic.ipa_us or ""
             extra["syllables"] = phonetic.syllables
 
         word_texts = {content_item.word_id: word_text}
