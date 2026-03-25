@@ -1,8 +1,9 @@
 """人工审核服务: approve/regenerate/manual_edit + 重试计数."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
@@ -321,6 +322,202 @@ class ReviewService:
             "new_content_cn": content_item.content_cn,
             "new_issues": new_issues,
         }
+
+    # ---- 异步 regenerate（三阶段拆分） ----
+
+    def _regen_preload(
+        self, session: Session, review_id: int, reviewer: str, user_id: Optional[int],
+    ) -> dict[str, Any]:
+        """Phase 1: DB 预加载 + 前置校验。返回 context dict 或含 early_return 的 dict。"""
+        from vocab_qc.core.generators.base import estimate_cost
+        from vocab_qc.core.models.data_layer import Meaning, Word
+        from vocab_qc.core.services.production_service import _GENERATORS
+
+        review = self._lock_review_item(session, review_id)
+        self._check_concurrency(review, user_id)
+
+        content_item = session.query(ContentItem).filter_by(id=review.content_item_id).one()
+        counter = self._get_or_create_counter(session, content_item)
+
+        # 原子递增计数 + 上限检查
+        result = session.execute(
+            update(RetryCounter)
+            .where(RetryCounter.id == counter.id, RetryCounter.count < self.max_retries)
+            .values(count=RetryCounter.count + 1, last_retry_at=datetime.now(UTC))
+        )
+        if result.rowcount == 0:
+            return {"early_return": {
+                "success": False, "qc_passed": False,
+                "retry_count": counter.count, "message": "已达到最大重试次数，请手动修改",
+            }}
+        session.refresh(counter)
+        content_item.retry_count = counter.count
+
+        generator = _GENERATORS.get(content_item.dimension)
+        if generator is None:
+            return {"early_return": {
+                "success": False, "qc_passed": False,
+                "retry_count": counter.count, "message": "未找到对应生成器",
+            }}
+
+        word = session.query(Word).filter_by(id=content_item.word_id).first()
+        if word is None:
+            return {"early_return": {
+                "success": False, "qc_passed": False,
+                "retry_count": counter.count, "message": "单词不存在",
+            }}
+
+        meaning_text = None
+        pos = None
+        if content_item.meaning_id:
+            meaning = session.query(Meaning).filter_by(id=content_item.meaning_id).first()
+            if meaning:
+                meaning_text = meaning.definition
+                pos = meaning.pos
+
+        ai_config = generator.resolve_ai_config(session=session)
+
+        return {
+            "review": review,
+            "content_item": content_item,
+            "counter": counter,
+            "generator": generator,
+            "ai_config": ai_config,
+            "word_text": word.word,
+            "word_id": content_item.word_id,
+            "meaning_text": meaning_text,
+            "pos": pos,
+            "estimate_cost": estimate_cost,
+            "reviewer": reviewer,
+        }
+
+    def _regen_writeback_and_qc(
+        self, session: Session, ctx: dict[str, Any], gen_result: dict, reviewer: str,
+    ) -> dict:
+        """Phase 3: 写入生成结果 + 运行质检 + 更新状态，返回最终 response dict。"""
+        from vocab_qc.core.models.quality_layer import AiUsageLog, QcRuleResult
+
+        content_item = ctx["content_item"]
+        review = ctx["review"]
+        counter = ctx["counter"]
+        generator = ctx["generator"]
+        ai_config = ctx["ai_config"]
+        estimate_cost = ctx["estimate_cost"]
+
+        # 记录 AI 用量
+        usage = gen_result.pop("__usage__", None)
+        if usage and usage.total_tokens > 0:
+            session.add(AiUsageLog(
+                phase="generation",
+                dimension=content_item.dimension,
+                ai_model=ai_config.model,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                estimated_cost_usd=estimate_cost(ai_config.model, usage),
+                word_id=content_item.word_id,
+                content_item_id=content_item.id,
+                package_id=_lookup_package_id(session, content_item.word_id),
+            ))
+
+        # 处理 rejected（助记类型不适用）
+        if gen_result.get("valid") is False:
+            content_item.content = ""
+            content_item.qc_status = QcStatus.REJECTED.value
+            review.status = ReviewStatus.RESOLVED.value
+            review.resolution = ReviewResolution.REGENERATE.value
+            review.reviewer = reviewer
+            review.resolved_at = datetime.now(UTC)
+            session.flush()
+            self._update_batch_progress(session, review.batch_id)
+            return {
+                "success": True, "qc_passed": True,
+                "retry_count": counter.count, "message": "该助记类型不适用，已跳过",
+                "new_content": None, "new_content_cn": None, "new_issues": [],
+            }
+
+        # 写入生成结果
+        content_item.content = gen_result.get("content", "")
+        if gen_result.get("content_cn"):
+            content_item.content_cn = gen_result["content_cn"]
+
+        # 重置质检状态 + 运行质检
+        content_item.qc_status = QcStatus.PENDING.value
+        session.flush()
+        qc_passed = self._run_qc_for_item(session, content_item)
+
+        if qc_passed:
+            content_item.qc_status = QcStatus.APPROVED.value
+            review.status = ReviewStatus.RESOLVED.value
+            review.resolution = ReviewResolution.REGENERATE.value
+            review.reviewer = reviewer
+            review.resolved_at = datetime.now(UTC)
+            message = f"第{counter.count}次重新生成成功，质检通过"
+        else:
+            message = f"第{counter.count}次重新生成完成，但质检未通过"
+
+        log_action(
+            session,
+            entity_type="review_item",
+            entity_id=review.id,
+            action="regenerate",
+            actor=reviewer,
+            new_value={"retry_count": counter.count, "qc_passed": qc_passed},
+        )
+
+        session.flush()
+        self._update_batch_progress(session, review.batch_id)
+
+        # 查询最新质检失败问题
+        new_issues = []
+        if content_item.last_qc_run_id and not qc_passed:
+            failed_results = (
+                session.query(QcRuleResult)
+                .filter_by(content_item_id=content_item.id, run_id=content_item.last_qc_run_id, passed=False)
+                .all()
+            )
+            new_issues = [
+                {"rule_id": r.rule_id, "field": r.dimension, "message": r.detail or ""}
+                for r in failed_results
+            ]
+
+        return {
+            "success": True,
+            "qc_passed": qc_passed,
+            "retry_count": counter.count,
+            "message": message,
+            "new_content": content_item.content,
+            "new_content_cn": content_item.content_cn,
+            "new_issues": new_issues,
+        }
+
+    async def regenerate_async(
+        self,
+        session: Session,
+        review_id: int,
+        reviewer: str,
+        user_id: Optional[int] = None,
+    ) -> dict:
+        """异步重新生成：preload(sync→thread) → AI生成(async) → 写回+QC(sync→thread)。"""
+        # Phase 1: DB 预加载
+        ctx = await asyncio.to_thread(
+            self._regen_preload, session, review_id, reviewer, user_id
+        )
+        if ctx.get("early_return"):
+            return ctx["early_return"]
+
+        # Phase 2: AI 生成（async，不占 worker）
+        gen_result = await ctx["generator"].generate_async(
+            word=ctx["word_text"],
+            meaning=ctx["meaning_text"],
+            pos=ctx["pos"],
+            _preloaded_config=ctx["ai_config"],
+        )
+
+        # Phase 3: 写回结果 + 质检
+        return await asyncio.to_thread(
+            self._regen_writeback_and_qc, session, ctx, gen_result, reviewer
+        )
 
     @staticmethod
     def _do_regenerate(session: Session, content_item: ContentItem) -> None:

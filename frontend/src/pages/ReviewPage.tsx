@@ -113,7 +113,15 @@ export default function ReviewPage({ onBack }: Props) {
       const detail = await api.get<BatchDetail>(`/batches/${data.id}/words`)
       const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
       const batchReviewIds = new Set(detail.words.flatMap(w => w.items.map(i => i.review_id)))
-      setItems((res.items ?? []).filter(r => batchReviewIds.has(r.id)))
+      const newItems = (res.items ?? []).filter(r => batchReviewIds.has(r.id))
+      // 仅在数据变化时更新，避免不必要的重渲染导致闪烁
+      setItems(prev => {
+        if (prev.length !== newItems.length) return newItems
+        const changed = newItems.some((item, i) =>
+          item.id !== prev[i].id || item.status !== prev[i].status || item.resolution !== prev[i].resolution
+        )
+        return changed ? newItems : prev
+      })
     } catch { /* 静默失败 */ }
   }, [actionLoading, batchFixing])
 
@@ -415,8 +423,8 @@ export default function ReviewPage({ onBack }: Props) {
                 }
               }
 
-              // 分批并发，每批 5 个，防止一次性打过多请求
-              const BATCH_SIZE = 5
+              // 分批并发，每批 2 个，避免打满 worker 导致 504
+              const BATCH_SIZE = 3
               let succeeded = 0
               let failed = 0
               for (let i = 0; i < canRetryItems.length; i += BATCH_SIZE) {

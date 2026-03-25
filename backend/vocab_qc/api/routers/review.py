@@ -1,5 +1,6 @@
 """审核 API 路由."""
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -159,7 +160,7 @@ def approve_review(
 
 @router.post("/{review_id}/regenerate", response_model=RegenerateResponse)
 @limiter.limit("20/minute")
-def regenerate(
+async def regenerate(
     request: Request,
     review_id: int,
     db: Session = Depends(get_db),
@@ -168,8 +169,8 @@ def regenerate(
 ):
     """触发重新生成（≤3次）."""
     try:
-        result = service.regenerate(db, review_id, reviewer=current_user.name, user_id=current_user.id)
-        db.commit()
+        result = await service.regenerate_async(db, review_id, reviewer=current_user.name, user_id=current_user.id)
+        await asyncio.to_thread(db.commit)
         return RegenerateResponse(**result)
     except NoResultFound:
         raise HTTPException(status_code=404, detail="审核项不存在")

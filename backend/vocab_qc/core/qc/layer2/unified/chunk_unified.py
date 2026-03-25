@@ -26,7 +26,12 @@ class UnifiedChunkChecker:
         self, client: AiClient, content: str, word: str,
         meaning: Optional[str] = None, **kwargs,
     ) -> list[RuleResult]:
-        user_prompt = f"单词: {word}\n义项: {meaning or '无'}\n语块: {content}"
+        content_cn = kwargs.get("content_cn", "")
+        pos = kwargs.get("pos", "")
+        user_prompt = (
+            f"Word: {word} | POS: {pos or '未知'} | Meaning: {meaning or '无'} "
+            f"| Chunk: {content} | Chinese: {content_cn or '无'}"
+        )
 
         # 优先使用完整 prompt + 纯文本输出
         full_prompt = load_full_prompt("chunk")
