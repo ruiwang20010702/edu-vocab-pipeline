@@ -122,6 +122,8 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
                 "syllables": syllables,
                 "ipa_uk": phonetic.ipa_uk if phonetic else "",
                 "ipa_us": phonetic.ipa_us if phonetic else "",
+                "audio_url_uk": phonetic.audio_url_uk if phonetic else "",
+                "audio_url_us": phonetic.audio_url_us if phonetic else "",
                 "meanings": [],
             }
 
@@ -130,10 +132,15 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
                 chunk = content_index.get((word_id, meaning.id, "chunk"))
                 sentence = content_index.get((word_id, meaning.id, "sentence"))
 
+                # 取第一条 Source 的教材 ID（一词多来源时优先取第一条）
+                first_source = sources[0] if sources else None
                 meaning_data = {
                     "pos": meaning.pos,
                     "def": meaning.definition,
                     "sources": [s.source_name for s in sources],
+                    "textbook_id": first_source.textbook_id if first_source else None,
+                    "word_book_id": first_source.word_book_id if first_source else None,
+                    "unit_id": first_source.unit_id if first_source else None,
                     "chunk": chunk.content if chunk else None,
                     "chunk_cn": chunk.content_cn if chunk else None,
                     "sentence": sentence.content if sentence else None,
@@ -201,6 +208,8 @@ class ExportService:
             "syllables": syllables,
             "ipa_uk": phonetic.ipa_uk if phonetic else "",
             "ipa_us": phonetic.ipa_us if phonetic else "",
+            "audio_url_uk": phonetic.audio_url_uk if phonetic else "",
+            "audio_url_us": phonetic.audio_url_us if phonetic else "",
             "meanings": [],
         }
 
@@ -208,10 +217,15 @@ class ExportService:
             chunk = content_index.get((meaning.id, "chunk"))
             sentence = content_index.get((meaning.id, "sentence"))
 
+            sources = sources_by_meaning.get(meaning.id, [])
+            first_source = sources[0] if sources else None
             meaning_data = {
                 "pos": meaning.pos,
                 "def": meaning.definition,
-                "sources": [s.source_name for s in sources_by_meaning.get(meaning.id, [])],
+                "sources": [s.source_name for s in sources],
+                "textbook_id": first_source.textbook_id if first_source else None,
+                "word_book_id": first_source.word_book_id if first_source else None,
+                "unit_id": first_source.unit_id if first_source else None,
                 "chunk": chunk.content if chunk else None,
                 "chunk_cn": chunk.content_cn if chunk else None,
                 "sentence": sentence.content if sentence else None,
@@ -262,7 +276,9 @@ class ExportService:
         ]
 
         base_headers = [
-            "单词", "英式音标", "美式音标", "音节", "词性", "释义", "教材来源",
+            "单词", "英式音标", "美式音标", "英式音频URL", "美式音频URL",
+            "音节", "词性", "释义", "教材来源",
+            "教材ID", "词书ID", "单元ID",
             "语块", "语块翻译", "例句", "例句翻译",
         ]
         mn_headers = []
@@ -286,6 +302,8 @@ class ExportService:
             word = word_data["word"]
             ipa_uk = word_data.get("ipa_uk", "")
             ipa_us = word_data.get("ipa_us", "")
+            audio_uk = word_data.get("audio_url_uk", "") or ""
+            audio_us = word_data.get("audio_url_us", "") or ""
             syllables = word_data.get("syllables", "")
             meanings = word_data.get("meanings", [])
 
@@ -293,7 +311,9 @@ class ExportService:
                 ws.cell(row=row, column=1, value=word)
                 ws.cell(row=row, column=2, value=ipa_uk)
                 ws.cell(row=row, column=3, value=ipa_us)
-                ws.cell(row=row, column=4, value=syllables)
+                ws.cell(row=row, column=4, value=audio_uk)
+                ws.cell(row=row, column=5, value=audio_us)
+                ws.cell(row=row, column=6, value=syllables)
                 row += 1
                 continue
 
@@ -301,15 +321,20 @@ class ExportService:
                 ws.cell(row=row, column=1, value=word)
                 ws.cell(row=row, column=2, value=ipa_uk)
                 ws.cell(row=row, column=3, value=ipa_us)
-                ws.cell(row=row, column=4, value=syllables)
-                ws.cell(row=row, column=5, value=m.get("pos", ""))
-                ws.cell(row=row, column=6, value=m.get("def", ""))
+                ws.cell(row=row, column=4, value=audio_uk)
+                ws.cell(row=row, column=5, value=audio_us)
+                ws.cell(row=row, column=6, value=syllables)
+                ws.cell(row=row, column=7, value=m.get("pos", ""))
+                ws.cell(row=row, column=8, value=m.get("def", ""))
                 sources = m.get("sources", [])
-                ws.cell(row=row, column=7, value="; ".join(sources) if sources else "")
-                ws.cell(row=row, column=8, value=m.get("chunk") or "")
-                ws.cell(row=row, column=9, value=m.get("chunk_cn") or "")
-                ws.cell(row=row, column=10, value=m.get("sentence") or "")
-                ws.cell(row=row, column=11, value=m.get("sentence_cn") or "")
+                ws.cell(row=row, column=9, value="; ".join(sources) if sources else "")
+                ws.cell(row=row, column=10, value=m.get("textbook_id") or "")
+                ws.cell(row=row, column=11, value=m.get("word_book_id") or "")
+                ws.cell(row=row, column=12, value=m.get("unit_id") or "")
+                ws.cell(row=row, column=13, value=m.get("chunk") or "")
+                ws.cell(row=row, column=14, value=m.get("chunk_cn") or "")
+                ws.cell(row=row, column=15, value=m.get("sentence") or "")
+                ws.cell(row=row, column=16, value=m.get("sentence_cn") or "")
 
                 # 助记：按 type 建索引
                 mn_by_type: dict[str, dict[str, str]] = {}
@@ -336,7 +361,7 @@ class ExportService:
                 row += 1
 
         # 列宽
-        base_widths = [12, 18, 18, 14, 8, 24, 18, 24, 24, 36, 36]
+        base_widths = [15, 22, 22, 40, 40, 18, 8, 30, 24, 12, 12, 12, 28, 28, 42, 42]
         mn_widths = [22, 22, 30] * 4
         for i, w in enumerate(base_widths + mn_widths, 1):
             ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
