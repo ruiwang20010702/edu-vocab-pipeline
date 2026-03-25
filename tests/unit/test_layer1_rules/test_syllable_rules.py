@@ -100,15 +100,15 @@ class TestS4SingleSyllableNoSplit:
         self.checker = S4SingleSyllableNoSplit()
 
     def test_single_syllable_no_split(self):
-        result = self.checker.check("kind", "kind", ipa="/kaɪnd/")
+        result = self.checker.check("kind", "kind", ipa_uk="/kaɪnd/")
         assert result.passed
 
     def test_multi_syllable_with_split(self):
-        result = self.checker.check("pa·per", "paper", ipa="/ˈpeɪ·pər/")
+        result = self.checker.check("pa·per", "paper", ipa_uk="/ˈpeɪ·pər/")
         assert result.passed
 
     def test_single_ipa_but_split_fails(self):
-        result = self.checker.check("ki·nd", "kind", ipa="/kaɪnd/")
+        result = self.checker.check("ki·nd", "kind", ipa_uk="/kaɪnd/")
         assert not result.passed
 
     def test_no_ipa_single_part(self):

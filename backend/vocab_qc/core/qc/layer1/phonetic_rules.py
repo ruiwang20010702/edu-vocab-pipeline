@@ -18,24 +18,30 @@ class P1IpaFormat(_RuleCheckerBase):
     description = "IPA 格式校验"
 
     def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
-        ipa = kwargs.get("ipa", content)
-        if not ipa:
+        ipa_uk = kwargs.get("ipa_uk", "")
+        ipa_us = kwargs.get("ipa_us", "")
+        # 兼容旧字段
+        if not ipa_uk and not ipa_us:
+            ipa_uk = kwargs.get("ipa", content)
+
+        if not ipa_uk and not ipa_us:
             return RuleResult(rule_id=self.rule_id, passed=False, detail="缺少音标")
 
-        # 检查是否用斜杠包裹
-        stripped = ipa.strip()
-        if not (stripped.startswith("/") and stripped.endswith("/")):
-            return RuleResult(rule_id=self.rule_id, passed=False, detail=f"音标未用斜杠包裹: {ipa!r}")
-
-        # 检查内部字符是否合法
-        inner = stripped[1:-1]
-        invalid_chars = set(inner) - IPA_CHARS
-        if invalid_chars:
-            return RuleResult(
-                rule_id=self.rule_id,
-                passed=False,
-                detail=f"音标包含非法字符: {invalid_chars}",
-            )
+        # 校验所有有值的音标
+        for label, ipa in [("英式", ipa_uk), ("美式", ipa_us)]:
+            if not ipa:
+                continue
+            stripped = ipa.strip()
+            if not (stripped.startswith("/") and stripped.endswith("/")):
+                return RuleResult(rule_id=self.rule_id, passed=False, detail=f"{label}音标未用斜杠包裹: {ipa!r}")
+            inner = stripped[1:-1]
+            invalid_chars = set(inner) - IPA_CHARS
+            if invalid_chars:
+                return RuleResult(
+                    rule_id=self.rule_id,
+                    passed=False,
+                    detail=f"{label}音标包含非法字符: {invalid_chars}",
+                )
 
         return RuleResult(rule_id=self.rule_id, passed=True)
 
@@ -49,7 +55,8 @@ class P2IpaSyllableAlignment(_RuleCheckerBase):
     description = "音标-音节对齐校验"
 
     def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
-        ipa = kwargs.get("ipa", "")
+        # 优先用英式音标，fallback 到美式
+        ipa = kwargs.get("ipa_uk", "") or kwargs.get("ipa_us", "") or kwargs.get("ipa", "")
         syllables = kwargs.get("syllables", "")
 
         if not ipa or not syllables:

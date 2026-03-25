@@ -54,7 +54,7 @@ def sample_word(db_session: Session):
     db_session.add(word)
     db_session.flush()
 
-    phonetic = Phonetic(word_id=word.id, ipa="/kaɪnd/", syllables="kind")
+    phonetic = Phonetic(word_id=word.id, ipa_uk="/kaɪnd/", ipa_us="/kaɪnd/", syllables="kind")
     db_session.add(phonetic)
 
     meaning1 = Meaning(word_id=word.id, pos="adj.", definition="友好的")

@@ -63,9 +63,9 @@ def test_phonetic_creation(db_session):
     db_session.add(word)
     db_session.flush()
 
-    phonetic = Phonetic(word_id=word.id, ipa="/ˈpeɪ·pər/", syllables="pa·per")
+    phonetic = Phonetic(word_id=word.id, ipa_uk="/ˈpeɪ·pər/", syllables="pa·per")
     db_session.add(phonetic)
     db_session.flush()
 
-    assert phonetic.ipa == "/ˈpeɪ·pər/"
+    assert phonetic.ipa_uk == "/ˈpeɪ·pər/"
     assert phonetic.syllables == "pa·per"

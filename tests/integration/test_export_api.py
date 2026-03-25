@@ -71,7 +71,7 @@ def test_app_with_data():
     session.add(word)
     session.flush()
 
-    phonetic = Phonetic(word_id=word.id, ipa="/braɪt/", syllables="bright")
+    phonetic = Phonetic(word_id=word.id, ipa_uk="/braɪt/", syllables="bright")
     session.add(phonetic)
 
     meaning = Meaning(word_id=word.id, pos="adj.", definition="明亮的")
@@ -172,7 +172,7 @@ class TestDownloadAll:
         assert len(data) == 1
         word_data = data[0]
         assert word_data["word"] == "bright"
-        assert word_data["ipa"] == "/braɪt/"
+        assert word_data["ipa_uk"] == "/braɪt/"
 
     def test_download_only_approved_content(self, test_app_with_data):
         """导出内容仅含 approved 状态，pending 不放行."""
@@ -219,7 +219,7 @@ class TestExportWord:
         client, word_id = test_app_with_data
         response = client.get(f"/api/export/word/{word_id}")
         data = response.json()
-        for key in ("id", "word", "syllables", "ipa", "meanings"):
+        for key in ("id", "word", "syllables", "ipa_uk", "meanings"):
             assert key in data
 
     def test_export_word_phonetic(self, test_app_with_data):
@@ -227,5 +227,5 @@ class TestExportWord:
         client, word_id = test_app_with_data
         response = client.get(f"/api/export/word/{word_id}")
         data = response.json()
-        assert data["ipa"] == "/braɪt/"
+        assert data["ipa_uk"] == "/braɪt/"
         assert data["syllables"] == "bright"

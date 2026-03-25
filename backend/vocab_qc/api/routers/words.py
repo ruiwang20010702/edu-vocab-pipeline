@@ -38,7 +38,8 @@ def _run_layer1_only(session: Session, content_item: ContentItem) -> bool:
 
     phonetic = session.query(Phonetic).filter_by(word_id=content_item.word_id).first()
     if phonetic:
-        extra["ipa"] = phonetic.ipa
+        extra["ipa_uk"] = phonetic.ipa_uk or ""
+        extra["ipa_us"] = phonetic.ipa_us or ""
         extra["syllables"] = phonetic.syllables
 
     word_texts = {content_item.word_id: word_text}

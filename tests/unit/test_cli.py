@@ -54,7 +54,7 @@ def _seed_word_and_content(session: Session, *, dimension: str = "chunk") -> dic
     session.add(word)
     session.flush()
 
-    phonetic = Phonetic(word_id=word.id, ipa="/həˈloʊ/", syllables="hel·lo")
+    phonetic = Phonetic(word_id=word.id, ipa_uk="/həˈloʊ/", syllables="hel·lo")
     session.add(phonetic)
 
     meaning = Meaning(word_id=word.id, pos="interj.", definition="你好")

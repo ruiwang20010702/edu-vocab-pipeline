@@ -194,7 +194,7 @@ export default function MasterTablePage() {
                 {words.map(w => {
                   const meanings = w.meanings ?? []
                   const rowCount = Math.max(meanings.length, 1)
-                  const ipa = w.phonetics?.[0]?.ipa ?? ''
+                  const ipa = [w.phonetics?.[0]?.ipa_uk, w.phonetics?.[0]?.ipa_us].filter(Boolean).join(' / ')
                   const syllables = w.syllable?.content ?? ''
 
                   if (meanings.length === 0) {

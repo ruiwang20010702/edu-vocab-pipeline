@@ -10,7 +10,10 @@ export interface Word {
 export interface Phonetic {
   id: number
   word_id: number
-  ipa: string
+  ipa_uk: string
+  ipa_us: string
+  audio_url_uk?: string
+  audio_url_us?: string
   syllables: string
 }
 
@@ -26,6 +29,9 @@ export interface Source {
   id: number
   meaning_id: number
   source_name: string
+  textbook_id?: number
+  word_book_id?: number
+  unit_id?: number
 }
 
 /* ===== 内容层类型 ===== */

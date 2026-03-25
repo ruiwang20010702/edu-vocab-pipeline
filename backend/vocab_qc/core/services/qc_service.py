@@ -265,7 +265,8 @@ class QcService:
             kwargs: dict = {"content_cn": item.content_cn or ""}
             phonetic = phonetics_by_word.get(item.word_id)
             if phonetic:
-                kwargs["ipa"] = phonetic.ipa
+                kwargs["ipa_uk"] = phonetic.ipa_uk or ""
+                kwargs["ipa_us"] = phonetic.ipa_us or ""
                 kwargs["syllables"] = phonetic.syllables
 
             # 为所有有 meaning_id 的维度传入 pos（sentence/mnemonic/meaning 等）

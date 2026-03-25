@@ -176,7 +176,7 @@ export function WordReviewModal({
                   <h2 className="text-3xl font-black text-slate-900 tracking-tight">{group.word_name}</h2>
                   {wordDetail?.phonetics?.[0] && (
                     <div className="flex items-center gap-3 mt-2">
-                      <span className="font-mono text-sm text-blue-600">{wordDetail.phonetics[0].ipa}</span>
+                      <span className="font-mono text-sm text-blue-600">{wordDetail.phonetics[0].ipa_uk}{wordDetail.phonetics[0].ipa_us ? ` / ${wordDetail.phonetics[0].ipa_us}` : ''}</span>
                       {(wordDetail.syllable?.content || wordDetail.phonetics[0].syllables) && (
                         <>
                           <span className="text-xs text-slate-400">·</span>

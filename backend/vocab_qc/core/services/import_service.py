@@ -14,6 +14,7 @@ _MAX_POS_LEN = 20
 _MAX_DEFINITION_LEN = 500
 _MAX_SOURCE_LEN = 200
 _MAX_IPA_LEN = 200
+_MAX_AUDIO_URL_LEN = 500
 
 from sqlalchemy.orm import Session
 
@@ -105,8 +106,8 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
     word_count = 0
     imported_words: list[Word] = []
     imported_meanings: list[tuple[Word, Meaning]] = []
-    pending_sources: list[tuple[int, str]] = []  # (meaning_id, source_name) - 暂存，flush 后填充
-    pending_source_entries: list[tuple[str, str, str]] = []  # (word_text, meaning_key, source_name)
+    pending_sources: list[tuple[int, str, dict]] = []  # (meaning_id, source_name, extra) - 暂存
+    pending_source_entries: list[tuple[str, str, str, dict]] = []  # (word_text, meaning_key, source_name, extra)
     new_phonetics: list[Phonetic] = []
     new_meanings: list[Meaning] = []
     # meaning_key → Meaning 对象（含尚未 flush 的新建对象）
@@ -118,16 +119,33 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
         word_count += 1
         imported_words.append(word)
 
-        # 音标（IPA）— 批量处理
-        ipa = entry.get("ipa", "").strip()
-        if ipa:
+        # 音标（IPA）— 批量处理（支持英式/美式分离）
+        ipa_uk = entry.get("ipa_uk", "").strip()
+        ipa_us = entry.get("ipa_us", "").strip()
+        audio_url_uk = entry.get("audio_url_uk", "").strip()
+        audio_url_us = entry.get("audio_url_us", "").strip()
+        has_phonetic_data = ipa_uk or ipa_us or audio_url_uk or audio_url_us
+        if has_phonetic_data:
             if word.id in existing_phonetic_ids:
-                # 更新已存在的（需要单独处理，但数量远小于总词数）
                 phonetic = session.query(Phonetic).filter_by(word_id=word.id).first()
                 if phonetic:
-                    phonetic.ipa = ipa
+                    if ipa_uk:
+                        phonetic.ipa_uk = ipa_uk
+                    if ipa_us:
+                        phonetic.ipa_us = ipa_us
+                    if audio_url_uk:
+                        phonetic.audio_url_uk = audio_url_uk
+                    if audio_url_us:
+                        phonetic.audio_url_us = audio_url_us
             else:
-                new_phonetics.append(Phonetic(word_id=word.id, ipa=ipa, syllables=""))
+                new_phonetics.append(Phonetic(
+                    word_id=word.id,
+                    ipa_uk=ipa_uk or None,
+                    ipa_us=ipa_us or None,
+                    audio_url_uk=audio_url_uk or None,
+                    audio_url_us=audio_url_us or None,
+                    syllables="",
+                ))
                 existing_phonetic_ids.add(word.id)
 
         for m_data in entry.get("meanings", []):
@@ -146,8 +164,20 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
 
             imported_meanings.append((word, meaning))
 
-            for src_name in m_data.get("sources", []):
-                pending_source_entries.append((word_text, f"{word.id}:{pos}:{definition}", src_name))
+            source_extra = {
+                "textbook_id": entry.get("textbook_id"),
+                "word_book_id": entry.get("word_book_id"),
+                "unit_id": entry.get("unit_id"),
+            }
+            sources = m_data.get("sources", [])
+            has_source_ids = any(v is not None for v in source_extra.values())
+            m_key = f"{word.id}:{pos}:{definition}"
+            if sources:
+                for src_name in sources:
+                    pending_source_entries.append((word_text, m_key, src_name, source_extra))
+            elif has_source_ids:
+                # 无 source 列但有教材 ID → 用批次名作 source_name
+                pending_source_entries.append((word_text, m_key, batch_name, source_extra))
 
     # ── 统一 flush：新 Phonetic + 新 Meaning ──
     if new_phonetics:
@@ -157,16 +187,16 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
 
     # ── 批量处理 Source（Meaning id 已就绪） ──
     pending_sources = []
-    for word_text, m_key, src_name in pending_source_entries:
+    for word_text, m_key, src_name, src_extra in pending_source_entries:
         parts = m_key.split(":", 2)
         key = (int(parts[0]), parts[1], parts[2])
         meaning = meaning_lookup.get(key)
         if meaning and meaning.id:
-            pending_sources.append((meaning.id, src_name))
+            pending_sources.append((meaning.id, src_name, src_extra))
 
     if pending_sources:
         existing_source_pairs: set[tuple[int, str]] = set()
-        unique_meaning_ids = list({mid for mid, _ in pending_sources})
+        unique_meaning_ids = list({mid for mid, _, _ in pending_sources})
         for i in range(0, len(unique_meaning_ids), 900):
             chunk = unique_meaning_ids[i:i + 900]
             for row in session.query(Source.meaning_id, Source.source_name).filter(
@@ -176,10 +206,16 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
 
         new_sources = []
         seen_pairs: set[tuple[int, str]] = set()
-        for mid, sname in pending_sources:
+        for mid, sname, src_extra in pending_sources:
             pair = (mid, sname)
             if pair not in existing_source_pairs and pair not in seen_pairs:
-                new_sources.append(Source(meaning_id=mid, source_name=sname))
+                new_sources.append(Source(
+                    meaning_id=mid,
+                    source_name=sname,
+                    textbook_id=src_extra.get("textbook_id"),
+                    word_book_id=src_extra.get("word_book_id"),
+                    unit_id=src_extra.get("unit_id"),
+                ))
                 seen_pairs.add(pair)
         if new_sources:
             session.add_all(new_sources)
@@ -235,9 +271,12 @@ def _parse_csv_text(text: str) -> list[dict[str, Any]]:
         pos = _truncate_field(row.get("pos", "").strip(), _MAX_POS_LEN, "pos", word)
         definition = _truncate_field(row.get("definition", "").strip(), _MAX_DEFINITION_LEN, "definition", word)
         source = _truncate_field(row.get("source", "").strip(), _MAX_SOURCE_LEN, "source", word)
-        ipa = _truncate_field(row.get("ipa", "").strip(), _MAX_IPA_LEN, "ipa", word)
-        if ipa and not entries[word].get("ipa"):
-            entries[word]["ipa"] = ipa
+        ipa_uk = _truncate_field(row.get("ipa_uk", row.get("ipa", "")).strip(), _MAX_IPA_LEN, "ipa_uk", word)
+        ipa_us = _truncate_field(row.get("ipa_us", "").strip(), _MAX_IPA_LEN, "ipa_us", word)
+        if ipa_uk and not entries[word].get("ipa_uk"):
+            entries[word]["ipa_uk"] = ipa_uk
+        if ipa_us and not entries[word].get("ipa_us"):
+            entries[word]["ipa_us"] = ipa_us
         if pos and definition:
             entries[word]["meanings"].append({
                 "pos": pos,
@@ -277,11 +316,17 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
     header = [str(c).strip().lower() if c else "" for c in rows[0]]
     col_map: dict[str, int] = {}
     for alias, key in [
-        ("word", "word"), ("单词", "word"),
+        ("word", "word"), ("单词", "word"), ("单词名", "word"),
         ("pos", "pos"), ("词性", "pos"),
         ("definition", "definition"), ("释义", "definition"), ("中文释义", "definition"),
         ("source", "source"), ("来源", "source"), ("教材来源", "source"),
-        ("ipa", "ipa"), ("音标", "ipa"),
+        ("ipa", "ipa_uk"), ("音标", "ipa_uk"), ("ipa_uk", "ipa_uk"), ("英式音标", "ipa_uk"),
+        ("ipa_us", "ipa_us"), ("美式音标", "ipa_us"),
+        ("audio_url_uk", "audio_url_uk"), ("英式音频url", "audio_url_uk"),
+        ("audio_url_us", "audio_url_us"), ("美式音频url", "audio_url_us"),
+        ("textbook_id", "textbook_id"), ("教材id", "textbook_id"),
+        ("word_book_id", "word_book_id"), ("词书id", "word_book_id"),
+        ("unit_id", "unit_id"), ("单元id", "unit_id"),
     ]:
         if alias in header and key not in col_map:
             col_map[key] = header.index(alias)
@@ -311,12 +356,46 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
             str(row[col_map.get("source", -1)] or "").strip() if "source" in col_map else "",
             _MAX_SOURCE_LEN, "source", word,
         )
-        ipa = _truncate_field(
-            str(row[col_map.get("ipa", -1)] or "").strip() if "ipa" in col_map else "",
-            _MAX_IPA_LEN, "ipa", word,
+        ipa_uk = _truncate_field(
+            str(row[col_map.get("ipa_uk", -1)] or "").strip() if "ipa_uk" in col_map else "",
+            _MAX_IPA_LEN, "ipa_uk", word,
         )
-        if ipa and not entries[word].get("ipa"):
-            entries[word]["ipa"] = ipa
+        ipa_us = _truncate_field(
+            str(row[col_map.get("ipa_us", -1)] or "").strip() if "ipa_us" in col_map else "",
+            _MAX_IPA_LEN, "ipa_us", word,
+        )
+        if ipa_uk and not entries[word].get("ipa_uk"):
+            entries[word]["ipa_uk"] = ipa_uk
+        if ipa_us and not entries[word].get("ipa_us"):
+            entries[word]["ipa_us"] = ipa_us
+        # 音频 URL
+        audio_uk = _truncate_field(
+            str(row[col_map.get("audio_url_uk", -1)] or "").strip() if "audio_url_uk" in col_map else "",
+            _MAX_AUDIO_URL_LEN, "audio_url_uk", word,
+        )
+        audio_us = _truncate_field(
+            str(row[col_map.get("audio_url_us", -1)] or "").strip() if "audio_url_us" in col_map else "",
+            _MAX_AUDIO_URL_LEN, "audio_url_us", word,
+        )
+        if audio_uk and not entries[word].get("audio_url_uk"):
+            entries[word]["audio_url_uk"] = audio_uk
+        if audio_us and not entries[word].get("audio_url_us"):
+            entries[word]["audio_url_us"] = audio_us
+        # 教材结构化 ID
+        def _safe_int(val: object) -> int | None:
+            if val is None:
+                return None
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return None
+
+        if "textbook_id" in col_map and not entries[word].get("textbook_id"):
+            entries[word]["textbook_id"] = _safe_int(row[col_map["textbook_id"]])
+        if "word_book_id" in col_map and not entries[word].get("word_book_id"):
+            entries[word]["word_book_id"] = _safe_int(row[col_map["word_book_id"]])
+        if "unit_id" in col_map and not entries[word].get("unit_id"):
+            entries[word]["unit_id"] = _safe_int(row[col_map["unit_id"]])
         if pos and definition:
             entries[word]["meanings"].append({
                 "pos": pos,

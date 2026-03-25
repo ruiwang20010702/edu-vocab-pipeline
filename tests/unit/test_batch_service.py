@@ -22,7 +22,7 @@ def _create_word_with_reviews(db: Session, word_text: str, n_items: int = 2) -> 
     db.add(word)
     db.flush()
 
-    phonetic = Phonetic(word_id=word.id, ipa=f"/{word_text}/", syllables=word_text)
+    phonetic = Phonetic(word_id=word.id, ipa_uk=f"/{word_text}/", syllables=word_text)
     meaning = Meaning(word_id=word.id, pos="n.", definition=f"{word_text}的意思")
     db.add_all([phonetic, meaning])
     db.flush()

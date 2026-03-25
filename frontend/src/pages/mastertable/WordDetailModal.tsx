@@ -476,7 +476,7 @@ export default function WordDetailModal({ word, loading, onClose, onWordUpdate, 
                   <div className="flex items-center gap-3 mt-2">
                     {word.phonetics?.[0] && (
                       <>
-                        <span className="font-mono text-sm text-blue-600">{word.phonetics[0].ipa}</span>
+                        <span className="font-mono text-sm text-blue-600">{word.phonetics[0].ipa_uk}{word.phonetics[0].ipa_us ? ` / ${word.phonetics[0].ipa_us}` : ''}</span>
                         <span className="text-xs text-slate-400">·</span>
                         {word.syllable?.id ? (
                           <SyllableInlineEditor

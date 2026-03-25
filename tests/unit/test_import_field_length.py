@@ -59,7 +59,7 @@ class TestCsvFieldLength:
         long_ipa = "/" + "x" * (_MAX_IPA_LEN + 10)
         csv_text = f"word,pos,definition,ipa\napple,n.,苹果,{long_ipa}"
         entries = _parse_csv_text(csv_text)
-        assert len(entries[0]["ipa"]) == _MAX_IPA_LEN
+        assert len(entries[0]["ipa_uk"]) == _MAX_IPA_LEN
 
     def test_normal_data_unaffected(self):
         csv_text = "word,pos,definition,source,ipa\napple,n.,苹果,人教七上,/ˈæp.əl/"

@@ -10,6 +10,9 @@ class SourceResponse(BaseModel):
     id: int
     meaning_id: int
     source_name: str
+    textbook_id: Optional[int] = None
+    word_book_id: Optional[int] = None
+    unit_id: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -41,7 +44,10 @@ class MeaningDetailResponse(BaseModel):
 class PhoneticResponse(BaseModel):
     id: int
     word_id: int
-    ipa: str
+    ipa_uk: Optional[str] = ""
+    ipa_us: Optional[str] = ""
+    audio_url_uk: Optional[str] = None
+    audio_url_us: Optional[str] = None
     syllables: str
 
     model_config = {"from_attributes": True}

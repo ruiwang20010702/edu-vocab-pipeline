@@ -29,7 +29,7 @@ def _seed_words(session: Session, n: int = 10) -> list[Word]:
         session.add(word)
         session.flush()
 
-        phonetic = Phonetic(word_id=word.id, ipa=f"/w{i}/", syllables=f"word_{i}")
+        phonetic = Phonetic(word_id=word.id, ipa_uk=f"/w{i}/", syllables=f"word_{i}")
         meaning = Meaning(word_id=word.id, pos="n.", definition=f"定义{i}")
         session.add_all([phonetic, meaning])
         session.flush()

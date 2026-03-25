@@ -41,7 +41,7 @@ def test_app():
     session.add(word)
     session.flush()
 
-    phonetic = Phonetic(word_id=word.id, ipa="/ˈhæpi/", syllables="hap·py")
+    phonetic = Phonetic(word_id=word.id, ipa_uk="/ˈhæpi/", syllables="hap·py")
     session.add(phonetic)
 
     meaning = Meaning(word_id=word.id, pos="adj.", definition="快乐的")

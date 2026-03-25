@@ -22,7 +22,7 @@ def full_word_data(db_session):
     db_session.add(word)
     db_session.flush()
 
-    phonetic = Phonetic(word_id=word.id, ipa="/ˈhæp·i/", syllables="hap\u00b7py")
+    phonetic = Phonetic(word_id=word.id, ipa_uk="/ˈhæp·i/", syllables="hap\u00b7py")
     db_session.add(phonetic)
 
     meaning = Meaning(word_id=word.id, pos="adj.", definition="快乐的；幸福的")
@@ -120,7 +120,7 @@ def test_e2e_full_pipeline(db_session, full_word_data):
     data = export_service.export_word(db_session, word.id)
     assert data is not None
     assert data["word"] == "happy"
-    assert data["ipa"] == "/ˈhæp·i/"
+    assert data["ipa_uk"] == "/ˈhæp·i/"
 
     # 验证导出就绪
     readiness = export_service.get_export_readiness(db_session)

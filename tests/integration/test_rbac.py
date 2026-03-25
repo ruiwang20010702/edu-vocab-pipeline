@@ -50,7 +50,7 @@ def _make_app(role: str):
     session.add(word)
     session.flush()
 
-    phonetic = Phonetic(word_id=word.id, ipa="/tɛst/", syllables="test")
+    phonetic = Phonetic(word_id=word.id, ipa_uk="/tɛst/", syllables="test")
     meaning = Meaning(word_id=word.id, pos="n.", definition="测试")
     session.add_all([phonetic, meaning])
     session.flush()

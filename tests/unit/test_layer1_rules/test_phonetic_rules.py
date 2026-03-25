@@ -9,27 +9,27 @@ class TestP1IpaFormat:
         self.checker = P1IpaFormat()
 
     def test_valid_ipa(self):
-        result = self.checker.check("", "kind", ipa="/kaɪnd/")
+        result = self.checker.check("", "kind", ipa_uk="/kaɪnd/")
         assert result.passed
 
     def test_valid_ipa_with_dot(self):
-        result = self.checker.check("", "paper", ipa="/ˈpeɪ·pər/")
+        result = self.checker.check("", "paper", ipa_uk="/ˈpeɪ·pər/")
         assert result.passed
 
     def test_valid_ipa_with_stress(self):
-        result = self.checker.check("", "about", ipa="/əˈbaʊt/")
+        result = self.checker.check("", "about", ipa_uk="/əˈbaʊt/")
         assert result.passed
 
     def test_missing_slashes(self):
-        result = self.checker.check("", "kind", ipa="kaɪnd")
+        result = self.checker.check("", "kind", ipa_uk="kaɪnd")
         assert not result.passed
 
     def test_empty_ipa(self):
-        result = self.checker.check("", "kind", ipa="")
+        result = self.checker.check("", "kind", ipa_uk="")
         assert not result.passed
 
     def test_only_opening_slash(self):
-        result = self.checker.check("", "kind", ipa="/kaɪnd")
+        result = self.checker.check("", "kind", ipa_uk="/kaɪnd")
         assert not result.passed
 
 
@@ -38,25 +38,25 @@ class TestP2IpaSyllableAlignment:
         self.checker = P2IpaSyllableAlignment()
 
     def test_single_syllable_aligned(self):
-        result = self.checker.check("", "kind", ipa="/kaɪnd/", syllables="kind")
+        result = self.checker.check("", "kind", ipa_uk="/kaɪnd/", syllables="kind")
         assert result.passed
 
     def test_two_syllable_aligned(self):
-        result = self.checker.check("", "paper", ipa="/ˈpeɪ·pər/", syllables="pa·per")
+        result = self.checker.check("", "paper", ipa_uk="/ˈpeɪ·pər/", syllables="pa·per")
         assert result.passed
 
     def test_three_syllable_aligned(self):
-        result = self.checker.check("", "beautiful", ipa="/ˈbjuː·tɪ·fəl/", syllables="beau·ti·ful")
+        result = self.checker.check("", "beautiful", ipa_uk="/ˈbjuː·tɪ·fəl/", syllables="beau·ti·ful")
         assert result.passed
 
     def test_misaligned_syllables(self):
-        result = self.checker.check("", "paper", ipa="/ˈpeɪpər/", syllables="pa·per")
+        result = self.checker.check("", "paper", ipa_uk="/ˈpeɪpər/", syllables="pa·per")
         assert not result.passed
 
     def test_missing_ipa(self):
-        result = self.checker.check("", "kind", ipa="", syllables="kind")
+        result = self.checker.check("", "kind", ipa_uk="", syllables="kind")
         assert not result.passed
 
     def test_missing_syllables(self):
-        result = self.checker.check("", "kind", ipa="/kaɪnd/", syllables="")
+        result = self.checker.check("", "kind", ipa_uk="/kaɪnd/", syllables="")
         assert not result.passed

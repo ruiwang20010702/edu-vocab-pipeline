@@ -53,14 +53,16 @@ def preview_file(
     rows: list[PreviewRow] = []
     for entry in data:
         word = entry.get("word", "")
-        ipa = entry.get("ipa", "")
+        ipa_uk = entry.get("ipa_uk", "")
+        ipa_us = entry.get("ipa_us", "")
         for m in entry.get("meanings", []):
             rows.append(PreviewRow(
                 word=word,
                 pos=m.get("pos", ""),
                 definition=m.get("definition", ""),
                 source=m.get("sources", [""])[0] if m.get("sources") else "",
-                ipa=ipa,
+                ipa_uk=ipa_uk,
+                ipa_us=ipa_us,
             ))
 
     total_count = len(rows)

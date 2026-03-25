@@ -274,7 +274,7 @@ export default function ImportPage({ onStartProduction }: Props) {
                   {previewRows.map((item, i) => (
                     <tr key={i} className="hover:bg-blue-50/30 transition-colors">
                       <td className="px-6 py-4 font-medium text-slate-900">{item.word}</td>
-                      <td className="px-6 py-4 font-mono text-sm text-blue-600">{item.ipa}</td>
+                      <td className="px-6 py-4 font-mono text-sm text-blue-600">{item.ipa_uk}{item.ipa_us ? ` / ${item.ipa_us}` : ''}</td>
                       <td className="px-6 py-4 text-slate-500">{item.pos}</td>
                       <td className="px-6 py-4 text-slate-700">{item.definition}</td>
                       <td className="px-6 py-4">

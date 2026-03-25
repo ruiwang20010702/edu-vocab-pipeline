@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -34,14 +35,17 @@ class Phonetic(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     word_id: Mapped[int] = mapped_column(ForeignKey("words.id"), nullable=False, index=True)
-    ipa: Mapped[str] = mapped_column(String(200), nullable=False)
+    ipa_uk: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    ipa_us: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    audio_url_uk: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    audio_url_us: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     syllables: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     word_rel: Mapped["Word"] = relationship(back_populates="phonetics")
 
     def __repr__(self) -> str:
-        return f"<Phonetic id={self.id} ipa={self.ipa!r}>"
+        return f"<Phonetic id={self.id} ipa_uk={self.ipa_uk!r} ipa_us={self.ipa_us!r}>"
 
 
 class Meaning(Base):
@@ -67,6 +71,9 @@ class Source(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meaning_id: Mapped[int] = mapped_column(ForeignKey("meanings.id"), nullable=False, index=True)
     source_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    textbook_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    word_book_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    unit_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     meaning_rel: Mapped["Meaning"] = relationship(back_populates="sources")

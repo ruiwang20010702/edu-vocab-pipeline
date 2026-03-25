@@ -120,7 +120,8 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
                 "id": word.id,
                 "word": word.word,
                 "syllables": syllables,
-                "ipa": phonetic.ipa if phonetic else "",
+                "ipa_uk": phonetic.ipa_uk if phonetic else "",
+                "ipa_us": phonetic.ipa_us if phonetic else "",
                 "meanings": [],
             }
 
@@ -198,7 +199,8 @@ class ExportService:
             "id": word.id,
             "word": word.word,
             "syllables": syllables,
-            "ipa": phonetic.ipa if phonetic else "",
+            "ipa_uk": phonetic.ipa_uk if phonetic else "",
+            "ipa_us": phonetic.ipa_us if phonetic else "",
             "meanings": [],
         }
 
@@ -260,7 +262,7 @@ class ExportService:
         ]
 
         base_headers = [
-            "单词", "音标", "音节", "词性", "释义", "教材来源",
+            "单词", "英式音标", "美式音标", "音节", "词性", "释义", "教材来源",
             "语块", "语块翻译", "例句", "例句翻译",
         ]
         mn_headers = []
@@ -282,29 +284,32 @@ class ExportService:
         row = 2
         for word_data in data:
             word = word_data["word"]
-            ipa = word_data.get("ipa", "")
+            ipa_uk = word_data.get("ipa_uk", "")
+            ipa_us = word_data.get("ipa_us", "")
             syllables = word_data.get("syllables", "")
             meanings = word_data.get("meanings", [])
 
             if not meanings:
                 ws.cell(row=row, column=1, value=word)
-                ws.cell(row=row, column=2, value=ipa)
-                ws.cell(row=row, column=3, value=syllables)
+                ws.cell(row=row, column=2, value=ipa_uk)
+                ws.cell(row=row, column=3, value=ipa_us)
+                ws.cell(row=row, column=4, value=syllables)
                 row += 1
                 continue
 
             for m in meanings:
                 ws.cell(row=row, column=1, value=word)
-                ws.cell(row=row, column=2, value=ipa)
-                ws.cell(row=row, column=3, value=syllables)
-                ws.cell(row=row, column=4, value=m.get("pos", ""))
-                ws.cell(row=row, column=5, value=m.get("def", ""))
+                ws.cell(row=row, column=2, value=ipa_uk)
+                ws.cell(row=row, column=3, value=ipa_us)
+                ws.cell(row=row, column=4, value=syllables)
+                ws.cell(row=row, column=5, value=m.get("pos", ""))
+                ws.cell(row=row, column=6, value=m.get("def", ""))
                 sources = m.get("sources", [])
-                ws.cell(row=row, column=6, value="; ".join(sources) if sources else "")
-                ws.cell(row=row, column=7, value=m.get("chunk") or "")
-                ws.cell(row=row, column=8, value=m.get("chunk_cn") or "")
-                ws.cell(row=row, column=9, value=m.get("sentence") or "")
-                ws.cell(row=row, column=10, value=m.get("sentence_cn") or "")
+                ws.cell(row=row, column=7, value="; ".join(sources) if sources else "")
+                ws.cell(row=row, column=8, value=m.get("chunk") or "")
+                ws.cell(row=row, column=9, value=m.get("chunk_cn") or "")
+                ws.cell(row=row, column=10, value=m.get("sentence") or "")
+                ws.cell(row=row, column=11, value=m.get("sentence_cn") or "")
 
                 # 助记：按 type 建索引
                 mn_by_type: dict[str, dict[str, str]] = {}
@@ -331,7 +336,7 @@ class ExportService:
                 row += 1
 
         # 列宽
-        base_widths = [12, 18, 14, 8, 24, 18, 24, 24, 36, 36]
+        base_widths = [12, 18, 18, 14, 8, 24, 18, 24, 24, 36, 36]
         mn_widths = [22, 22, 30] * 4
         for i, w in enumerate(base_widths + mn_widths, 1):
             ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w

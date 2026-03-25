@@ -32,7 +32,7 @@ class TestListWords:
         result = word_service.list_words(db_session)
         word_data = result["items"][0]
         assert len(word_data["phonetics"]) == 1
-        assert word_data["phonetics"][0].ipa == "/kaɪnd/"
+        assert word_data["phonetics"][0].ipa_uk == "/kaɪnd/"
 
     def test_word_detail_has_meanings(self, db_session, sample_word):
         result = word_service.list_words(db_session)
