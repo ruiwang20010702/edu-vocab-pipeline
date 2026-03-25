@@ -14,7 +14,8 @@ interface PreviewRow {
   pos: string
   definition: string
   source: string
-  ipa: string
+  ipa_uk: string
+  ipa_us: string
 }
 
 export default function ImportPage({ onStartProduction }: Props) {
