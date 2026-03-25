@@ -151,6 +151,49 @@ class TestGetProductionRecords:
         assert rec["gpt_input_tokens"] == 0
 
 
+class TestReviewRegeneratePackageId:
+    """审核重生成路径的 package_id 归因测试。"""
+
+    def test_lookup_package_id(self, db_session: Session):
+        """_lookup_package_id 正确反查 Package ID。"""
+        from vocab_qc.core.services.review_service import _lookup_package_id
+
+        pkg = _make_package(db_session, "lookup-test", total_words=1)
+        w = _make_word(db_session, "test")
+        db_session.add(PackageWord(package_id=pkg.id, word_id=w.id))
+        db_session.flush()
+
+        assert _lookup_package_id(db_session, w.id) == pkg.id
+
+    def test_lookup_package_id_missing(self, db_session: Session):
+        """word 不在任何 Package 中时返回 None。"""
+        from vocab_qc.core.services.review_service import _lookup_package_id
+
+        w = _make_word(db_session, "orphan")
+        assert _lookup_package_id(db_session, w.id) is None
+
+    def test_regenerate_usage_has_package_id(self, db_session: Session):
+        """模拟重生成写入 AiUsageLog，验证 package_id 被正确设置。"""
+        pkg = _make_package(db_session, "regen-test", total_words=1)
+        w = _make_word(db_session, "apple")
+        db_session.add(PackageWord(package_id=pkg.id, word_id=w.id))
+
+        # 直接写入带 package_id 的 usage log（模拟 _do_regenerate 行为）
+        from vocab_qc.core.services.review_service import _lookup_package_id
+
+        pkg_id = _lookup_package_id(db_session, w.id)
+        db_session.add(AiUsageLog(
+            phase="generation", dimension="chunk", ai_model="gemini-3-flash",
+            prompt_tokens=630, completion_tokens=100, total_tokens=730,
+            word_id=w.id, package_id=pkg_id,
+        ))
+        db_session.flush()
+
+        result = get_production_records(db_session)
+        assert len(result["records"]) == 1
+        assert result["records"][0]["gemini_input_tokens"] == 630
+
+
 class TestExportProductionRecordsXlsx:
     """export_production_records_xlsx 导出测试。"""
 

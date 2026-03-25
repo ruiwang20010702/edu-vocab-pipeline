@@ -19,6 +19,14 @@ from vocab_qc.core.services.audit_service import log_action
 from vocab_qc.core.services.batch_service import update_batch_progress
 
 
+def _lookup_package_id(session: Session, word_id: int) -> int | None:
+    """通过 word_id 反查所属 Package ID。"""
+    from vocab_qc.core.models.package_layer import PackageWord
+
+    row = session.query(PackageWord.package_id).filter_by(word_id=word_id).first()
+    return row[0] if row else None
+
+
 class ReviewService:
     def __init__(self, max_retries: int = 3):
         self.max_retries = max_retries
@@ -310,6 +318,7 @@ class ReviewService:
                 estimated_cost_usd=estimate_cost(ai_config.model, usage),
                 word_id=content_item.word_id,
                 content_item_id=content_item.id,
+                package_id=_lookup_package_id(session, content_item.word_id),
             ))
 
         if result.get("valid") is False:
@@ -452,7 +461,11 @@ class ReviewService:
         l2_runner = Layer2Runner()
         has_l2 = content_item.dimension in l2_runner._unified_checkers
         if has_l2:
-            l2_runner.run(session, [content_item], word_texts, meaning_texts, extra_kwargs=extra_kwargs)
+            pkg_id = _lookup_package_id(session, content_item.word_id)
+            l2_runner.run(
+                session, [content_item], word_texts, meaning_texts,
+                extra_kwargs=extra_kwargs, package_id=pkg_id,
+            )
             return content_item.qc_status == QcStatus.LAYER2_PASSED.value
 
         # 无 Layer 2 规则的维度（如 syllable），Layer 1 通过即算通过
