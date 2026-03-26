@@ -272,6 +272,7 @@ class Layer2Runner:
         package_id: int | None = None,
     ) -> str:
         """异步执行 Layer 2 批量校验."""
+        logger.info("Layer2Runner.run_async 开始 items=%d strategy=%s", len(items), strategy.value)
         self.load_dimension_configs(session)
         run_id = str(uuid.uuid4())
         extra_kwargs = extra_kwargs or {}
@@ -313,6 +314,12 @@ class Layer2Runner:
         qc_run.status = "completed"
 
         session.flush()
+
+        logger.info(
+            "Layer2Runner.run_async 完成 run_id=%s passed=%d failed=%d errors=%d",
+            run_id, passed_count, failed_count, len(error_logs),
+        )
+
         return run_id
 
     def run(
@@ -326,6 +333,7 @@ class Layer2Runner:
         package_id: int | None = None,
     ) -> str:
         """同步桥接：AI 调用在独立线程/事件循环，DB 操作在主线程."""
+        logger.info("Layer2Runner.run 开始 items=%d strategy=%s", len(items), strategy.value)
         self.load_dimension_configs(session)
         run_id = str(uuid.uuid4())
         extra_kwargs = extra_kwargs or {}
@@ -367,4 +375,10 @@ class Layer2Runner:
         qc_run.status = "completed"
 
         session.flush()
+
+        logger.info(
+            "Layer2Runner.run 完成 run_id=%s passed=%d failed=%d errors=%d",
+            run_id, passed_count, failed_count, len(error_logs),
+        )
+
         return run_id

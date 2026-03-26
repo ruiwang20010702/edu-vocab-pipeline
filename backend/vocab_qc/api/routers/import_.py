@@ -146,6 +146,8 @@ def import_file(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    logger.info("触发导入 filename=%s user=%s", safe_filename, _current_user.email)
+
     # 统计词数，决定同步还是异步
     word_count = len(data)
     _ASYNC_THRESHOLD = 1000  # ≥1000 词走后台

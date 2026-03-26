@@ -110,8 +110,11 @@ class AiClient:
         last_error = None
         for attempt in range(self.max_retries):
             try:
+                t0_call = time.monotonic()
                 result = await self._call_api(system_prompt, user_prompt, use_json_format=use_json_format)
+                call_elapsed = int((time.monotonic() - t0_call) * 1000)
                 self._circuit_breaker.record_success()
+                logger.info("AI 质检调用成功 [%s] elapsed=%dms", self.model, call_elapsed)
                 return result
             except Exception as e:
                 last_error = e

@@ -1,7 +1,10 @@
 """批次派发服务: 按词分配审核批次，防并发碰撞."""
 
+import logging
 from datetime import UTC, datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import distinct, func, update
 from sqlalchemy.orm import Session
@@ -92,6 +95,9 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
         item.assigned_to_id = user_id
 
     session.flush()
+
+    logger.info("批次领取 batch_id=%d user_id=%d word_count=%d item_count=%d", batch.id, user_id, len(actual_word_ids), len(items))
+
     return batch
 
 
@@ -147,6 +153,8 @@ def skip_word(session: Session, batch_id: int, word_id: int, user_id: int) -> No
     session.flush()
     update_batch_progress(session, batch_id)
 
+    logger.info("跳过单词 batch_id=%d word_id=%d user_id=%d", batch_id, word_id, user_id)
+
 
 def complete_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
     """标记批次完成。"""
@@ -159,6 +167,9 @@ def complete_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch
     batch.status = BatchStatus.COMPLETED.value
     batch.completed_at = datetime.now(UTC)
     session.flush()
+
+    logger.info("批次完成 batch_id=%d user_id=%d", batch_id, user_id)
+
     return batch
 
 
@@ -222,6 +233,9 @@ def release_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
     batch.status = BatchStatus.COMPLETED.value
     batch.completed_at = datetime.now(UTC)
     session.flush()
+
+    logger.info("批次释放 batch_id=%d user_id=%d", batch_id, user_id)
+
     return batch
 
 

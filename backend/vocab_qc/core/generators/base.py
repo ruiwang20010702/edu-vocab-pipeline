@@ -628,8 +628,11 @@ class ContentGenerator:
         last_error = None
         for attempt in range(settings.ai_max_retries):
             try:
+                t0_call = time.monotonic()
                 result = self._do_request(actual_url, actual_key, actual_model, system_prompt, user_prompt)
+                call_elapsed = int((time.monotonic() - t0_call) * 1000)
                 _generator_circuit_breaker.record_success()
+                logger.info("AI 调用成功 [%s] elapsed=%dms", actual_model, call_elapsed)
                 return result
             except Exception as e:
                 last_error = e
@@ -715,6 +718,8 @@ class ContentGenerator:
                     result = json.loads(content)
                     result["__usage__"] = usage
                     _generator_circuit_breaker.record_success()
+                    total_elapsed = int((time.monotonic() - t0) * 1000)
+                    logger.info("AI 调用成功 [%s] elapsed=%dms tokens=%d", actual_model, total_elapsed, usage.total_tokens if usage else 0)
                     return result
                 except json.JSONDecodeError as e:
                     raise AiRequestError(

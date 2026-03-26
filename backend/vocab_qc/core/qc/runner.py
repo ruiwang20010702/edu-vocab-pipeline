@@ -1,8 +1,11 @@
 """质检运行器: 协调 Layer 1/2 规则执行."""
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
@@ -65,6 +68,8 @@ class Layer1Runner:
         run_id = str(uuid.uuid4())
         extra_kwargs = extra_kwargs or {}
 
+        logger.info("Layer1Runner 开始 items=%d", len(items))
+
         # 创建运行记录
         qc_run = QcRun(
             id=run_id,
@@ -122,4 +127,7 @@ class Layer1Runner:
         qc_run.status = "completed"
 
         session.flush()
+
+        logger.info("Layer1Runner 完成 run_id=%s passed=%d failed=%d", run_id, passed_count, failed_count)
+
         return run_id

@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     allowed_email_domains: list[str] = []
     verification_code_expire_minutes: int = 10
 
+    # 日志
+    log_format: str = "text"         # "text" | "json"，生产环境设 "json"
+    log_level: str = "INFO"          # DEBUG / INFO / WARNING / ERROR
+    log_slow_request_ms: int = 3000  # 慢请求阈值（毫秒）
+
     # CORS
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 

@@ -1,7 +1,10 @@
 """熔断器：连续 N 次失败后快速失败，冷却 M 秒后半开重试。"""
 
+import logging
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitBreaker:
@@ -29,6 +32,7 @@ class CircuitBreaker:
             if self._state == self.OPEN:
                 if time.monotonic() - self._last_failure_time >= self._recovery_timeout:
                     self._state = self.HALF_OPEN
+                    logger.info("熔断器冷却完成 OPEN → HALF_OPEN (%.0fs后)", self._recovery_timeout)
             return self._state
 
     @property
@@ -49,8 +53,11 @@ class CircuitBreaker:
     def record_success(self) -> None:
         """记录成功，重置计数。"""
         with self._lock:
+            prev = self._state
             self._failure_count = 0
             self._state = self.CLOSED
+            if prev != self.CLOSED:
+                logger.info("熔断器恢复 %s → CLOSED", prev)
 
     def record_failure(self, error: str = "") -> None:
         """记录失败，达阈值则熔断；HALF_OPEN 下任何失败立即回到 OPEN。"""
@@ -61,6 +68,11 @@ class CircuitBreaker:
             if self._state == self.HALF_OPEN:
                 self._state = self.OPEN
                 self._last_failure_time = time.monotonic()
+                logger.warning("熔断器触发 HALF_OPEN → OPEN (半开重试失败): %s", error)
             elif self._failure_count >= self._failure_threshold:
                 self._state = self.OPEN
                 self._last_failure_time = time.monotonic()
+                logger.warning(
+                    "熔断器触发 CLOSED → OPEN (连续失败%d次): %s",
+                    self._failure_count, error,
+                )

@@ -136,6 +136,7 @@ def assign_batch(
     batch = batch_service.assign_batch(db, user_id=current_user.id, batch_size=batch_size)
     if batch is None:
         return None
+    logger.info("领取批次 batch_id=%s user=%s batch_size=%d", batch.id, current_user.email, batch_size)
     db.commit()
     return BatchResponse.model_validate(batch)
 
@@ -511,5 +512,6 @@ def produce_batch(
     pkg.status = "processing"
     pkg.processed_words = 0  # 重置进度，_run_production_bg 会用绝对值重新计算
     db.commit()
+    logger.info("触发生产 package_id=%s user=%s", batch_id, _current_user.email)
     background_tasks.add_task(_run_production_bg_async, batch_id)
     return ProduceResponse(batch_id=batch_id, status="processing")

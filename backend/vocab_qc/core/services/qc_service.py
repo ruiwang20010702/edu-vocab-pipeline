@@ -1,9 +1,11 @@
 """质检编排服务: 协调 Layer 1/2/3."""
 
+import logging
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from vocab_qc.core.logging_config import log_elapsed
 from vocab_qc.core.models import (
     ContentItem,
     Meaning,
@@ -17,6 +19,8 @@ from vocab_qc.core.models.quality_layer import QcRuleResult, QcRun
 from vocab_qc.core.qc.layer2.runner import Layer2Runner
 from vocab_qc.core.qc.runner import Layer1Runner
 from vocab_qc.core.services.review_service import ReviewService
+
+logger = logging.getLogger(__name__)
 
 
 class QcService:
@@ -59,6 +63,8 @@ class QcService:
         if not items:
             return {"run_id": None, "total": 0, "passed": 0, "failed": 0}
 
+        logger.info("Layer1 质检开始 total=%d scope=%s dimension=%s", len(items), scope, dimension)
+
         # 收集关联数据
         word_ids = {item.word_id for item in items}
         meaning_ids = {item.meaning_id for item in items if item.meaning_id}
@@ -69,11 +75,14 @@ class QcService:
         # 收集额外参数（音标、音节等）
         extra_kwargs = self._build_extra_kwargs(session, items)
 
-        run_id = self.layer1_runner.run(session, items, words, meanings, extra_kwargs)
+        with log_elapsed(logger, "Layer1 质检"):
+            run_id = self.layer1_runner.run(session, items, words, meanings, extra_kwargs)
 
         # 统计
         passed = sum(1 for item in items if item.qc_status == QcStatus.LAYER1_PASSED.value)
         failed = sum(1 for item in items if item.qc_status == QcStatus.LAYER1_FAILED.value)
+
+        logger.info("Layer1 质检完成 run_id=%s total=%d passed=%d failed=%d", run_id, len(items), passed, failed)
 
         return {"run_id": run_id, "total": len(items), "passed": passed, "failed": failed}
 
@@ -103,6 +112,8 @@ class QcService:
         if not items:
             return {"run_id": None, "total": 0, "passed": 0, "failed": 0}
 
+        logger.info("Layer2 质检开始 total=%d scope=%s dimension=%s", len(items), scope, dimension)
+
         word_ids = {item.word_id for item in items}
         meaning_ids = {item.meaning_id for item in items if item.meaning_id}
 
@@ -111,13 +122,16 @@ class QcService:
 
         extra_kwargs = self._build_extra_kwargs(session, items)
 
-        run_id = self.layer2_runner.run(
-            session, items, word_texts, meaning_texts,
-            extra_kwargs=extra_kwargs, package_id=package_id,
-        )
+        with log_elapsed(logger, "Layer2 质检"):
+            run_id = self.layer2_runner.run(
+                session, items, word_texts, meaning_texts,
+                extra_kwargs=extra_kwargs, package_id=package_id,
+            )
 
         passed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_PASSED.value)
         failed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_FAILED.value)
+
+        logger.info("Layer2 质检完成 run_id=%s total=%d passed=%d failed=%d", run_id, len(items), passed, failed)
 
         return {"run_id": run_id, "total": len(items), "passed": passed, "failed": failed}
 
@@ -143,6 +157,8 @@ class QcService:
         if not items:
             return {"run_id": None, "total": 0, "passed": 0, "failed": 0}
 
+        logger.info("Layer1 批量质检开始 word_ids=%d items=%d dimension=%s", len(word_ids), len(items), dimension)
+
         item_word_ids = {item.word_id for item in items}
         meaning_ids = {item.meaning_id for item in items if item.meaning_id}
 
@@ -150,10 +166,13 @@ class QcService:
         meanings = {m.id: m.definition for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all()}
         extra_kwargs = self._build_extra_kwargs(session, items)
 
-        run_id = self.layer1_runner.run(session, items, words, meanings, extra_kwargs)
+        with log_elapsed(logger, "Layer1 批量质检"):
+            run_id = self.layer1_runner.run(session, items, words, meanings, extra_kwargs)
 
         passed = sum(1 for item in items if item.qc_status == QcStatus.LAYER1_PASSED.value)
         failed = sum(1 for item in items if item.qc_status == QcStatus.LAYER1_FAILED.value)
+
+        logger.info("Layer1 批量质检完成 run_id=%s total=%d passed=%d failed=%d", run_id, len(items), passed, failed)
 
         return {"run_id": run_id, "total": len(items), "passed": passed, "failed": failed}
 
@@ -180,6 +199,8 @@ class QcService:
         if not items:
             return {"run_id": None, "total": 0, "passed": 0, "failed": 0}
 
+        logger.info("Layer2 批量质检开始 word_ids=%d items=%d dimension=%s", len(word_ids), len(items), dimension)
+
         item_word_ids = {item.word_id for item in items}
         meaning_ids = {item.meaning_id for item in items if item.meaning_id}
 
@@ -187,13 +208,16 @@ class QcService:
         meaning_texts = {m.id: m.definition for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all()}
         extra_kwargs = self._build_extra_kwargs(session, items)
 
-        run_id = self.layer2_runner.run(
-            session, items, word_texts, meaning_texts,
-            extra_kwargs=extra_kwargs, package_id=package_id,
-        )
+        with log_elapsed(logger, "Layer2 批量质检"):
+            run_id = self.layer2_runner.run(
+                session, items, word_texts, meaning_texts,
+                extra_kwargs=extra_kwargs, package_id=package_id,
+            )
 
         passed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_PASSED.value)
         failed = sum(1 for item in items if item.qc_status == QcStatus.LAYER2_FAILED.value)
+
+        logger.info("Layer2 批量质检完成 run_id=%s total=%d passed=%d failed=%d", run_id, len(items), passed, failed)
 
         return {"run_id": run_id, "total": len(items), "passed": passed, "failed": failed}
 
@@ -204,9 +228,11 @@ class QcService:
             .filter_by(qc_status=QcStatus.LAYER2_FAILED.value, last_qc_run_id=run_id)
             .all()
         )
-        return self.review_service.create_review_items_batch(
+        count = self.review_service.create_review_items_batch(
             session, failed_items, ReviewReason.LAYER2_FAILED, priority=5,
         )
+        logger.info("Layer2 失败项入审核队列 run_id=%s count=%d", run_id, count)
+        return count
 
     def enqueue_failed_for_review(self, session: Session, run_id: str) -> int:
         """将 Layer 1 失败项批量加入审核队列.
@@ -219,9 +245,11 @@ class QcService:
             .filter_by(qc_status=QcStatus.LAYER1_FAILED.value, last_qc_run_id=run_id)
             .all()
         )
-        return self.review_service.create_review_items_batch(
+        count = self.review_service.create_review_items_batch(
             session, failed_items, ReviewReason.LAYER1_FAILED, priority=10,
         )
+        logger.info("Layer1 失败项入审核队列 run_id=%s count=%d", run_id, count)
+        return count
 
     def enqueue_sampling(self, session: Session, run_id: str, sample_rate: float = 0.1) -> int:
         """将 Layer 1 通过项按比例抽样入审核队列.
@@ -240,9 +268,11 @@ class QcService:
         sample_size = max(1, int(len(passed_items) * sample_rate))
         sampled = random.sample(passed_items, min(sample_size, len(passed_items)))
 
-        return self.review_service.create_review_items_batch(
+        count = self.review_service.create_review_items_batch(
             session, sampled, ReviewReason.SAMPLING, priority=0,
         )
+        logger.info("抽样入审核队列 run_id=%s sample_rate=%.1f%% count=%d", run_id, sample_rate * 100, count)
+        return count
 
     def _build_extra_kwargs(self, session: Session, items: list[ContentItem]) -> dict[int, dict]:
         """为规则检查器构建额外参数（如音标、音节信息）."""

@@ -8,5 +8,6 @@ exec gunicorn \
     --bind 127.0.0.1:8000 \
     --timeout 120 \
     --access-logfile - \
+    --error-logfile - \
     --log-level info \
     vocab_qc.api.main:app

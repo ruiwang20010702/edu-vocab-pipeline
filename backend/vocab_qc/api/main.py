@@ -16,12 +16,20 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from vocab_qc.api.deps import get_db
 from vocab_qc.api.routers import admin, auth, batch, export, import_, prompt, qc, review, stats, words
 from vocab_qc.core.config import _INSECURE_JWT_SECRETS, settings, validate_production_config
+from vocab_qc.core.logging_config import (
+    AccessLogMiddleware,
+    RequestIdMiddleware,
+    configure_logging,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _setup_async_logging() -> QueueListener:
     """将日志写入队列，后台线程异步消费，避免 I/O 阻塞请求线程。"""
+    # 先配置格式和 Filter（在 QueueHandler 接管之前）
+    configure_logging(log_format=settings.log_format, log_level=settings.log_level)
+
     log_queue: Queue = Queue(-1)
     root = logging.getLogger()
     original_handlers = root.handlers[:]
@@ -109,6 +117,8 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(AccessLogMiddleware, slow_ms=settings.log_slow_request_ms)
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(auth.router)
 app.include_router(admin.router)

@@ -150,12 +150,14 @@ class ReviewService:
             for item in content_items if item.id not in existing_ids
         ]
         if not new_reviews:
+            logger.info("审核项入队 reason=%s total=%d enqueued=%d", reason.value, len(content_items), 0)
             return 0
 
         # 先尝试批量写入（快路径，无并发冲突时一次完成）
         session.add_all(new_reviews)
         try:
             session.flush()
+            logger.info("审核项入队 reason=%s total=%d enqueued=%d", reason.value, len(content_items), len(new_reviews))
             return len(new_reviews)
         except IntegrityError:
             session.rollback()
@@ -175,6 +177,7 @@ class ReviewService:
                     review.content_item_id,
                 )
         session.flush()
+        logger.info("审核项入队 reason=%s total=%d enqueued=%d", reason.value, len(content_items), created)
         return created
 
     def approve(
@@ -209,6 +212,8 @@ class ReviewService:
             old_value={"status": old_status},
             new_value={"status": review.status, "resolution": review.resolution},
         )
+
+        logger.info("审核通过 review_id=%d reviewer=%s content_item_id=%d", review_id, reviewer, review.content_item_id)
 
         session.flush()
         self._update_batch_progress(session, review.batch_id)
@@ -295,6 +300,8 @@ class ReviewService:
             actor=reviewer,
             new_value={"retry_count": counter.count, "qc_passed": qc_passed},
         )
+
+        logger.info("重新生成 review_id=%d reviewer=%s retry=%d qc_passed=%s", review_id, reviewer, counter.count, qc_passed)
 
         session.flush()
         self._update_batch_progress(session, review.batch_id)
@@ -622,6 +629,8 @@ class ReviewService:
             old_value={"content": old_content},
             new_value={"content": new_content},
         )
+
+        logger.info("人工修改 review_id=%d reviewer=%s qc_passed=%s", review_id, reviewer, qc_passed)
 
         session.flush()
         self._update_batch_progress(session, review.batch_id)

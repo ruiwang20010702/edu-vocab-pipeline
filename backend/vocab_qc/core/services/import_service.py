@@ -252,6 +252,11 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
     package.processed_words = 0
 
     session.flush()
+    _logger.info(
+        "导入完成 batch=%s 新建词=%d 复用词=%d 新义项=%d 新音标=%d 总词数=%d",
+        batch_name, len(new_words), word_count - len(new_words),
+        len(new_meanings), len(new_phonetics), word_count,
+    )
     return {"batch_id": str(package.id), "word_count": word_count}
 
 

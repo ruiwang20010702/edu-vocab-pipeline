@@ -182,6 +182,7 @@ def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
     count = r1.rowcount + r2.rowcount
     if count:
         session.flush()
+        logger.info("自动批准 auto_approved=%d (l2_passed=%d no_l2=%d)", count, r1.rowcount, r2.rowcount)
     return count
 
 
@@ -198,6 +199,7 @@ def run_production(
         {"generated": int, "qc_passed": int, "qc_failed": int,
          "l2_passed": int, "l2_failed": int, "enqueued": int}
     """
+    import time as _time
     qc = qc_service or QcService()
 
     pkg = session.query(Package).filter_by(id=package_id).first()
@@ -210,6 +212,8 @@ def run_production(
 
     # 获取 Package 关联的所有 word_id
     word_ids_from_package = _get_word_ids_for_package(session, package_id)
+
+    logger.info("生产开始 package_id=%s 词数=%d", package_id, len(word_ids_from_package))
 
     if not word_ids_from_package:
         pkg.status = "completed"
@@ -225,9 +229,12 @@ def run_production(
         .all()
     )
 
+    _t0 = _time.monotonic()
+
     # Step 1: 生成内容
     generated = _generate_content(session, items, package_id=package_id)
     session.flush()
+    logger.info("生成阶段完成 package_id=%s 成功=%d 总待生成=%d", package_id, generated, len(items))
 
     # Step 2: 运行 Layer 1 质检（批量）
     qc_result = qc.run_layer1_batch(session, word_ids_from_package)
@@ -235,10 +242,14 @@ def run_production(
         qc.enqueue_failed_for_review(session, qc_result["run_id"])
     session.flush()
 
+    logger.info("L1质检完成 package_id=%s passed=%d failed=%d", package_id, qc_result["passed"], qc_result["failed"])
+
     # Step 3: 运行 Layer 2 AI 质检（批量，仅针对 Layer 1 通过项）
     l2_result = qc.run_layer2_batch(session, word_ids_from_package, package_id=package_id)
     if l2_result.get("run_id"):
         qc.enqueue_layer2_failed_for_review(session, l2_result["run_id"])
+
+    logger.info("L2质检完成 package_id=%s passed=%d failed=%d", package_id, l2_result["passed"], l2_result["failed"])
 
     # Step 4: 自动批准通过全部质检的项目
     auto_approved = _auto_approve_passed(session, word_ids_from_package)
@@ -248,6 +259,15 @@ def run_production(
     pkg.completed_at = datetime.now(UTC)
     pkg.status = "completed"
     session.flush()
+
+    _elapsed = _time.monotonic() - _t0
+    logger.info(
+        "生产完成 package_id=%s 耗时=%.1fs generated=%d l1_passed=%d l1_failed=%d l2_passed=%d l2_failed=%d auto_approved=%d",
+        package_id, _elapsed, generated,
+        qc_result["passed"], qc_result["failed"],
+        l2_result["passed"], l2_result["failed"],
+        auto_approved,
+    )
 
     enqueued = qc_result["failed"] + l2_result["failed"]
     return {

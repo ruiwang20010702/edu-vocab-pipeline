@@ -2,10 +2,15 @@
 
 import io
 import json
+import logging
 import re
 from typing import Any
 
 from sqlalchemy.orm import Session
+
+from vocab_qc.core.logging_config import log_elapsed
+
+logger = logging.getLogger(__name__)
 
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
 from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
@@ -162,8 +167,11 @@ class ExportService:
         """导出单个词的完整数据（仅 approved 内容）."""
         from collections import defaultdict
 
+        logger.info("导出单词开始 word_id=%d", word_id)
+
         word = session.query(Word).filter_by(id=word_id).first()
         if not word:
+            logger.warning("导出单词未找到 word_id=%d", word_id)
             return None
 
         phonetic = session.query(Phonetic).filter_by(word_id=word.id).first()
@@ -238,10 +246,15 @@ class ExportService:
 
     def export_all_approved(self, session: Session) -> list[dict[str, Any]]:
         """导出所有有 approved 内容的词（复用分批生成器，避免全量加载）."""
-        return list(_iter_approved_batches(session))
+        logger.info("导出全部已审核词汇开始")
+        with log_elapsed(logger, "导出全部已审核词汇"):
+            result = list(_iter_approved_batches(session))
+        logger.info("导出全部已审核词汇完成 count=%d", len(result))
+        return result
 
     def export_to_json(self, session: Session, filepath: str) -> int:
         """导出到 JSON 文件（分批写入，避免全量加载到内存）."""
+        logger.info("导出 JSON 开始 filepath=%s", filepath)
         count = 0
         with open(filepath, "w", encoding="utf-8") as f:
             f.write("[\n")
@@ -251,6 +264,7 @@ class ExportService:
                 json.dump(item, f, ensure_ascii=False, indent=2)
                 count += 1
             f.write("\n]")
+        logger.info("导出 JSON 完成 filepath=%s count=%d", filepath, count)
         return count
 
     def export_to_excel(self, session: Session) -> io.BytesIO:
@@ -258,6 +272,7 @@ class ExportService:
 
         P-M1: 使用分批查询，避免全量加载到内存。
         """
+        logger.info("导出 Excel 开始")
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Font, PatternFill
 
@@ -371,6 +386,7 @@ class ExportService:
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
+        logger.info("导出 Excel 完成 rows=%d", row - 2)
         return buf
 
     def get_export_readiness(self, session: Session) -> dict:

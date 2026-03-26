@@ -1,5 +1,6 @@
 """导出 API 路由."""
 
+import logging
 import json
 from typing import Iterator
 
@@ -11,6 +12,8 @@ from vocab_qc.api.deps import get_db, require_role
 from vocab_qc.api.routers.auth import limiter
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services.export_service import ExportService, _iter_approved_batches
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/export", tags=["导出"])
 
@@ -63,6 +66,7 @@ def download_all(
     _current_user: User = Depends(require_role("admin")),
 ):
     """下载所有已审核通过的词汇数据 (JSON 流式导出)."""
+    logger.info("导出下载 format=json user=%s", _current_user.email)
     return StreamingResponse(
         _stream_json(db),
         media_type="application/json",
@@ -78,6 +82,7 @@ def download_excel(
     _current_user: User = Depends(require_role("admin", "reviewer")),
 ):
     """下载所有已通过词汇数据 (Excel)."""
+    logger.info("导出下载 format=excel user=%s", _current_user.email)
     service = ExportService()
     buf = service.export_to_excel(db)
     return StreamingResponse(
