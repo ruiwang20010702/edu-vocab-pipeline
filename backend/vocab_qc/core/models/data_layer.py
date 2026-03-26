@@ -71,9 +71,9 @@ class Source(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meaning_id: Mapped[int] = mapped_column(ForeignKey("meanings.id"), nullable=False, index=True)
     source_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    textbook_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    word_book_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    unit_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    textbook_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    word_book_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    unit_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     meaning_rel: Mapped["Meaning"] = relationship(back_populates="sources")

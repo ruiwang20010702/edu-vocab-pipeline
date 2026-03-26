@@ -282,6 +282,16 @@ def _parse_csv_text(text: str) -> list[dict[str, Any]]:
             entries[word]["ipa_uk"] = ipa_uk
         if ipa_us and not entries[word].get("ipa_us"):
             entries[word]["ipa_us"] = ipa_us
+        # 教材结构化 ID
+        tb = row.get("textbook_id", "").strip()
+        wb = row.get("word_book_id", "").strip()
+        ui = row.get("unit_id", "").strip()
+        if tb and not entries[word].get("textbook_id"):
+            entries[word]["textbook_id"] = tb
+        if wb and not entries[word].get("word_book_id"):
+            entries[word]["word_book_id"] = wb
+        if ui and not entries[word].get("unit_id"):
+            entries[word]["unit_id"] = ui
         if pos and definition:
             entries[word]["meanings"].append({
                 "pos": pos,
@@ -387,20 +397,18 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
         if audio_us and not entries[word].get("audio_url_us"):
             entries[word]["audio_url_us"] = audio_us
         # 教材结构化 ID
-        def _safe_int(val: object) -> int | None:
+        def _safe_str(val: object) -> str | None:
             if val is None:
                 return None
-            try:
-                return int(val)
-            except (ValueError, TypeError):
-                return None
+            s = str(val).strip()
+            return s if s else None
 
         if "textbook_id" in col_map and not entries[word].get("textbook_id"):
-            entries[word]["textbook_id"] = _safe_int(row[col_map["textbook_id"]])
+            entries[word]["textbook_id"] = _safe_str(row[col_map["textbook_id"]])
         if "word_book_id" in col_map and not entries[word].get("word_book_id"):
-            entries[word]["word_book_id"] = _safe_int(row[col_map["word_book_id"]])
+            entries[word]["word_book_id"] = _safe_str(row[col_map["word_book_id"]])
         if "unit_id" in col_map and not entries[word].get("unit_id"):
-            entries[word]["unit_id"] = _safe_int(row[col_map["unit_id"]])
+            entries[word]["unit_id"] = _safe_str(row[col_map["unit_id"]])
         if pos and definition:
             entries[word]["meanings"].append({
                 "pos": pos,

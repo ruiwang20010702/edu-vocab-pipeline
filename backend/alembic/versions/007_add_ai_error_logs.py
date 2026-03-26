@@ -1,7 +1,7 @@
 """新增 ai_error_logs 表记录 AI 调用失败.
 
 Revision ID: 007_add_ai_error_logs
-Revises: eb1d3d8b6d1c
+Revises: 006_prompt_ai_config
 Create Date: 2026-03-12
 """
 
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "007_add_ai_error_logs"
-down_revision = "eb1d3d8b6d1c"
+down_revision = "006_prompt_ai_config"
 branch_labels = None
 depends_on = None
 
