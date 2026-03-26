@@ -30,7 +30,7 @@ class TestCsvFieldLength:
         """超长单词应被跳过。"""
         long_word = "a" * (_MAX_WORD_LEN + 1)
         csv_text = f"word,pos,definition\n{long_word},n.,test\napple,n.,苹果"
-        entries = _parse_csv_text(csv_text)
+        entries, _ = _parse_csv_text(csv_text)
         words = [e["word"] for e in entries]
         assert long_word not in words
         assert "apple" in words
@@ -39,31 +39,31 @@ class TestCsvFieldLength:
         """超长词性应被截断。"""
         long_pos = "x" * (_MAX_POS_LEN + 10)
         csv_text = f"word,pos,definition\napple,{long_pos},苹果"
-        entries = _parse_csv_text(csv_text)
+        entries, _ = _parse_csv_text(csv_text)
         assert len(entries) == 1
         assert len(entries[0]["meanings"][0]["pos"]) == _MAX_POS_LEN
 
     def test_long_definition_truncated(self):
         long_def = "字" * (_MAX_DEFINITION_LEN + 10)
         csv_text = f"word,pos,definition\napple,n.,{long_def}"
-        entries = _parse_csv_text(csv_text)
+        entries, _ = _parse_csv_text(csv_text)
         assert len(entries[0]["meanings"][0]["definition"]) == _MAX_DEFINITION_LEN
 
     def test_long_source_truncated(self):
         long_src = "s" * (_MAX_SOURCE_LEN + 10)
         csv_text = f"word,pos,definition,source\napple,n.,苹果,{long_src}"
-        entries = _parse_csv_text(csv_text)
+        entries, _ = _parse_csv_text(csv_text)
         assert len(entries[0]["meanings"][0]["sources"][0]) == _MAX_SOURCE_LEN
 
     def test_long_ipa_truncated(self):
         long_ipa = "/" + "x" * (_MAX_IPA_LEN + 10)
         csv_text = f"word,pos,definition,ipa\napple,n.,苹果,{long_ipa}"
-        entries = _parse_csv_text(csv_text)
+        entries, _ = _parse_csv_text(csv_text)
         assert len(entries[0]["ipa_uk"]) == _MAX_IPA_LEN
 
     def test_normal_data_unaffected(self):
         csv_text = "word,pos,definition,source,ipa\napple,n.,苹果,人教七上,/ˈæp.əl/"
-        entries = _parse_csv_text(csv_text)
+        entries, _ = _parse_csv_text(csv_text)
         assert entries[0]["word"] == "apple"
         assert entries[0]["meanings"][0]["pos"] == "n."
         assert entries[0]["meanings"][0]["definition"] == "苹果"

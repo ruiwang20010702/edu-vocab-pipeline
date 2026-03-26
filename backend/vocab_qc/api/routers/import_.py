@@ -45,7 +45,7 @@ def preview_file(
     safe_filename = Path(file.filename).name
 
     try:
-        data = import_service.parse_upload(content, safe_filename)
+        data, _preview_warnings = import_service.parse_upload(content, safe_filename)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -69,13 +69,13 @@ def preview_file(
     return PreviewResponse(rows=rows[:5], total_count=total_count)
 
 
-def _run_import_bg(data: list[dict[str, Any]], batch_name: str, force: bool) -> None:
+def _run_import_bg(data: list[dict[str, Any]], batch_name: str, force: bool, warnings: list[str] | None = None) -> None:
     """后台线程执行导入，使用独立 Session。"""
     from vocab_qc.core.db import SyncSessionLocal
 
     session = SyncSessionLocal()
     try:
-        import_service.import_from_json(session, data, batch_name, force=force)
+        import_service.import_from_json(session, data, batch_name, force=force, warnings=warnings)
         session.commit()
         logger.info("后台导入完成: batch_name=%s", batch_name)
     except Exception:
@@ -142,7 +142,7 @@ def import_file(
 
     # 解析文件（同步，快速报错）
     try:
-        data = import_service.parse_upload(content, safe_filename)
+        data, parse_warnings = import_service.parse_upload(content, safe_filename)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -174,17 +174,18 @@ def import_file(
             pkg_id = existing_pkg.id
 
         # 提交后台任务
-        _import_executor.submit(_run_import_bg, data, batch_name, force)
+        _import_executor.submit(_run_import_bg, data, batch_name, force, parse_warnings)
 
         return ImportResponse(
             batch_id=str(pkg_id),
             word_count=word_count,
             message=f"已提交 {word_count} 个词汇的导入任务（后台处理中）",
+            warnings=parse_warnings,
         )
 
     # 小文件：同步执行
     try:
-        result = import_service.import_from_json(db, data, batch_name, force=force)
+        result = import_service.import_from_json(db, data, batch_name, force=force, warnings=parse_warnings)
     except ValueError as e:
         status = 409 if "不可重复导入" in str(e) else 400
         raise HTTPException(status_code=status, detail=str(e))
@@ -197,4 +198,5 @@ def import_file(
         batch_id=result["batch_id"],
         word_count=result["word_count"],
         message=f"成功导入 {result['word_count']} 个词汇",
+        warnings=result.get("warnings", []),
     )

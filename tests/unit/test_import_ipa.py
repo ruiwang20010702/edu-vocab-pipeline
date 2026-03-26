@@ -97,10 +97,12 @@ class TestImportWithIPA:
         excel_bytes = buffer.getvalue()
 
         # 导入
+        data, warnings = import_service.parse_upload(excel_bytes, "test.xlsx")
         result = import_service.import_from_json(
             db_session,
-            import_service.parse_upload(excel_bytes, "test.xlsx"),
-            "excel_ipa_test"
+            data,
+            "excel_ipa_test",
+            warnings=warnings,
         )
         assert result["word_count"] == 2
 

@@ -55,6 +55,6 @@ class TestMagicBytesValidation:
     def test_parse_upload_json_still_works(self):
         """parse_upload JSON 仍然正常工作。"""
         data = [{"word": "test", "meanings": [{"pos": "n.", "definition": "测试"}]}]
-        result = parse_upload(json.dumps(data).encode(), "test.json")
+        result, _ = parse_upload(json.dumps(data).encode(), "test.json")
         assert len(result) == 1
         assert result[0]["word"] == "test"

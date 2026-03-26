@@ -79,7 +79,10 @@ export default function ImportPage({ onStartProduction }: Props) {
       fd.append('file', file!)
       const params = new URLSearchParams({ batch_name: batchName.trim() })
       if (force) params.set('force', 'true')
-      const res = await api.upload<{ batch_id: string }>(`/import?${params}`, fd)
+      const res = await api.upload<{ batch_id: string; warnings?: string[] }>(`/import?${params}`, fd)
+      if (res.warnings && res.warnings.length > 0) {
+        showToast('warning', `导入警告：${res.warnings.join('；')}`)
+      }
       try {
         await api.post(`/batches/${res.batch_id}/produce`)
       } catch {

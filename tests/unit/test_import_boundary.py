@@ -95,7 +95,7 @@ class TestEmptyFile:
 
     def test_empty_csv_file_upload(self):
         """空 CSV 文件上传 — 返回空列表。"""
-        result = import_service.parse_upload(b"", "empty.csv")
+        result, warnings = import_service.parse_upload(b"", "empty.csv")
         assert result == []
 
 
@@ -137,7 +137,7 @@ class TestDuplicateWordsInBatch:
             "book,n.,书,来源A\n"
             "book,v.,预订,来源B\n"
         )
-        entries = import_service._parse_csv_text(csv_content)
+        entries, _ = import_service._parse_csv_text(csv_content)
         assert len(entries) == 1
         assert entries[0]["word"] == "book"
         assert len(entries[0]["meanings"]) == 2

@@ -33,7 +33,7 @@ def _truncate_field(value: str, max_len: int, field_name: str, word: str) -> str
     return value
 
 
-def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: str, *, force: bool = False) -> dict:
+def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: str, *, force: bool = False, warnings: list[str] | None = None) -> dict:
     """从 JSON 数据导入词汇。
 
     期望格式:
@@ -50,6 +50,7 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
     避免逐条查询导致的 N+1 问题。4400 词从 ~15 分钟降至 <10 秒。
     """
     package = _get_or_create_package(session, batch_name, force=force)
+    all_warnings: list[str] = list(warnings) if warnings else []
 
     # ── 第一遍：收集所有待处理的 word_text 和 meaning 信息 ──
     parsed_entries: list[dict[str, Any]] = []
@@ -62,7 +63,7 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
         parsed_entries.append(entry)
 
     if not all_word_texts:
-        return {"batch_id": str(package.id), "word_count": 0}
+        return {"batch_id": str(package.id), "word_count": 0, "warnings": all_warnings}
 
     # ── 预批量查询已存在的 Word ──
     unique_word_texts = list(dict.fromkeys(all_word_texts))  # 保序去重
@@ -152,6 +153,10 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
             pos = m_data.get("pos", "").strip()
             definition = m_data.get("definition", "").strip()
             if not pos or not definition:
+                if not definition:
+                    msg = f"单词 '{word_text}' 缺失释义，已跳过该义项"
+                    if msg not in all_warnings:
+                        all_warnings.append(msg)
                 continue
 
             key = (word.id, pos, definition)
@@ -257,13 +262,18 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
         batch_name, len(new_words), word_count - len(new_words),
         len(new_meanings), len(new_phonetics), word_count,
     )
-    return {"batch_id": str(package.id), "word_count": word_count}
+    if all_warnings:
+        for w in all_warnings:
+            _logger.warning("导入警告 batch=%s: %s", batch_name, w)
+    return {"batch_id": str(package.id), "word_count": word_count, "warnings": all_warnings}
 
 
-def _parse_csv_text(text: str) -> list[dict[str, Any]]:
-    """将 CSV 文本解析为词汇 entries 列表。"""
+def _parse_csv_text(text: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """将 CSV 文本解析为词汇 entries 列表，同时收集缺失释义的警告。"""
     reader = csv.DictReader(io.StringIO(text))
     entries: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    warned_words: set[str] = set()
     for row in reader:
         word = row.get("word", "").strip()
         if not word:
@@ -298,13 +308,16 @@ def _parse_csv_text(text: str) -> list[dict[str, Any]]:
                 "definition": definition,
                 "sources": [source] if source else [],
             })
-    return list(entries.values())
+        elif not definition and word not in warned_words:
+            warnings.append(f"单词 '{word}' 缺失释义，已跳过该义项")
+            warned_words.add(word)
+    return list(entries.values()), warnings
 
 
 def import_from_csv(session: Session, content: str, batch_name: str) -> dict:
     """从 CSV 导入。期望列: word, pos, definition, source。"""
-    entries = _parse_csv_text(content)
-    return import_from_json(session, entries, batch_name)
+    entries, warnings = _parse_csv_text(content)
+    return import_from_json(session, entries, batch_name, warnings=warnings)
 
 
 def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
@@ -333,7 +346,7 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
     for alias, key in [
         ("word", "word"), ("单词", "word"), ("单词名", "word"),
         ("pos", "pos"), ("词性", "pos"),
-        ("definition", "definition"), ("释义", "definition"), ("中文释义", "definition"),
+        ("definition", "definition"), ("释义", "definition"), ("中文释义", "definition"), ("剑桥释义", "definition"),
         ("source", "source"), ("来源", "source"), ("教材来源", "source"),
         ("ipa", "ipa_uk"), ("音标", "ipa_uk"), ("ipa_uk", "ipa_uk"), ("英式音标", "ipa_uk"),
         ("ipa_us", "ipa_us"), ("美式音标", "ipa_us"),
@@ -350,6 +363,8 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
         raise ValueError("Excel 缺少必要的 'word'（或 '单词'）列")
 
     entries: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    warned_words: set[str] = set()
     for row in rows[1:]:
         word = str(row[col_map["word"]] or "").strip()
         if not word:
@@ -415,7 +430,10 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
                 "definition": definition,
                 "sources": [source] if source else [],
             })
-    return list(entries.values())
+        elif not definition and word not in warned_words:
+            warnings.append(f"单词 '{word}' 缺失释义，已跳过该义项")
+            warned_words.add(word)
+    return list(entries.values()), warnings
 
 
 # S-H2: Magic bytes 校验映射
@@ -441,15 +459,15 @@ def _validate_magic_bytes(file_content: bytes, filename: str) -> None:
     raise ValueError(f"不支持的文件格式: {filename}")
 
 
-def parse_upload(file_content: bytes, filename: str) -> list[dict[str, Any]]:
-    """根据文件扩展名解析上传内容。"""
+def parse_upload(file_content: bytes, filename: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """根据文件扩展名解析上传内容，返回 (entries, warnings)。"""
     _validate_magic_bytes(file_content, filename)
     lower = filename.lower()
     if lower.endswith(".json"):
         data = json.loads(file_content.decode("utf-8"))
         if not isinstance(data, list):
             raise ValueError("JSON 文件格式错误：期望数组格式，如 [{\"word\": \"hello\", ...}]")
-        return data
+        return data, []
     if lower.endswith(".csv"):
         return _parse_csv_text(file_content.decode("utf-8"))
     if lower.endswith((".xlsx", ".xls")):

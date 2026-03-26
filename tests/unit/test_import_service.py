@@ -164,12 +164,12 @@ class TestParseUpload:
     def test_json_file(self):
         data = [{"word": "a", "meanings": []}]
         content = json.dumps(data).encode("utf-8")
-        result = import_service.parse_upload(content, "test.json")
+        result, _ = import_service.parse_upload(content, "test.json")
         assert len(result) == 1
 
     def test_csv_file(self):
         csv = "word,pos,definition,source\nhello,interj.,你好,src"
-        result = import_service.parse_upload(csv.encode("utf-8"), "test.csv")
+        result, _ = import_service.parse_upload(csv.encode("utf-8"), "test.csv")
         assert len(result) == 1
 
     def test_unsupported_format(self):

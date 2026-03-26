@@ -7,6 +7,7 @@ class ImportResponse(BaseModel):
     batch_id: str
     word_count: int
     message: str
+    warnings: list[str] = []
 
 
 class PreviewRow(BaseModel):
