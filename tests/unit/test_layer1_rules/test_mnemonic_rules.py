@@ -121,9 +121,9 @@ class TestN4FormulaLength:
         assert not result.passed
 
     def test_mixed_text_counts_word_as_one(self):
-        """中英混排：'站(stand)稳的旗帜即标准。' len=18, logical=12, 应通过."""
+        """中英混排：'站(stand)稳的旗帜即标准。' → 中文8 + 英文1 = 9（标点不计）."""
         chant = "站(stand)稳的旗帜即标准。"
-        assert count_logical_chars(chant) == 12
+        assert count_logical_chars(chant) == 9
         result = self.checker.check(_mj(chant=chant), "standard")
         assert result.passed
 
@@ -151,30 +151,34 @@ class TestN5TeacherScriptLength:
         assert result.passed
 
     def test_lower_bound(self):
-        result = self.checker.check(_mj(script="字" * 400), "kind")
+        # 默认维度（词中词/词根词缀）下限 500
+        result = self.checker.check(_mj(script="字" * 500), "kind")
         assert result.passed
 
     def test_upper_bound(self):
+        # 默认维度上限 600
         result = self.checker.check(_mj(script="字" * 600), "kind")
         assert result.passed
 
     def test_too_short(self):
-        result = self.checker.check(_mj(script="字" * 300), "kind")
+        # 默认维度下限 500，499 应失败
+        result = self.checker.check(_mj(script="字" * 499), "kind")
         assert not result.passed
 
     def test_too_long(self):
-        result = self.checker.check(_mj(script="字" * 700), "kind")
+        # 默认维度上限 600，601 应失败
+        result = self.checker.check(_mj(script="字" * 601), "kind")
         assert not result.passed
 
     def test_mixed_text_script_length(self):
-        """话术中英混排：英文单词按 1 计数."""
-        # 398 中文 + 1 英文单词 "hello" = logical 399 → 低于下限 400
-        script_short = "字" * 398 + "hello"
+        """话术中英混排：英文单词按 1 计数（默认维度下限 500）."""
+        # 498 中文 + 1 英文单词 "hello" = logical 499 → 低于下限 500
+        script_short = "字" * 498 + "hello"
         result = self.checker.check(_mj(script=script_short), "kind")
         assert not result.passed
 
-        # 399 中文 + 1 英文单词 = logical 400 → 刚好达到下限
-        script_ok = "字" * 399 + "hello"
+        # 499 中文 + 1 英文单词 = logical 500 → 刚好达到下限
+        script_ok = "字" * 499 + "hello"
         result = self.checker.check(_mj(script=script_ok), "kind")
         assert result.passed
 
@@ -191,28 +195,29 @@ class TestCountLogicalChars:
         assert count_logical_chars("hello") == 1
 
     def test_pure_english_multiple_words(self):
-        # "hello world" → "¤ ¤" → 3
-        assert count_logical_chars("hello world") == 3
+        # "hello world" → 2 个英文词（空格不计）
+        assert count_logical_chars("hello world") == 2
 
     def test_mixed_chinese_english(self):
-        # "站(stand)稳的旗帜即标准。" → "站(¤)稳的旗帜即标准。" → 12
-        assert count_logical_chars("站(stand)稳的旗帜即标准。") == 12
+        # "站(stand)稳的旗帜即标准。" → 中文8 + 英文1 = 9（标点不计）
+        assert count_logical_chars("站(stand)稳的旗帜即标准。") == 9
 
     def test_english_in_parentheses(self):
-        # "好(good)的" → "好(¤)的" → 5
-        assert count_logical_chars("好(good)的") == 5
+        # "好(good)的" → 中文2 + 英文1 = 3（括号不计）
+        assert count_logical_chars("好(good)的") == 3
 
     def test_multiple_english_words_in_chinese(self):
-        # "the big dog很大" → "¤ ¤ ¤很大" → 7
-        assert count_logical_chars("the big dog很大") == 7
+        # "the big dog很大" → 英文3 + 中文2 = 5（空格不计）
+        assert count_logical_chars("the big dog很大") == 5
 
     def test_empty_string(self):
         assert count_logical_chars("") == 0
 
     def test_numbers_and_punctuation(self):
-        assert count_logical_chars("123") == 3
-        assert count_logical_chars("!@#") == 3
+        # 纯数字和标点不计
+        assert count_logical_chars("123") == 0
+        assert count_logical_chars("!@#") == 0
 
     def test_mixed_with_numbers(self):
-        # "hello123" → "¤123" → 4 (英文算1，数字各算1)
-        assert count_logical_chars("hello123") == 4
+        # "hello123" → 英文1（hello算英文词，123不计）
+        assert count_logical_chars("hello123") == 1

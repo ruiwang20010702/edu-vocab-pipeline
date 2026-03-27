@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     ai_gateway_biz_type: str = "vocab_qc"  # Gateway biz_type 标识
     ai_gateway_async: bool = True  # True=使用异步提交+轮询（仅 ai_gateway_mode=True 时生效）
     ai_gateway_poll_interval: float = 3.0  # 轮询间隔（秒）
-    ai_gateway_poll_max_wait: int = 300  # 单任务最大轮询等待（秒）
+    ai_gateway_poll_max_wait: int = 600  # 单任务最大轮询等待（秒）
     allow_private_ai_url: bool = False
     allowed_ai_hosts: list[str] = []
 

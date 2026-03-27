@@ -8,8 +8,11 @@ from vocab_qc.core.qc.base import RuleResult
 
 
 def count_logical_chars(text: str) -> int:
-    """中英混排逻辑字数统计：连续英文字母算 1 个字，其余每字符算 1 个字."""
-    return len(re.sub(r"[a-zA-Z]+", "¤", text))
+    """中英混排逻辑字数统计：连续英文字母算 1 个字，中文字符算 1 个字，标点符号不计."""
+    # 连续英文字母替换为单个占位符
+    collapsed = re.sub(r"[a-zA-Z]+", "¤", text)
+    # 只计中文字符和占位符（英文词），忽略标点、空格、数字等
+    return sum(1 for ch in collapsed if ch == "¤" or "\u4e00" <= ch <= "\u9fff")
 from vocab_qc.core.qc.registry import RuleRegistry, _RuleCheckerBase
 
 
@@ -147,12 +150,12 @@ _SCRIPT_LENGTH_LIMITS: dict[str, tuple[int, int]] = {
     "mnemonic_sound_meaning": (400, 500),
     "mnemonic_exam_app": (400, 500),
 }
-_DEFAULT_SCRIPT_LENGTH = (400, 600)
+_DEFAULT_SCRIPT_LENGTH = (500, 600)
 
 
 @RuleRegistry.register_layer1
 class N5TeacherScriptLength(_RuleCheckerBase):
-    """N5: 老师话术字数校验（音义联想 400-500，其他 400-600）."""
+    """N5: 老师话术字数校验（音义联想/考试应用 400-500，词中词/词根词缀 500-600）."""
 
     rule_id = "N5"
     dimension = "mnemonic"

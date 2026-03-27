@@ -187,6 +187,7 @@ def parse_poll_response(data: dict[str, Any]) -> tuple[str, dict[str, Any] | Non
             "task_poll_error",
             detail=f"code={code}, res={res!r}",
         )
+    logger.debug("Gateway poll res keys=%s", list(res.keys()) if isinstance(res, dict) else type(res).__name__)
     return res["status"], res.get("result"), res.get("failed_reason", "")
 
 
@@ -202,13 +203,30 @@ def build_poll_body(submit_body: dict[str, Any], task_no: str) -> dict[str, Any]
     }
 
 
+def _adaptive_poll_interval(elapsed: float) -> float:
+    """根据已等待时间返回渐进式轮询间隔。
+
+    - 前 60 秒：使用配置的 poll_interval（默认 3 秒）
+    - 60-300 秒：每 10 秒（减少压力）
+    - 300 秒以上：每 20 秒（兜底）
+
+    始终尊重 settings.ai_gateway_poll_interval 作为最小值。
+    """
+    base = settings.ai_gateway_poll_interval
+    if elapsed < 60:
+        return base
+    if elapsed < 300:
+        return max(base, 10.0)
+    return max(base, 20.0)
+
+
 async def poll_gateway_task_async(
     client: httpx.AsyncClient,
     base_url: str,
     task_no: str,
     submit_body: dict[str, Any],
 ) -> dict[str, Any]:
-    """异步轮询 Gateway 任务直到完成/失败/超时。"""
+    """异步轮询 Gateway 任务直到完成/失败/超时（渐进式间隔）。"""
     poll_url = f"{base_url}/chat/task/result"
     poll_body = build_poll_body(submit_body, task_no)
     deadline = time.monotonic() + settings.ai_gateway_poll_max_wait
@@ -224,7 +242,8 @@ async def poll_gateway_task_async(
                 task_no=task_no,
             )
 
-        await asyncio.sleep(settings.ai_gateway_poll_interval)
+        elapsed = time.monotonic() - start_time
+        await asyncio.sleep(_adaptive_poll_interval(elapsed))
         poll_count += 1
 
         t0 = time.monotonic()
@@ -266,6 +285,7 @@ async def poll_gateway_task_async(
         if status == "COMPLETED" and result is not None:
             total_elapsed = int((time.monotonic() - start_time) * 1000)
             logger.info("Gateway 任务完成 task_no=%s polls=%d elapsed=%dms", task_no, poll_count, total_elapsed)
+            logger.debug("Gateway async result keys=%s has_usage=%s", list(result.keys()) if isinstance(result, dict) else type(result).__name__, "usage" in result if isinstance(result, dict) else False)
             return result
         elif status == "FAILED":
             raise AiRequestError(
@@ -282,7 +302,7 @@ def poll_gateway_task_sync(
     task_no: str,
     submit_body: dict[str, Any],
 ) -> dict[str, Any]:
-    """同步轮询 Gateway 任务直到完成/失败/超时。"""
+    """同步轮询 Gateway 任务直到完成/失败/超时（渐进式间隔）。"""
     poll_url = f"{base_url}/chat/task/result"
     poll_body = build_poll_body(submit_body, task_no)
     deadline = time.monotonic() + settings.ai_gateway_poll_max_wait
@@ -298,7 +318,8 @@ def poll_gateway_task_sync(
                 task_no=task_no,
             )
 
-        time.sleep(settings.ai_gateway_poll_interval)
+        elapsed = time.monotonic() - start_time
+        time.sleep(_adaptive_poll_interval(elapsed))
         poll_count += 1
 
         t0 = time.monotonic()
