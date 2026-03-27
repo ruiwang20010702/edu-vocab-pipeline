@@ -75,14 +75,14 @@ class TestEstimateCost:
     def test_known_model_gemini_flash(self):
         usage = AiUsageInfo(prompt_tokens=1_000_000, completion_tokens=500_000, total_tokens=1_500_000)
         cost = estimate_cost("gemini-2.0-flash", usage)
-        # input: 1M * 0.10/1M = 0.10, output: 0.5M * 0.40/1M = 0.20, total = 0.30
-        assert cost == 0.3
+        # RMB: input: 1M * 0.00000365 = 3.65, output: 0.5M * 0.00002190 = 10.95, total = 14.60
+        assert cost == 14.6
 
-    def test_known_model_gpt4o(self):
+    def test_known_model_gpt(self):
         usage = AiUsageInfo(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
-        cost = estimate_cost("gpt-4o", usage)
-        # input: 1000 * 2.50/1M = 0.0025, output: 500 * 10.0/1M = 0.005, total = 0.0075
-        assert cost == 0.0075
+        cost = estimate_cost("gpt-5.2", usage)
+        # RMB: input: 1000 * 0.00001278 = 0.01278, output: 500 * 0.00010220 = 0.05110, total = 0.06388
+        assert cost == 0.06388
 
     def test_unknown_model(self):
         usage = AiUsageInfo(prompt_tokens=100, completion_tokens=50, total_tokens=150)

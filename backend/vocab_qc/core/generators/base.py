@@ -499,21 +499,24 @@ def extract_usage(data: dict[str, Any]) -> AiUsageInfo:
     )
 
 
-# 模型费用表（USD / 百万 token）: (input_price, output_price)
+# 模型费用表（RMB / 单个 token）: (input_price, output_price)
+# 数据来源：51talk AI Gateway 定价表
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "gemini-2.0-flash": (0.10, 0.40),
-    "gemini-2.5-flash": (0.15, 0.60),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.0),
+    "gemini-3-flash-preview": (0.00000365, 0.00002190),
+    "gemini-2.0-flash": (0.00000365, 0.00002190),
+    "gemini-2.5-flash": (0.00000365, 0.00002190),
+    "gpt-5.2": (0.00001278, 0.00010220),
+    "gpt-4o-mini": (0.00001278, 0.00010220),
+    "gpt-4o": (0.00001278, 0.00010220),
 }
 
 
 def estimate_cost(model: str, usage: AiUsageInfo) -> float | None:
-    """按模型费率表估算费用（USD），未知模型返回 None。"""
+    """按 Gateway 费率表估算费用（RMB），未知模型返回 None。"""
     model_key = model.lower().split("|")[0]  # 去掉 "|efficiency" 后缀
     for prefix, (inp_price, out_price) in _MODEL_PRICING.items():
         if model_key.startswith(prefix):
-            cost = (usage.prompt_tokens * inp_price + usage.completion_tokens * out_price) / 1_000_000
+            cost = usage.prompt_tokens * inp_price + usage.completion_tokens * out_price
             return round(cost, 6)
     return None
 
