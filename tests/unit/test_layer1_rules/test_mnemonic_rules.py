@@ -155,19 +155,14 @@ class TestN5TeacherScriptLength:
         result = self.checker.check(_mj(script="字" * 500), "kind")
         assert result.passed
 
-    def test_upper_bound(self):
-        # 默认维度上限 600
-        result = self.checker.check(_mj(script="字" * 600), "kind")
+    def test_above_old_upper_bound_still_passes(self):
+        # 移除上限后，超过原上限 600 仍通过
+        result = self.checker.check(_mj(script="字" * 800), "kind")
         assert result.passed
 
     def test_too_short(self):
         # 默认维度下限 500，499 应失败
         result = self.checker.check(_mj(script="字" * 499), "kind")
-        assert not result.passed
-
-    def test_too_long(self):
-        # 默认维度上限 600，601 应失败
-        result = self.checker.check(_mj(script="字" * 601), "kind")
         assert not result.passed
 
     def test_mixed_text_script_length(self):

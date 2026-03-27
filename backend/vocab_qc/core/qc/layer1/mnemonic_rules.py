@@ -146,20 +146,20 @@ class N4FormulaLength(_RuleCheckerBase):
         return RuleResult(rule_id=self.rule_id, passed=True)
 
 
-_SCRIPT_LENGTH_LIMITS: dict[str, tuple[int, int]] = {
-    "mnemonic_sound_meaning": (400, 500),
-    "mnemonic_exam_app": (400, 500),
+_SCRIPT_MIN_LENGTH: dict[str, int] = {
+    "mnemonic_sound_meaning": 400,
+    "mnemonic_exam_app": 400,
 }
-_DEFAULT_SCRIPT_LENGTH = (500, 600)
+_DEFAULT_SCRIPT_MIN_LENGTH = 500
 
 
 @RuleRegistry.register_layer1
 class N5TeacherScriptLength(_RuleCheckerBase):
-    """N5: 老师话术字数校验（音义联想/考试应用 400-500，词中词/词根词缀 500-600）."""
+    """N5: 老师话术字数校验（音义联想/考试应用 ≥400，词中词/词根词缀 ≥500）."""
 
     rule_id = "N5"
     dimension = "mnemonic"
-    description = "话术字数校验"
+    description = "话术字数下限校验"
 
     def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
         if not content:
@@ -176,17 +176,12 @@ class N5TeacherScriptLength(_RuleCheckerBase):
         char_count = count_logical_chars(script)
 
         dimension = kwargs.get("dimension", "")
-        lower, upper = _SCRIPT_LENGTH_LIMITS.get(dimension, _DEFAULT_SCRIPT_LENGTH)
+        lower = _SCRIPT_MIN_LENGTH.get(dimension, _DEFAULT_SCRIPT_MIN_LENGTH)
 
         if char_count < lower:
             return RuleResult(
                 rule_id=self.rule_id, passed=False,
                 detail=f"话术字数({char_count})低于下限({lower})",
-            )
-        if char_count > upper:
-            return RuleResult(
-                rule_id=self.rule_id, passed=False,
-                detail=f"话术字数({char_count})超过上限({upper})",
             )
 
         return RuleResult(rule_id=self.rule_id, passed=True)

@@ -165,22 +165,30 @@ def test_e2e_retry_limit(db_session, full_word_data):
 
 
 def test_e2e_export_only_approved(db_session, full_word_data):
-    """导出门禁: 只有 approved 的内容才会导出."""
+    """导出门禁: 义项须全部终态才导出，且只有 approved 的内容才填充."""
     word = full_word_data["word"]
+    chunk = full_word_data["chunk"]
+    sentence = full_word_data["sentence"]
     export_service = ExportService()
 
-    # 未审核通过 → 导出数据中内容为 None
+    # 全部 pending → 义项未到终态，export_word 返回 None
     data = export_service.export_word(db_session, word.id)
-    assert data["meanings"][0]["chunk"] is None
-    assert data["meanings"][0]["sentence"] is None
-    assert data["meanings"][0].get("mnemonics", []) == []
+    assert data is None
 
-    # 手动设为 approved
-    chunk = full_word_data["chunk"]
+    # 全部设为终态（rejected），义项可导出但内容为 None
+    chunk.qc_status = QcStatus.REJECTED.value
+    sentence.qc_status = QcStatus.REJECTED.value
+    db_session.flush()
+
+    # 全部 rejected、无 approved → 不满足 "至少 1 个 approved"，返回 None
+    data2 = export_service.export_word(db_session, word.id)
+    assert data2 is None
+
+    # chunk 改为 approved → 满足导出条件
     chunk.qc_status = QcStatus.APPROVED.value
     db_session.flush()
 
-    data2 = export_service.export_word(db_session, word.id)
-    assert data2["meanings"][0]["chunk"] == "happy birthday"
-    # sentence 仍为 None（未 approved）
-    assert data2["meanings"][0]["sentence"] is None
+    data3 = export_service.export_word(db_session, word.id)
+    assert data3["meanings"][0]["chunk"] == "happy birthday"
+    # sentence 是 rejected（终态但非 approved）→ 不填充
+    assert data3["meanings"][0]["sentence"] is None
