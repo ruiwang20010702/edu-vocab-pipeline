@@ -138,42 +138,66 @@ class TestQcServiceTerminalStatusFiltering:
 
 
 class TestExportServiceAllApproved:
-    """export_all_approved 只导出 approved 内容."""
+    """export_all_approved 按义项级别过滤：所有维度终态才导出."""
 
-    def test_only_approved_items_exported(self, db_session: Session):
-        """混合状态的内容项中，仅 approved 出现在导出结果里."""
+    def test_meaning_with_pending_item_not_exported(self, db_session: Session):
+        """义项有 pending 维度时，整个义项不导出."""
         word = _make_word(db_session, "book")
         meaning = _make_meaning(db_session, word, "n.", "书")
 
-        # approved chunk
         _make_content(
             db_session, word, "chunk", "read a book",
             meaning=meaning, qc_status=QcStatus.APPROVED.value,
         )
-        # pending sentence — 不应导出
+        # pending sentence → 义项未全部终态 → 不导出
         _make_content(
             db_session, word, "sentence", "I read a book every day.",
             meaning=meaning, qc_status=QcStatus.PENDING.value,
             content_cn="我每天读一本书。",
         )
-        # rejected chunk — 不应导出
+
+        svc = ExportService()
+        results = svc.export_all_approved(db_session)
+        assert results == []
+
+    def test_all_terminal_meaning_exported(self, db_session: Session):
+        """义项所有维度均终态（approved + rejected），可导出."""
+        word = _make_word(db_session, "book")
+        meaning = _make_meaning(db_session, word, "n.", "书")
+
         _make_content(
-            db_session, word, "chunk", "bad chunk",
+            db_session, word, "chunk", "read a book",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        # rejected = 不适用，属于终态
+        _make_content(
+            db_session, word, "mnemonic_word_in_word", "{}",
             meaning=meaning, qc_status=QcStatus.REJECTED.value,
         )
 
         svc = ExportService()
         results = svc.export_all_approved(db_session)
-
         assert len(results) == 1
-        exported = results[0]
-        assert exported["word"] == "book"
+        assert results[0]["word"] == "book"
+        assert results[0]["meanings"][0]["chunk"] == "read a book"
 
-        # meanings 内的 chunk 应有值，sentence 应为 None（未 approved）
-        assert len(exported["meanings"]) == 1
-        m = exported["meanings"][0]
-        assert m["chunk"] == "read a book"
-        assert m["sentence"] is None
+    def test_all_rejected_meaning_not_exported(self, db_session: Session):
+        """义项所有维度都是 rejected（全部不适用），不导出（无有效内容）."""
+        word = _make_word(db_session, "a")
+        meaning = _make_meaning(db_session, word, "art.", "一个")
+
+        _make_content(
+            db_session, word, "mnemonic_root_affix", "{}",
+            meaning=meaning, qc_status=QcStatus.REJECTED.value,
+        )
+        _make_content(
+            db_session, word, "mnemonic_word_in_word", "{}",
+            meaning=meaning, qc_status=QcStatus.REJECTED.value,
+        )
+
+        svc = ExportService()
+        results = svc.export_all_approved(db_session)
+        assert results == []
 
     def test_no_approved_items(self, db_session: Session):
         """没有任何 approved 项时返回空列表."""
@@ -186,11 +210,11 @@ class TestExportServiceAllApproved:
 
         svc = ExportService()
         results = svc.export_all_approved(db_session)
-
         assert results == []
 
     def test_multiple_words_partial_approval(self, db_session: Session):
-        """多词场景：仅有 approved 内容的词才出现在导出列表中."""
+        """多词场景：仅义项全部终态的词才出现在导出列表中."""
+        # sun: 全部终态 → 可导出
         word_a = _make_word(db_session, "sun")
         meaning_a = _make_meaning(db_session, word_a, "n.", "太阳")
         _make_content(
@@ -198,6 +222,7 @@ class TestExportServiceAllApproved:
             meaning=meaning_a, qc_status=QcStatus.APPROVED.value,
         )
 
+        # moon: pending → 不可导出
         word_b = _make_word(db_session, "moon")
         meaning_b = _make_meaning(db_session, word_b, "n.", "月亮")
         _make_content(
@@ -211,6 +236,54 @@ class TestExportServiceAllApproved:
         exported_words = [r["word"] for r in results]
         assert "sun" in exported_words
         assert "moon" not in exported_words
+
+    def test_multi_meaning_partial_export(self, db_session: Session):
+        """一个词有两个义项，只导出全部终态的义项."""
+        word = _make_word(db_session, "run")
+        m1 = _make_meaning(db_session, word, "v.", "跑")
+        m2 = _make_meaning(db_session, word, "v.", "运行")
+
+        # m1: 全部 approved → 可导出
+        _make_content(
+            db_session, word, "chunk", "run fast",
+            meaning=m1, qc_status=QcStatus.APPROVED.value,
+        )
+        # m2: 有 pending → 不可导出
+        _make_content(
+            db_session, word, "chunk", "run a program",
+            meaning=m2, qc_status=QcStatus.APPROVED.value,
+        )
+        _make_content(
+            db_session, word, "sentence", "I run the program.",
+            meaning=m2, qc_status=QcStatus.PENDING.value,
+        )
+
+        svc = ExportService()
+        results = svc.export_all_approved(db_session)
+
+        assert len(results) == 1
+        assert len(results[0]["meanings"]) == 1
+        assert results[0]["meanings"][0]["def"] == "跑"
+
+    def test_syllable_not_terminal_blocks_word(self, db_session: Session):
+        """syllable 未终态时，整个词不导出."""
+        word = _make_word(db_session, "cat")
+        meaning = _make_meaning(db_session, word, "n.", "猫")
+
+        # 义项全部 approved
+        _make_content(
+            db_session, word, "chunk", "a lovely cat",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        # syllable pending → 阻塞导出
+        _make_content(
+            db_session, word, "syllable", "cat",
+            meaning=None, qc_status=QcStatus.PENDING.value,
+        )
+
+        svc = ExportService()
+        results = svc.export_all_approved(db_session)
+        assert results == []
 
     def test_export_readiness_counts(self, db_session: Session):
         """get_export_readiness 正确统计各状态数量."""

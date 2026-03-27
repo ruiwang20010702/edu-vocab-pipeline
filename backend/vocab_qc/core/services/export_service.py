@@ -13,7 +13,7 @@ from vocab_qc.core.logging_config import log_elapsed
 logger = logging.getLogger(__name__)
 
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
-from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS
+from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS, QC_TERMINAL_STATUSES
 
 _MNEMONIC_TYPE_LABELS: dict[str, str] = {
     "mnemonic_root_affix": "词根词缀",
@@ -57,62 +57,108 @@ def _parse_mnemonic_fields(content: str) -> dict[str, str]:
     }
 
 
+def _is_meaning_exportable(items: list["ContentItem"]) -> bool:
+    """义项可导出条件：所有 ContentItem 都处于终态，且至少有 1 个 approved."""
+    if not items:
+        return False
+    return (
+        all(ci.qc_status in QC_TERMINAL_STATUSES for ci in items)
+        and any(ci.qc_status == QcStatus.APPROVED.value for ci in items)
+    )
+
+
 def _iter_approved_batches(session: Session, batch_size: int = 500):
-    """P-M1: 分批查询已审核通过的词汇数据，避免全量加载到内存。"""
+    """分批查询已审核通过的词汇数据（按义项级别过滤：所有维度终态才导出）。"""
     from collections import defaultdict
 
     from sqlalchemy import distinct
 
-    # 一次查出所有有 approved 内容的 word_id
-    approved_word_ids = [
+    # 查出所有有 ContentItem 的 word_id
+    all_word_ids = [
         row[0]
-        for row in session.query(distinct(ContentItem.word_id))
-        .filter_by(qc_status=QcStatus.APPROVED.value)
-        .all()
+        for row in session.query(distinct(ContentItem.word_id)).all()
     ]
-    if not approved_word_ids:
+    if not all_word_ids:
         return
 
-    for i in range(0, len(approved_word_ids), batch_size):
-        batch_ids = approved_word_ids[i : i + batch_size]
+    for i in range(0, len(all_word_ids), batch_size):
+        batch_ids = all_word_ids[i : i + batch_size]
 
-        words = {w.id: w for w in session.query(Word).filter(Word.id.in_(batch_ids)).all()}
+        # 加载该批次所有 ContentItem（不限 status）
+        all_items = (
+            session.query(ContentItem)
+            .filter(ContentItem.word_id.in_(batch_ids))
+            .all()
+        )
+
+        # 按 (word_id, meaning_id) 分组
+        items_by_key: dict[tuple[int, int | None], list[ContentItem]] = defaultdict(list)
+        for ci in all_items:
+            items_by_key[(ci.word_id, ci.meaning_id)].append(ci)
+
+        # 判定每个 word 的 syllable 是否终态、每个义项是否可导出
+        exportable_meaning_ids: set[int] = set()
+        word_has_exportable: set[int] = set()
+        syllable_ok: dict[int, bool] = {}
+
+        for (word_id, meaning_id), items in items_by_key.items():
+            if meaning_id is None:
+                # syllable 是 word 级别
+                syllable_ok[word_id] = all(
+                    ci.qc_status in QC_TERMINAL_STATUSES for ci in items
+                )
+            else:
+                if _is_meaning_exportable(items):
+                    exportable_meaning_ids.add(meaning_id)
+                    word_has_exportable.add(word_id)
+
+        # 没有 syllable 记录的 word 视为 syllable OK（可能尚未生成）
+        exportable_word_ids = [
+            wid for wid in batch_ids
+            if wid in word_has_exportable and syllable_ok.get(wid, True)
+        ]
+        if not exportable_word_ids:
+            continue
+
+        words = {w.id: w for w in session.query(Word).filter(Word.id.in_(exportable_word_ids)).all()}
         phonetics = {}
-        for p in session.query(Phonetic).filter(Phonetic.word_id.in_(batch_ids)).all():
+        for p in session.query(Phonetic).filter(Phonetic.word_id.in_(exportable_word_ids)).all():
             phonetics[p.word_id] = p
 
-        all_meanings = session.query(Meaning).filter(Meaning.word_id.in_(batch_ids)).all()
+        all_meanings = session.query(Meaning).filter(Meaning.word_id.in_(exportable_word_ids)).all()
         meanings_by_word: dict[int, list[Meaning]] = defaultdict(list)
         meaning_ids = []
         for m in all_meanings:
-            meanings_by_word[m.word_id].append(m)
-            meaning_ids.append(m.id)
+            if m.id in exportable_meaning_ids:
+                meanings_by_word[m.word_id].append(m)
+                meaning_ids.append(m.id)
 
         sources_by_meaning: dict[int, list[Source]] = defaultdict(list)
         if meaning_ids:
             for s in session.query(Source).filter(Source.meaning_id.in_(meaning_ids)).all():
                 sources_by_meaning[s.meaning_id].append(s)
 
-        approved_items = (
-            session.query(ContentItem)
-            .filter(
-                ContentItem.word_id.in_(batch_ids),
-                ContentItem.qc_status == QcStatus.APPROVED.value,
-            )
-            .all()
-        )
+        # 只取 approved 的 ContentItem 填充内容
+        approved_items = [ci for ci in all_items if ci.qc_status == QcStatus.APPROVED.value]
 
         content_index: dict[tuple[int, int | None, str], ContentItem] = {}
         mnemonics_by_meaning: dict[int, list[ContentItem]] = defaultdict(list)
         for ci in approved_items:
+            if ci.word_id not in words:
+                continue
             if ci.dimension in MNEMONIC_DIMENSIONS and ci.meaning_id:
-                mnemonics_by_meaning[ci.meaning_id].append(ci)
+                if ci.meaning_id in exportable_meaning_ids:
+                    mnemonics_by_meaning[ci.meaning_id].append(ci)
             else:
                 content_index[(ci.word_id, ci.meaning_id, ci.dimension)] = ci
 
-        for word_id in batch_ids:
+        for word_id in exportable_word_ids:
             word = words.get(word_id)
             if not word:
+                continue
+
+            export_meanings = meanings_by_word.get(word_id, [])
+            if not export_meanings:
                 continue
 
             phonetic = phonetics.get(word_id)
@@ -132,12 +178,11 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
                 "meanings": [],
             }
 
-            for meaning in meanings_by_word.get(word_id, []):
+            for meaning in export_meanings:
                 sources = sources_by_meaning.get(meaning.id, [])
                 chunk = content_index.get((word_id, meaning.id, "chunk"))
                 sentence = content_index.get((word_id, meaning.id, "sentence"))
 
-                # 取第一条 Source 的教材 ID（一词多来源时优先取第一条）
                 first_source = sources[0] if sources else None
                 meaning_data = {
                     "pos": meaning.pos,
@@ -164,7 +209,7 @@ class ExportService:
     """导出服务: 门禁 + 格式化输出."""
 
     def export_word(self, session: Session, word_id: int) -> dict[str, Any] | None:
-        """导出单个词的完整数据（仅 approved 内容）."""
+        """导出单个词的完整数据（按义项过滤：所有维度终态才导出）."""
         from collections import defaultdict
 
         logger.info("导出单词开始 word_id=%d", word_id)
@@ -177,33 +222,52 @@ class ExportService:
         phonetic = session.query(Phonetic).filter_by(word_id=word.id).first()
         meanings = session.query(Meaning).filter_by(word_id=word.id).all()
 
-        # 批量加载该词所有 approved ContentItem（1 条查询）
-        approved_items = (
+        # 加载该词所有 ContentItem（不限 status）
+        all_items = (
             session.query(ContentItem)
-            .filter(
-                ContentItem.word_id == word.id,
-                ContentItem.qc_status == QcStatus.APPROVED.value,
-            )
+            .filter(ContentItem.word_id == word.id)
             .all()
         )
 
-        # 按 (meaning_id, dimension) 建索引
+        # 按 meaning_id 分组，判定哪些义项可导出
+        items_by_meaning: dict[int | None, list[ContentItem]] = defaultdict(list)
+        for ci in all_items:
+            items_by_meaning[ci.meaning_id].append(ci)
+
+        # syllable 终态检查
+        syllable_items = items_by_meaning.get(None, [])
+        if syllable_items and not all(ci.qc_status in QC_TERMINAL_STATUSES for ci in syllable_items):
+            logger.info("导出单词跳过 word_id=%d syllable 未终态", word_id)
+            return None
+
+        # 筛选可导出义项
+        exportable_meaning_ids = {
+            mid for mid, items in items_by_meaning.items()
+            if mid is not None and _is_meaning_exportable(items)
+        }
+
+        if not exportable_meaning_ids:
+            logger.info("导出单词跳过 word_id=%d 无可导出义项", word_id)
+            return None
+
+        # 只取 approved 的 ContentItem 填充内容
+        approved_items = [ci for ci in all_items if ci.qc_status == QcStatus.APPROVED.value]
+
         content_index: dict[tuple[int | None, str], ContentItem] = {}
         mnemonics_by_meaning: dict[int, list[ContentItem]] = defaultdict(list)
         for ci in approved_items:
             if ci.dimension in MNEMONIC_DIMENSIONS and ci.meaning_id:
-                mnemonics_by_meaning[ci.meaning_id].append(ci)
+                if ci.meaning_id in exportable_meaning_ids:
+                    mnemonics_by_meaning[ci.meaning_id].append(ci)
             else:
                 content_index[(ci.meaning_id, ci.dimension)] = ci
 
-        # 批量加载该词所有义项的来源（1 条查询）
-        meaning_ids = [m.id for m in meanings]
+        meaning_ids = [m.id for m in meanings if m.id in exportable_meaning_ids]
         sources_by_meaning: dict[int, list[Source]] = defaultdict(list)
         if meaning_ids:
             for s in session.query(Source).filter(Source.meaning_id.in_(meaning_ids)).all():
                 sources_by_meaning[s.meaning_id].append(s)
 
-        # 音节优先用 syllable ContentItem，fallback 到 Phonetic 表
         syllable_item = content_index.get((None, "syllable"))
         syllables = (
             syllable_item.content if syllable_item
@@ -222,6 +286,9 @@ class ExportService:
         }
 
         for meaning in meanings:
+            if meaning.id not in exportable_meaning_ids:
+                continue
+
             chunk = content_index.get((meaning.id, "chunk"))
             sentence = content_index.get((meaning.id, "sentence"))
 

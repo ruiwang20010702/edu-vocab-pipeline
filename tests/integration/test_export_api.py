@@ -78,6 +78,11 @@ def test_app_with_data():
     session.add(meaning)
     session.flush()
 
+    # 第二个义项（有 pending 内容，不可导出）
+    meaning2 = Meaning(word_id=word.id, pos="adj.", definition="聪明的")
+    session.add(meaning2)
+    session.flush()
+
     source = Source(meaning_id=meaning.id, source_name="人教版七年级")
     chunk = ContentItem(
         word_id=word.id,
@@ -94,9 +99,10 @@ def test_app_with_data():
         content_cn="今天阳光明媚。",
         qc_status=QcStatus.APPROVED.value,
     )
+    # pending 放到第二个义项上，不影响第一个义项的导出
     pending_item = ContentItem(
         word_id=word.id,
-        meaning_id=meaning.id,
+        meaning_id=meaning2.id,
         dimension="chunk",
         content="pending chunk",
         qc_status=QcStatus.PENDING.value,
