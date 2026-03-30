@@ -210,6 +210,139 @@ class Layer2Runner:
             results_map[item_id] = item_results
         return results_map, error_logs
 
+    def _collect_ai_results_queued(
+        self,
+        session: Session,
+        items: list[ContentItem],
+        word_texts: dict[int, str],
+        meaning_texts: dict[int, str],
+        extra_kwargs: dict[int, dict],
+        package_id: int | None = None,
+    ) -> tuple[dict[int, list[RuleResult]], list[AiErrorLog]]:
+        """任务队列模式：enqueue → submit → poll → collect → parse."""
+        import json as _json
+
+        from vocab_qc.core.async_bridge import run_async_in_sync
+        from vocab_qc.core.generators.base import (
+            _strip_markdown_fences,
+            extract_usage,
+            parse_ai_response,
+        )
+        from vocab_qc.core.models.ai_task_queue import AiTaskStatus
+        from vocab_qc.core.polling_pool import PollingPool
+        from vocab_qc.core.task_queue import TaskQueueService, TaskSpec
+
+        batch_key = f"l2:{uuid.uuid4().hex[:8]}"
+
+        # Step 1: 为每个 item 构造 submit_body
+        specs: list[TaskSpec] = []
+        item_meta: dict[int, dict] = {}  # item_id → {checker, use_json_format}
+
+        for item in items:
+            checker = self._unified_checkers.get(item.dimension)
+            if checker is None:
+                continue
+            if not hasattr(checker, "build_prompts"):
+                continue
+
+            word_text = word_texts.get(item.word_id, "")
+            meaning_text = meaning_texts.get(item.meaning_id, "") if item.meaning_id else None
+            extra = extra_kwargs.get(item.id, {})
+
+            system_prompt, user_prompt, use_json_format = checker.build_prompts(
+                item.content, word_text, meaning_text,
+                item_dimension=item.dimension, **extra,
+            )
+
+            client = self._get_client_for_dimension(item.dimension)
+            submit_body = client.make_submit_body(
+                system_prompt, user_prompt, use_json_format=use_json_format,
+            )
+
+            specs.append(TaskSpec(
+                batch_key=batch_key,
+                phase="qc_layer2",
+                submit_body=submit_body,
+                content_item_id=item.id,
+                dimension=item.dimension,
+                ai_model=client.model,
+                word_id=item.word_id,
+                package_id=package_id,
+            ))
+            item_meta[item.id] = {
+                "checker": checker,
+                "use_json_format": use_json_format,
+            }
+
+        if not specs:
+            return {}, []
+
+        # Step 2: 入队 + 提交 + 轮询
+        TaskQueueService.enqueue_tasks(session, specs)
+        session.commit()
+
+        async def _submit_and_wait() -> None:
+            pool = PollingPool.get_instance()
+            await pool.submit_batch(batch_key)
+            timeout = min(max(600, len(specs) * 10), 3600)
+            done = await pool.wait_for_batch(batch_key, timeout=timeout)
+            if not done:
+                logger.warning("L2 批次 %s 轮询超时", batch_key)
+
+        run_async_in_sync(_submit_and_wait())
+
+        # Step 3: 收集 + 解析
+        completed = TaskQueueService.collect_completed(session, batch_key)
+        results_map: dict[int, list[RuleResult]] = {}
+        error_logs: list[AiErrorLog] = []
+
+        for task in completed:
+            cid = task.content_item_id
+            if cid is None:
+                continue
+            meta = item_meta.get(cid)
+            if meta is None:
+                continue
+
+            checker = meta["checker"]
+            use_json = meta["use_json_format"]
+
+            if task.status == AiTaskStatus.FAILED.value:
+                error_logs.append(AiErrorLog(
+                    content_item_id=cid,
+                    word_id=task.word_id,
+                    phase="qc_layer2",
+                    dimension=task.dimension,
+                    error_type=task.error_type or "unknown",
+                    error_message=task.error_message or "",
+                    ai_model=task.ai_model,
+                    gateway_task_no=task.gateway_task_no,
+                ))
+                continue
+
+            # 解析 Gateway 原始响应
+            raw_data = task.result_data or {}
+            try:
+                content_str = _strip_markdown_fences(parse_ai_response(raw_data))
+                if use_json:
+                    parsed = _json.loads(content_str)
+                else:
+                    parsed = {"raw_text": content_str}
+                results_map[cid] = checker.parse_ai_response(parsed, use_json)
+            except Exception as e:
+                logger.warning("L2 结果解析失败 task_id=%d: %s", task.id, e)
+                error_logs.append(AiErrorLog(
+                    content_item_id=cid,
+                    word_id=task.word_id,
+                    phase="qc_layer2",
+                    dimension=task.dimension,
+                    error_type="parse_error",
+                    error_message=str(e)[:2000],
+                    ai_model=task.ai_model,
+                ))
+
+        return results_map, error_logs
+
     def _save_results(
         self,
         session: Session,
@@ -333,6 +466,8 @@ class Layer2Runner:
         package_id: int | None = None,
     ) -> str:
         """同步桥接：AI 调用在独立线程/事件循环，DB 操作在主线程."""
+        from vocab_qc.core.config import settings as _settings
+
         logger.info("Layer2Runner.run 开始 items=%d strategy=%s", len(items), strategy.value)
         self.load_dimension_configs(session)
         run_id = str(uuid.uuid4())
@@ -350,10 +485,15 @@ class Layer2Runner:
         session.add(qc_run)
         session.flush()
 
-        # P-H1: AI 调用（不涉及 session，线程安全）
-        coro = self._collect_ai_results(items, word_texts, meaning_texts, strategy, extra_kwargs)
-        from vocab_qc.core.async_bridge import run_async_in_sync
-        results_map, error_logs = run_async_in_sync(coro)
+        # 任务队列模式 vs 原模式
+        if _settings.ai_use_task_queue and strategy == AiStrategy.UNIFIED:
+            results_map, error_logs = self._collect_ai_results_queued(
+                session, items, word_texts, meaning_texts, extra_kwargs, package_id,
+            )
+        else:
+            coro = self._collect_ai_results(items, word_texts, meaning_texts, strategy, extra_kwargs)
+            from vocab_qc.core.async_bridge import run_async_in_sync
+            results_map, error_logs = run_async_in_sync(coro)
 
         # Step 2: DB 写入（主线程，session 安全）
         failed_ids = frozenset(

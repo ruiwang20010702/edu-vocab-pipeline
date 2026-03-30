@@ -26,6 +26,28 @@ class UnifiedMnemonicChecker:
     dimension = "mnemonic"
     rule_ids = ["N5_AI", "N6"]
 
+    def build_prompts(
+        self, content: str, word: str, meaning: Optional[str] = None, **kwargs,
+    ) -> tuple[str, str, bool]:
+        """返回 (system_prompt, user_prompt, use_json_format)，不发 AI 请求."""
+        pos = kwargs.get("pos", "")
+        item_dimension = kwargs.get("item_dimension", "")
+        user_prompt = f"单词: {word}\n词性: {pos or '未知'}\n义项: {meaning or '无'}\n助记内容:\n{content}"
+        if item_dimension and item_dimension.startswith("mnemonic_"):
+            full_prompt = load_full_prompt(item_dimension)
+            if full_prompt:
+                return full_prompt + TEXT_OUTPUT_INSTRUCTION, user_prompt, False
+        return UNIFIED_MNEMONIC_SYSTEM, user_prompt, True
+
+    def parse_ai_response(self, response: dict, use_json_format: bool) -> list[RuleResult]:
+        """解析 AI 返回，还原 list[RuleResult]."""
+        if not use_json_format:
+            return parse_text_result(response.get("raw_text", ""), self.rule_ids)
+        return [
+            RuleResult(rule_id=item["rule_id"], passed=item.get("passed", False), detail=item.get("detail"))
+            for item in response.get("results", [])
+        ]
+
     async def check(
         self, client: AiClient, content: str, word: str,
         meaning: Optional[str] = None, **kwargs,

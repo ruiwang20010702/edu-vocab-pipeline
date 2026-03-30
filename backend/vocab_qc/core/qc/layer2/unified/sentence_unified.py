@@ -43,6 +43,31 @@ class UnifiedSentenceChecker:
     dimension = "sentence"
     rule_ids = ["E1", "E2", "E3", "E4", "E5", "E8_AI", "E9", "E10", "E11"]
 
+    def build_prompts(
+        self, content: str, word: str, meaning: Optional[str] = None, **kwargs: Any,
+    ) -> tuple[str, str, bool]:
+        """返回 (system_prompt, user_prompt, use_json_format)，不发 AI 请求."""
+        pos = kwargs.get("pos", "")
+        content_cn = kwargs.get("content_cn", "")
+        user_prompt = (
+            f"单词: {word}\n词性: {pos or '未知'}\n义项: {meaning or '无'}\n"
+            f"英文例句: {content}\n中文翻译: {content_cn}\n\n"
+            "请对以上例句执行所有检查项。"
+        )
+        full_prompt = load_full_prompt("sentence")
+        if full_prompt:
+            return full_prompt + TEXT_OUTPUT_INSTRUCTION, user_prompt, False
+        return UNIFIED_SENTENCE_SYSTEM, user_prompt, True
+
+    def parse_ai_response(self, response: dict, use_json_format: bool) -> list[RuleResult]:
+        """解析 AI 返回，还原 list[RuleResult]."""
+        if not use_json_format:
+            return parse_text_result(response.get("raw_text", ""), self.rule_ids)
+        return [
+            RuleResult(rule_id=item["rule_id"], passed=item.get("passed", False), detail=item.get("detail"))
+            for item in response.get("results", [])
+        ]
+
     async def check(
         self,
         client: AiClient,

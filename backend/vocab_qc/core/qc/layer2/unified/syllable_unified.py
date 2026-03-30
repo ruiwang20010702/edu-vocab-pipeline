@@ -51,6 +51,25 @@ class UnifiedSyllableChecker:
     dimension = "syllable"
     rule_ids = ["SA1", "SA2", "SA3", "SA4", "SA5", "SA6", "SA7"]
 
+    def build_prompts(
+        self, content: str, word: str, meaning: Optional[str] = None, **kwargs: Any,
+    ) -> tuple[str, str, bool]:
+        """返回 (system_prompt, user_prompt, use_json_format)，不发 AI 请求."""
+        user_prompt = f"单词: {word}\n音节切分: {content}\n\n请对以上音节切分执行所有检查项。"
+        full_prompt = load_full_prompt("syllable")
+        if full_prompt:
+            return full_prompt + TEXT_OUTPUT_INSTRUCTION, user_prompt, False
+        return UNIFIED_SYLLABLE_SYSTEM, user_prompt, True
+
+    def parse_ai_response(self, response: dict, use_json_format: bool) -> list[RuleResult]:
+        """解析 AI 返回，还原 list[RuleResult]."""
+        if not use_json_format:
+            return parse_text_result(response.get("raw_text", ""), self.rule_ids)
+        return [
+            RuleResult(rule_id=item["rule_id"], passed=item.get("passed", False), detail=item.get("detail"))
+            for item in response.get("results", [])
+        ]
+
     async def check(
         self,
         client: AiClient,

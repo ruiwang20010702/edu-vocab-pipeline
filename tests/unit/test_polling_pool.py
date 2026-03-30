@@ -108,3 +108,74 @@ class TestMakeSubmitBody:
         gen = SentenceGenerator()
         body = gen.make_submit_body(word="hello", meaning="你好", pos="interj.")
         assert "messages" in body
+
+
+class TestL2CheckerBuildPrompts:
+    """测试 L2 UnifiedChecker 的 build_prompts 和 parse_ai_response."""
+
+    def test_chunk_build_prompts(self):
+        from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
+        checker = UnifiedChunkChecker()
+        sys_p, usr_p, use_json = checker.build_prompts("take a walk", "walk", "散步", pos="n.")
+        assert len(sys_p) > 0
+        assert "walk" in usr_p
+        assert isinstance(use_json, bool)
+
+    def test_chunk_parse_json_response(self):
+        from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
+        checker = UnifiedChunkChecker()
+        response = {"results": [{"rule_id": "C3", "passed": True, "detail": "ok"}]}
+        results = checker.parse_ai_response(response, use_json_format=True)
+        assert len(results) == 1
+        assert results[0].passed is True
+
+    def test_chunk_parse_text_response(self):
+        from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
+        checker = UnifiedChunkChecker()
+        response = {"raw_text": "Collocation Check: PASS\nOVERALL: PASS"}
+        results = checker.parse_ai_response(response, use_json_format=False)
+        assert len(results) == 1
+        assert results[0].passed is True
+
+    def test_sentence_build_prompts(self):
+        from vocab_qc.core.qc.layer2.unified.sentence_unified import UnifiedSentenceChecker
+        checker = UnifiedSentenceChecker()
+        sys_p, usr_p, use_json = checker.build_prompts(
+            "He is kind.", "kind", "友好的", pos="adj.", content_cn="他很友好。",
+        )
+        assert "kind" in usr_p
+        assert isinstance(use_json, bool)
+
+    def test_syllable_build_prompts(self):
+        from vocab_qc.core.qc.layer2.unified.syllable_unified import UnifiedSyllableChecker
+        checker = UnifiedSyllableChecker()
+        sys_p, usr_p, use_json = checker.build_prompts("hap·py", "happy")
+        assert "happy" in usr_p
+
+    def test_mnemonic_build_prompts(self):
+        from vocab_qc.core.qc.layer2.unified.mnemonic_unified import UnifiedMnemonicChecker
+        checker = UnifiedMnemonicChecker()
+        sys_p, usr_p, use_json = checker.build_prompts(
+            "kind = k + ind", "kind", "友好的",
+            item_dimension="mnemonic_word_in_word",
+        )
+        assert "kind" in usr_p
+
+    def test_mnemonic_parse_json_response(self):
+        from vocab_qc.core.qc.layer2.unified.mnemonic_unified import UnifiedMnemonicChecker
+        checker = UnifiedMnemonicChecker()
+        response = {"results": [
+            {"rule_id": "N5_AI", "passed": True, "detail": "ok"},
+            {"rule_id": "N6", "passed": False, "detail": "伪助记"},
+        ]}
+        results = checker.parse_ai_response(response, use_json_format=True)
+        assert len(results) == 2
+        assert results[0].passed is True
+        assert results[1].passed is False
+
+    def test_ai_client_make_submit_body(self):
+        from vocab_qc.core.qc.layer2.ai_base import AiClient
+        client = AiClient(api_key="test", base_url="http://test", model="test-model")
+        body = client.make_submit_body("system", "user")
+        assert "messages" in body
+        assert body.get("temperature") == 0  # 质检用 temperature=0
