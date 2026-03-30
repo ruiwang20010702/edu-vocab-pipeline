@@ -152,7 +152,7 @@ def validate_production_config() -> None:
         if not settings.ai_callback_url:
             errors.append("VOCAB_QC_AI_CALLBACK_MODE=True 时 VOCAB_QC_AI_CALLBACK_URL 不能为空")
         if not settings.ai_callback_allowed_ips:
-            errors.append("VOCAB_QC_AI_CALLBACK_MODE=True 时 VOCAB_QC_AI_CALLBACK_ALLOWED_IPS 不能为空")
+            logger.warning("VOCAB_QC_AI_CALLBACK_ALLOWED_IPS 为空，回调端点不校验来源 IP（建议配置）")
         if not settings.ai_use_task_queue:
             errors.append("VOCAB_QC_AI_CALLBACK_MODE=True 需要 VOCAB_QC_AI_USE_TASK_QUEUE=True")
 
