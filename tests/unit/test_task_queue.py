@@ -135,6 +135,10 @@ class TestGetSubmittedForPoll:
 
 
 class TestIsBatchDone:
+    def test_nonexistent_batch_returns_false(self, db_session: Session):
+        """空批次（不存在）不应误判为完成."""
+        assert TaskQueueService.is_batch_done(db_session, "nonexistent") is False
+
     def test_not_done_with_pending(self, db_session: Session):
         TaskQueueService.enqueue_tasks(db_session, [_make_spec(batch_key="b1")])
         assert TaskQueueService.is_batch_done(db_session, "b1") is False

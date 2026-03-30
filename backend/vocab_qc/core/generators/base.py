@@ -779,12 +779,17 @@ class ContentGenerator:
         子类有 _build_user_prompt 方法，签名可能不同。
         此方法统一调用子类的 user prompt 构造，组合 config 和 system prompt。
         """
+        import inspect
+
         config = self.resolve_ai_config(_preloaded_config=_preloaded_config, **kwargs)
         # 子类签名：syllable 只要 word，其他要 word/pos/meaning
-        try:
-            user_prompt = self._build_user_prompt(word, pos, meaning)  # type: ignore[call-arg]
-        except TypeError:
+        sig = inspect.signature(self._build_user_prompt)
+        params = list(sig.parameters.keys())
+        if len(params) == 1:
+            # syllable: _build_user_prompt(self, word)
             user_prompt = self._build_user_prompt(word)  # type: ignore[call-arg]
+        else:
+            user_prompt = self._build_user_prompt(word, pos, meaning)  # type: ignore[call-arg]
         return self.build_task_queue_body(
             config.system_prompt, user_prompt,
             model=config.model, api_key=config.api_key, base_url=config.base_url,

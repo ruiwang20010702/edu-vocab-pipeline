@@ -117,9 +117,20 @@ class PollingPool:
 
         session = SyncSessionLocal()
         try:
+            from datetime import UTC, datetime, timedelta
+
+            # 按自适应间隔过滤：只取 last_polled_at 为 NULL 或已过间隔的任务
+            # 用最短间隔（3s）作为 DB 过滤基线，更精细的过滤在应用层做
+            min_interval = settings.ai_gateway_poll_interval
+            cutoff = datetime.now(UTC) - timedelta(seconds=min_interval)
+
             tasks = (
                 session.query(AiTaskQueue)
                 .filter_by(status=AiTaskStatus.SUBMITTED.value)
+                .filter(
+                    (AiTaskQueue.last_polled_at.is_(None))
+                    | (AiTaskQueue.last_polled_at < cutoff)
+                )
                 .order_by(AiTaskQueue.last_polled_at.asc().nullsfirst())
                 .limit(settings.ai_poll_pool_size)
                 .all()
@@ -127,20 +138,17 @@ class PollingPool:
             if not tasks:
                 return 0
 
-            # 过滤掉还没到轮询间隔的任务
-            now = time.monotonic()
+            # 应用层精细过滤：按 poll_count 对应的自适应间隔
+            now_utc = datetime.now(UTC)
             ready_tasks = []
             for t in tasks:
-                interval = _poll_interval_for_count(t.poll_count)
                 if t.last_polled_at is None:
                     ready_tasks.append(t)
                 else:
-                    # 用 poll_count 推算是否到了间隔
-                    elapsed_since_poll = (
-                        asyncio.get_event_loop().time() - asyncio.get_event_loop().time()
-                    )
-                    # 简化：直接检查 poll_count 对应间隔，每轮都轮询一次
-                    ready_tasks.append(t)
+                    interval = _poll_interval_for_count(t.poll_count)
+                    elapsed = (now_utc - t.last_polled_at).total_seconds()
+                    if elapsed >= interval:
+                        ready_tasks.append(t)
 
             if not ready_tasks:
                 return 0
@@ -276,8 +284,9 @@ class PollingPool:
         client = await self._ensure_client()
         submit_url = f"{settings.ai_api_base_url}/chat/completions"
         submitted_count = 0
+        max_rounds = 1000  # 防止死循环（正常情况远低于此值）
 
-        while True:
+        for _round in range(max_rounds):
             session = SyncSessionLocal()
             try:
                 pending = TaskQueueService.get_pending_submit(session, batch_key)
@@ -301,24 +310,28 @@ class PollingPool:
             # 写回结果
             session = SyncSessionLocal()
             try:
+                all_failed = True
                 for td, result in zip(batch_data, results):
                     if isinstance(result, Exception):
                         logger.warning("提交失败 task_id=%d: %s", td["id"], result)
-                        task = session.query(AiTaskQueue).filter_by(id=td["id"]).one()
-                        task.retry_count += 1
-                        if task.retry_count >= task.max_retries:
-                            TaskQueueService.mark_failed(
-                                session, td["id"], "submit_failed", str(result),
-                            )
+                        TaskQueueService.mark_failed(
+                            session, td["id"], "submit_failed", str(result),
+                        )
                     else:
                         TaskQueueService.mark_submitted(session, td["id"], result)
                         submitted_count += 1
+                        all_failed = False
                 session.commit()
             except Exception:
                 session.rollback()
                 raise
             finally:
                 session.close()
+
+            # 如果整批全部失败，直接退出防止无限重试
+            if all_failed:
+                logger.error("批次 %s 本轮全部提交失败，终止提交", batch_key)
+                break
 
             # 批次间 stagger
             if settings.ai_submit_stagger > 0:

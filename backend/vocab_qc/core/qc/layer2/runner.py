@@ -133,8 +133,6 @@ class Layer2Runner:
         extra_kwargs: dict[int, dict],
     ) -> tuple[dict[int, list[RuleResult]], list[AiErrorLog]]:
         """纯 AI 调用，不涉及 session 操作。并发执行所有 item 检查。"""
-        # item_id → ContentItem 映射，用于错误日志填充 word_id / dimension
-        {item.id: item for item in items}
 
         from vocab_qc.core.config import settings as _settings
         stagger = _settings.ai_request_stagger
@@ -277,9 +275,17 @@ class Layer2Runner:
         if not specs:
             return {}, []
 
-        # Step 2: 入队 + 提交 + 轮询
-        TaskQueueService.enqueue_tasks(session, specs)
-        session.commit()
+        # Step 2: 入队（独立 session，不破坏外层事务） + 提交 + 轮询
+        from vocab_qc.core.db import SyncSessionLocal as _SyncSessionLocal
+        enqueue_session = _SyncSessionLocal()
+        try:
+            TaskQueueService.enqueue_tasks(enqueue_session, specs)
+            enqueue_session.commit()
+        except Exception:
+            enqueue_session.rollback()
+            raise
+        finally:
+            enqueue_session.close()
 
         async def _submit_and_wait() -> None:
             pool = PollingPool.get_instance()
@@ -323,6 +329,23 @@ class Layer2Runner:
             # 解析 Gateway 原始响应
             raw_data = task.result_data or {}
             try:
+                # 提取 usage 信息（Token 用量）
+                usage = extract_usage(raw_data)
+                if usage and usage.total_tokens > 0:
+                    from vocab_qc.core.generators.base import estimate_cost
+                    session.add(AiUsageLog(
+                        phase="qc_layer2",
+                        dimension=task.dimension,
+                        ai_model=task.ai_model or self.client.model,
+                        prompt_tokens=usage.prompt_tokens,
+                        completion_tokens=usage.completion_tokens,
+                        total_tokens=usage.total_tokens,
+                        estimated_cost_usd=estimate_cost(task.ai_model or self.client.model, usage),
+                        word_id=task.word_id,
+                        content_item_id=cid,
+                        package_id=package_id,
+                    ))
+
                 content_str = _strip_markdown_fences(parse_ai_response(raw_data))
                 if use_json:
                     parsed = _json.loads(content_str)
@@ -486,6 +509,11 @@ class Layer2Runner:
         session.flush()
 
         # 任务队列模式 vs 原模式
+        if _settings.ai_use_task_queue and strategy != AiStrategy.UNIFIED:
+            logger.warning(
+                "ai_use_task_queue=True 仅支持 UNIFIED 策略，当前 strategy=%s，回退到直连模式",
+                strategy.value,
+            )
         if _settings.ai_use_task_queue and strategy == AiStrategy.UNIFIED:
             results_map, error_logs = self._collect_ai_results_queued(
                 session, items, word_texts, meaning_texts, extra_kwargs, package_id,

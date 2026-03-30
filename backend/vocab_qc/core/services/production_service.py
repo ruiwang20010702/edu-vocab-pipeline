@@ -553,8 +553,17 @@ def _generate_content_queued(
         return 0
 
     # --- Step B: 入队 + 提交 + 轮询 ---
-    TaskQueueService.enqueue_tasks(session, specs)
-    session.commit()  # 确保入队持久化（重启可恢复）
+    # 用独立 session 入队，避免在外层 session 上 commit 破坏事务边界
+    from vocab_qc.core.db import SyncSessionLocal
+    enqueue_session = SyncSessionLocal()
+    try:
+        TaskQueueService.enqueue_tasks(enqueue_session, specs)
+        enqueue_session.commit()
+    except Exception:
+        enqueue_session.rollback()
+        raise
+    finally:
+        enqueue_session.close()
 
     async def _submit_and_wait() -> None:
         pool = PollingPool.get_instance()

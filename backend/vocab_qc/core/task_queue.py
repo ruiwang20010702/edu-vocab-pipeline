@@ -153,7 +153,14 @@ class TaskQueueService:
 
     @staticmethod
     def is_batch_done(session: Session, batch_key: str) -> bool:
-        """检查批次是否全部完成（无 pending/submitted/polling 状态）."""
+        """检查批次是否全部完成（无 pending/submitted/polling 状态）.
+
+        若批次不存在（无任何记录），返回 False 而非误判完成。
+        """
+        total = session.query(AiTaskQueue).filter_by(batch_key=batch_key).count()
+        if total == 0:
+            return False  # 批次不存在，不算完成
+
         active_count = (
             session.query(AiTaskQueue)
             .filter_by(batch_key=batch_key)
