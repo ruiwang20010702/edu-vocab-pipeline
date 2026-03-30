@@ -766,6 +766,87 @@ class ContentGenerator:
 
         raise RuntimeError(f"AI 生成失败（{settings.ai_max_retries}次重试后）: {last_error}")
 
+    def make_submit_body(
+        self,
+        word: str,
+        meaning: str | None = None,
+        pos: str | None = None,
+        _preloaded_config: Any | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """构造用于任务队列的 Gateway 请求 body.
+
+        子类有 _build_user_prompt 方法，签名可能不同。
+        此方法统一调用子类的 user prompt 构造，组合 config 和 system prompt。
+        """
+        config = self.resolve_ai_config(_preloaded_config=_preloaded_config, **kwargs)
+        # 子类签名：syllable 只要 word，其他要 word/pos/meaning
+        try:
+            user_prompt = self._build_user_prompt(word, pos, meaning)  # type: ignore[call-arg]
+        except TypeError:
+            user_prompt = self._build_user_prompt(word)  # type: ignore[call-arg]
+        return self.build_task_queue_body(
+            config.system_prompt, user_prompt,
+            model=config.model, api_key=config.api_key, base_url=config.base_url,
+        )
+
+    def build_task_queue_body(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> dict[str, Any]:
+        """构造用于任务队列持久化的 Gateway 请求 body（不发请求）。
+
+        返回的 dict 可直接存入 AiTaskQueue.submit_body，也可传给 Gateway POST。
+        """
+        actual_key = api_key or settings.ai_api_key
+        actual_url = base_url or settings.ai_api_base_url
+        actual_model = model or settings.ai_model
+        _url, _headers, body = self._build_request(
+            actual_url, actual_key, actual_model, system_prompt, user_prompt,
+        )
+        return body
+
+    async def submit_only_async(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """只提交到 Gateway，返回 (task_no, submit_body)，不轮询。
+
+        供任务队列模式使用：提交后由 PollingPool 统一轮询。
+        """
+        actual_key = api_key or settings.ai_api_key
+        actual_url = base_url or settings.ai_api_base_url
+        actual_model = model or settings.ai_model
+
+        if not actual_key or not actual_url:
+            raise AiRequestError("submit_failed", detail="未配置 AI API Key 或 URL")
+
+        url, headers, body = self._build_request(
+            actual_url, actual_key, actual_model, system_prompt, user_prompt,
+        )
+        client = _get_async_http_client()
+        response = await client.post(url, headers=headers, json=body)
+
+        if response.status_code == 429:
+            raise AiRequestError("http_error", status_code=429, detail="Gateway 429 限流")
+        if response.status_code >= 400:
+            raise AiRequestError(
+                "http_error", status_code=response.status_code,
+                response_body=response.text[:500],
+            )
+
+        task_no = parse_async_submit_response(response.json())
+        logger.info("Gateway submit-only 成功 task_no=%s model=%s", task_no, actual_model)
+        return task_no, body
+
     @staticmethod
     def _ensure_json_hint(system_prompt: str) -> str:
         """确保 system prompt 包含 'json' 关键词，满足 response_format 要求。"""

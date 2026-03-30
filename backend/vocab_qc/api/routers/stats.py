@@ -1,7 +1,10 @@
 """仪表板统计 API 路由."""
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from vocab_qc.api.deps import get_current_user, get_db, require_role
@@ -56,3 +59,67 @@ def export_production_records(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=production-records.xlsx"},
     )
+
+
+# ── 任务队列监控 ──────────────────────────────────────────────────
+
+
+@router.get("/stats/task-queue")
+def get_task_queue_stats(
+    batch_key: Optional[str] = Query(default=None, description="按批次 key 过滤"),
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """任务队列总览：各状态数量、平均耗时."""
+    from vocab_qc.core.models.ai_task_queue import AiTaskQueue, AiTaskStatus
+
+    q = db.query(AiTaskQueue)
+    if batch_key:
+        q = q.filter_by(batch_key=batch_key)
+
+    total = q.count()
+    if total == 0:
+        return {"total": 0, "by_status": {}, "avg_poll_count": 0, "avg_duration_s": None}
+
+    by_status = {}
+    for status in AiTaskStatus:
+        by_status[status.value] = q.filter_by(status=status.value).count()
+
+    # 平均轮询次数
+    avg_poll = db.query(func.avg(AiTaskQueue.poll_count)).filter(
+        AiTaskQueue.status == AiTaskStatus.COMPLETED.value,
+    ).scalar() or 0
+
+    # 平均耗时（提交到完成）
+    from sqlalchemy import extract
+    completed_tasks = q.filter(
+        AiTaskQueue.submitted_at.isnot(None),
+        AiTaskQueue.completed_at.isnot(None),
+    )
+    avg_dur = None
+    if completed_tasks.count() > 0:
+        durations = [
+            (t.completed_at - t.submitted_at).total_seconds()
+            for t in completed_tasks.limit(1000).all()
+            if t.completed_at and t.submitted_at
+        ]
+        if durations:
+            avg_dur = round(sum(durations) / len(durations), 1)
+
+    return {
+        "total": total,
+        "by_status": by_status,
+        "avg_poll_count": round(float(avg_poll), 1),
+        "avg_duration_s": avg_dur,
+    }
+
+
+@router.get("/stats/task-queue/batch/{batch_key}")
+def get_batch_progress(
+    batch_key: str,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """指定批次的实时进度."""
+    from vocab_qc.core.task_queue import TaskQueueService
+    return TaskQueueService.batch_progress(db, batch_key)

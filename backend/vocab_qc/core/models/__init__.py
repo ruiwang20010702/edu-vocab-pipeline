@@ -1,5 +1,6 @@
 """ORM 模型统一导出."""
 
+from vocab_qc.core.models.ai_task_queue import AiTaskQueue, AiTaskStatus
 from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Phonetic, Source, Word
@@ -30,6 +31,8 @@ from vocab_qc.core.models.quality_layer import (
 from vocab_qc.core.models.user import User, VerificationCode
 
 __all__ = [
+    "AiTaskQueue",
+    "AiTaskStatus",
     "AiErrorLog",
     "AiUsageLog",
     "AiStrategy",

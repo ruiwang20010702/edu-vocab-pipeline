@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     ai_circuit_breaker_threshold: int = 15  # 连续失败次数触发熔断
     ai_circuit_breaker_recovery: int = 30   # 熔断恢复冷却时间（秒）
 
+    # 任务队列（提交/轮询解耦）
+    ai_use_task_queue: bool = False         # 开关：True=新队列模式，False=原轮询模式
+    ai_submit_batch_size: int = 20          # 每批提交数（匹配 Gateway 限制）
+    ai_submit_stagger: float = 0.5          # 批次间提交间隔（秒），防 429
+    ai_poll_pool_size: int = 50             # 轮询 worker 数
+    ai_poll_scan_interval: float = 2.0      # 轮询扫描间隔（秒）
+
     production_batch_size: int = 50  # 大批量生产时每批处理的词数（fallback）
     production_max_items_per_batch: int = 500  # 智能分批：每批 ContentItem 数上限
     package_processing_timeout_hours: int = 6  # Package processing 状态超时（小时）

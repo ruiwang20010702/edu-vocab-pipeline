@@ -19,6 +19,7 @@ from vocab_qc.core.generators.sentence import SentenceGenerator
 from vocab_qc.core.generators.syllable import SyllableGenerator
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
+from vocab_qc.core.models.ai_task_queue import AiTaskStatus
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import AiErrorLog, AiUsageLog, classify_ai_error
@@ -294,6 +295,10 @@ def _generate_content(session: Session, items: list[ContentItem], *, package_id:
     if not items:
         return 0
 
+    # 任务队列模式：提交/轮询解耦，支持高并发和重启恢复
+    if settings.ai_use_task_queue:
+        return _generate_content_queued(session, items, package_id=package_id)
+
     # --- Step A: 预加载，构造任务 ---
     word_ids = {item.word_id for item in items}
     meaning_ids = {item.meaning_id for item in items if item.meaning_id}
@@ -463,6 +468,180 @@ def _generate_content(session: Session, items: list[ContentItem], *, package_id:
         session.add(log)
     for log in usage_logs:
         session.add(log)
+
+    session.flush()
+    return count
+
+
+def _generate_content_queued(
+    session: Session,
+    items: list[ContentItem],
+    *,
+    package_id: int | None = None,
+) -> int:
+    """任务队列模式：enqueue → submit → poll → collect → writeback.
+
+    提交与轮询解耦，支持高并发（每批 20 个连续提交）和容器重启恢复。
+    """
+    import uuid
+
+    from vocab_qc.core.generators.base import (
+        AiUsageInfo,
+        _strip_markdown_fences,
+        estimate_cost,
+        extract_usage,
+    )
+    from vocab_qc.core.polling_pool import PollingPool
+    from vocab_qc.core.task_queue import TaskQueueService, TaskSpec
+
+    batch_key = f"gen:{package_id or uuid.uuid4().hex[:8]}"
+
+    # --- Step A: 预加载 + 构造 TaskSpec ---
+    word_ids = {item.word_id for item in items}
+    meaning_ids = {item.meaning_id for item in items if item.meaning_id}
+    words_map = {w.id: w for w in session.query(Word).filter(Word.id.in_(word_ids)).all()}
+    meanings_map = (
+        {m.id: m for m in session.query(Meaning).filter(Meaning.id.in_(meaning_ids)).all()}
+        if meaning_ids else {}
+    )
+
+    ai_configs: dict[str, Any] = {}
+    for dim, gen in _GENERATORS.items():
+        ai_configs[dim] = gen.get_ai_config(session)
+
+    specs: list[TaskSpec] = []
+    item_map: dict[int, ContentItem] = {}
+
+    for item in items:
+        if item.content:
+            continue
+        if item.dimension not in _GENERATORS:
+            continue
+        word = words_map.get(item.word_id)
+        if word is None:
+            continue
+
+        meaning_text = None
+        pos = None
+        if item.meaning_id:
+            meaning = meanings_map.get(item.meaning_id)
+            if meaning:
+                meaning_text = meaning.definition
+                pos = meaning.pos
+
+        generator = _GENERATORS[item.dimension]
+        config = ai_configs[item.dimension]
+
+        # 构造 Gateway 请求 body（内部调用子类的 _build_user_prompt + config）
+        submit_body = generator.make_submit_body(
+            word=word.word, meaning=meaning_text, pos=pos, _preloaded_config=config,
+        )
+
+        specs.append(TaskSpec(
+            batch_key=batch_key,
+            phase="generation",
+            submit_body=submit_body,
+            content_item_id=item.id,
+            dimension=item.dimension,
+            ai_model=config.model if config else settings.ai_model,
+            word_id=item.word_id,
+            package_id=package_id,
+        ))
+        item_map[item.id] = item
+
+    if not specs:
+        return 0
+
+    # --- Step B: 入队 + 提交 + 轮询 ---
+    TaskQueueService.enqueue_tasks(session, specs)
+    session.commit()  # 确保入队持久化（重启可恢复）
+
+    async def _submit_and_wait() -> None:
+        pool = PollingPool.get_instance()
+        await pool.submit_batch(batch_key)
+        # 动态超时：每任务 10s 基准，下限 10 分钟，上限 60 分钟
+        timeout = min(max(600, len(specs) * 10), 3600)
+        done = await pool.wait_for_batch(batch_key, timeout=timeout)
+        if not done:
+            logger.warning("批次 %s 轮询超时, 部分任务可能未完成", batch_key)
+
+    from vocab_qc.core.async_bridge import run_async_in_sync
+    run_async_in_sync(_submit_and_wait())
+
+    # --- Step C: 收集结果 + 写回 ---
+    completed = TaskQueueService.collect_completed(session, batch_key)
+    count = 0
+
+    for task in completed:
+        item = item_map.get(task.content_item_id)
+        if item is None:
+            continue
+
+        if task.status == AiTaskStatus.FAILED.value:
+            item.content = ""
+            item.qc_status = QcStatus.LAYER1_FAILED.value
+            session.add(AiErrorLog(
+                content_item_id=task.content_item_id,
+                word_id=item.word_id,
+                phase="generation",
+                dimension=item.dimension,
+                error_type=task.error_type or "unknown",
+                error_message=task.error_message or "",
+                ai_model=task.ai_model,
+                gateway_task_no=task.gateway_task_no,
+            ))
+            count += 1
+            continue
+
+        # 解析结果
+        result_data = task.result_data or {}
+        try:
+            usage = extract_usage(result_data)
+            from vocab_qc.core.generators.base import parse_ai_response
+            raw_content = _strip_markdown_fences(parse_ai_response(result_data))
+            import json
+            parsed = json.loads(raw_content)
+        except Exception as e:
+            logger.warning("结果解析失败 task_id=%d: %s", task.id, e)
+            item.content = ""
+            item.qc_status = QcStatus.LAYER1_FAILED.value
+            count += 1
+            continue
+
+        if parsed.get("valid") is False:
+            item.content = ""
+            item.qc_status = QcStatus.REJECTED.value
+            count += 1
+            continue
+
+        content = parsed.get("content", "")
+        if not content:
+            item.content = ""
+            item.qc_status = QcStatus.LAYER1_FAILED.value
+            count += 1
+            continue
+
+        item.content = content
+        if parsed.get("content_cn"):
+            item.content_cn = parsed["content_cn"]
+
+        # 用量日志
+        if usage and usage.total_tokens > 0:
+            dim_model = task.ai_model or settings.ai_model
+            session.add(AiUsageLog(
+                phase="generation",
+                dimension=item.dimension,
+                ai_model=dim_model,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                estimated_cost_usd=estimate_cost(dim_model, usage),
+                word_id=item.word_id,
+                content_item_id=task.content_item_id,
+                package_id=package_id,
+            ))
+
+        count += 1
 
     session.flush()
     return count

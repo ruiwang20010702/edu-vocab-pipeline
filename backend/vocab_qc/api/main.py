@@ -72,9 +72,47 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("词根词缀知识库预热失败（不阻塞启动）", exc_info=True)
 
+    # 任务队列模式：恢复中断的任务 + 启动后台 polling pool
+    _poll_task = None
+    if settings.ai_use_task_queue:
+        try:
+            from vocab_qc.core.db import SyncSessionLocal
+            from vocab_qc.core.polling_pool import PollingPool
+            from vocab_qc.core.task_queue import TaskQueueService
+
+            with SyncSessionLocal() as session:
+                recovered = TaskQueueService.recover_interrupted(session)
+                cleaned = TaskQueueService.cleanup_old(session)
+                session.commit()
+                if recovered:
+                    logger.info("恢复 %d 个中断的 AI 任务", recovered)
+                if cleaned:
+                    logger.info("清理 %d 条过期任务记录", cleaned)
+
+            pool = PollingPool.get_instance()
+            import asyncio
+            _poll_task = asyncio.create_task(pool.run_forever())
+            logger.info("任务队列 PollingPool 已启动")
+        except Exception:
+            logger.warning("PollingPool 启动失败（不阻塞启动）", exc_info=True)
+
     yield
 
     # --- shutdown ---
+    # 停止 polling pool
+    if settings.ai_use_task_queue and _poll_task is not None:
+        try:
+            from vocab_qc.core.polling_pool import PollingPool
+            PollingPool.get_instance().shutdown()
+            _poll_task.cancel()
+            try:
+                await _poll_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("PollingPool 已停止")
+        except Exception:
+            logger.warning("PollingPool 停止失败", exc_info=True)
+
     try:
         from vocab_qc.core.generators.base import close_http_clients
         await close_http_clients()
