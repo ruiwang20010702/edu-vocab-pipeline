@@ -73,8 +73,15 @@ def ai_task_callback(
     """
     _check_ip_whitelist(request)
 
+    # 调试日志：完整记录回调数据，便于确认 result 格式
+    logger.info(
+        "回调详情 task_no=%s status=%s result_type=%s result_preview=%s",
+        payload.task_no, payload.status,
+        type(payload.result).__name__,
+        str(payload.result)[:500] if payload.result else "None",
+    )
+
     task_no = payload.task_no
-    logger.info("收到回调 task_no=%s status=%s", task_no, payload.status)
 
     # 查找任务
     task = db.query(AiTaskQueue).filter_by(gateway_task_no=task_no).first()
