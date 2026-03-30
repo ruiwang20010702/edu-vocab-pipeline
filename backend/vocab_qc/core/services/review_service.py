@@ -607,8 +607,8 @@ class ReviewService:
         content_item.qc_status = QcStatus.PENDING.value
         session.flush()
 
-        # 自动运行质检
-        qc_passed = self._run_qc_for_item(session, content_item)
+        # 自动运行质检（人工编辑跳过 Layer 2 AI 校验）
+        qc_passed = self._run_qc_for_item(session, content_item, skip_layer2=True)
 
         if qc_passed:
             content_item.qc_status = QcStatus.APPROVED.value
@@ -675,8 +675,12 @@ class ReviewService:
         return items, total
 
     @staticmethod
-    def _run_qc_for_item(session: Session, content_item: ContentItem) -> bool:
-        """对单个内容项运行 Layer 1 + Layer 2 质检，返回是否全部通过。"""
+    def _run_qc_for_item(session: Session, content_item: ContentItem, *, skip_layer2: bool = False) -> bool:
+        """对单个内容项运行质检，返回是否全部通过。
+
+        Args:
+            skip_layer2: 为 True 时跳过 Layer 2 AI 语义校验（人工编辑场景）。
+        """
         from vocab_qc.core.models.data_layer import Meaning, Phonetic, Word
         from vocab_qc.core.qc.layer2.runner import Layer2Runner
         from vocab_qc.core.qc.runner import Layer1Runner
@@ -710,7 +714,9 @@ class ReviewService:
         if content_item.qc_status != QcStatus.LAYER1_PASSED.value:
             return False
 
-        # Layer 2（仅对有 Layer 2 规则的维度执行）
+        # Layer 2（仅对有 Layer 2 规则的维度执行；人工编辑时跳过）
+        if skip_layer2:
+            return True
         l2_runner = Layer2Runner()
         has_l2 = content_item.dimension in l2_runner._unified_checkers
         if has_l2:
