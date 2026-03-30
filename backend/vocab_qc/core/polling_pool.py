@@ -48,7 +48,6 @@ class PollingPool:
 
     def __init__(self) -> None:
         self._shutdown = False
-        self._batch_events: dict[str, asyncio.Event] = {}
         self._global_429_until: float = 0.0  # monotonic timestamp
         self._client: httpx.AsyncClient | None = None
 
@@ -183,12 +182,12 @@ class PollingPool:
                 status, data, error = result
                 if status == "COMPLETED" and data is not None:
                     TaskQueueService.mark_completed(session, td["id"], data)
-                    self._notify_batch(td["batch_key"])
+                    pass
                 elif status == "FAILED":
                     TaskQueueService.mark_failed(
                         session, td["id"], "task_failed", error or "Gateway FAILED",
                     )
-                    self._notify_batch(td["batch_key"])
+                    pass
                 else:
                     # PENDING / PROCESSING
                     TaskQueueService.increment_poll(session, td["id"])
@@ -198,19 +197,6 @@ class PollingPool:
             raise
         finally:
             session.close()
-
-        # 检查哪些 batch 已全部完成
-        done_batches = set()
-        for td in task_data:
-            bk = td["batch_key"]
-            if bk not in done_batches and bk in self._batch_events:
-                s = SyncSessionLocal()
-                try:
-                    if TaskQueueService.is_batch_done(s, bk):
-                        done_batches.add(bk)
-                        self._notify_batch(bk, final=True)
-                finally:
-                    s.close()
 
         return len(task_data)
 
@@ -242,38 +228,41 @@ class PollingPool:
 
     # ── 批次等待 ────────────────────────────────────────────────────
 
-    def _notify_batch(self, batch_key: str, final: bool = False) -> None:
-        """通知等待某批次的协程."""
-        event = self._batch_events.get(batch_key)
-        if event and final:
-            event.set()
-
     async def wait_for_batch(self, batch_key: str, timeout: float = 1800.0) -> bool:
         """异步等待某批次全部完成.
+
+        内部自驱动轮询：不依赖后台 run_forever（兼容 run_async_in_sync 场景）。
+        每轮扫描 submitted 任务并 poll，直到全部完成或超时。
 
         Returns:
             True=全部完成, False=超时.
         """
-        # 先检查是否已完成
-        session = SyncSessionLocal()
-        try:
-            if TaskQueueService.is_batch_done(session, batch_key):
-                return True
-        finally:
-            session.close()
+        import time as _time
+        deadline = _time.monotonic() + timeout
 
-        # 注册事件
-        event = asyncio.Event()
-        self._batch_events[batch_key] = event
+        while _time.monotonic() < deadline:
+            # 检查是否已全部完成
+            session = SyncSessionLocal()
+            try:
+                if TaskQueueService.is_batch_done(session, batch_key):
+                    return True
+            finally:
+                session.close()
 
-        try:
-            await asyncio.wait_for(event.wait(), timeout=timeout)
-            return True
-        except asyncio.TimeoutError:
-            logger.warning("等待批次 %s 超时 (%.0fs)", batch_key, timeout)
-            return False
-        finally:
-            self._batch_events.pop(batch_key, None)
+            # 跑一轮扫描 + 轮询
+            try:
+                polled = await self._scan_and_poll()
+            except Exception:
+                logger.exception("wait_for_batch scan 异常")
+                polled = 0
+
+            if polled == 0:
+                await asyncio.sleep(settings.ai_poll_scan_interval)
+            else:
+                await asyncio.sleep(0.5)
+
+        logger.warning("等待批次 %s 超时 (%.0fs)", batch_key, timeout)
+        return False
 
     # ── 批量提交 ────────────────────────────────────────────────────
 
