@@ -73,10 +73,11 @@ def ai_task_callback(
     """
     _check_ip_whitelist(request)
 
-    # 调试日志：完整记录回调数据，便于确认 result 格式
+    # 调试日志：记录来源 IP + 回调数据
+    client_ip = request.client.host if request.client else "unknown"
     logger.info(
-        "回调详情 task_no=%s status=%s result_type=%s result_preview=%s",
-        payload.task_no, payload.status,
+        "回调详情 ip=%s task_no=%s status=%s result_type=%s result_preview=%s",
+        client_ip, payload.task_no, payload.status,
         type(payload.result).__name__,
         str(payload.result)[:500] if payload.result else "None",
     )
