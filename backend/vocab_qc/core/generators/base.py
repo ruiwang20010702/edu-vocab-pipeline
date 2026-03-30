@@ -114,6 +114,9 @@ def build_ai_request(
         }
         if use_json_format:
             body["response_format"] = {"type": "json_object"}
+        # 回调模式：注入 callback URL
+        if settings.ai_callback_mode and settings.ai_callback_url:
+            body["client_callback_url"] = settings.ai_callback_url
     else:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         body = {

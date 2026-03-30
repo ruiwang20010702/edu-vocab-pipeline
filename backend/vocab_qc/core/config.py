@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     ai_poll_pool_size: int = 50             # 轮询 worker 数
     ai_poll_scan_interval: float = 2.0      # 轮询扫描间隔（秒）
 
+    # 回调模式（替代轮询，需 ai_use_task_queue=True）
+    ai_callback_mode: bool = False              # 开关：True=回调主驱+轮询兜底
+    ai_callback_url: str = ""                   # Gateway 回调地址
+    ai_callback_allowed_ips: list[str] = []     # 回调来源 IP 白名单
+    ai_callback_grace_period: float = 300.0     # 宽限期（秒），超时后降级为轮询
+
     production_batch_size: int = 50  # 大批量生产时每批处理的词数（fallback）
     production_max_items_per_batch: int = 500  # 智能分批：每批 ContentItem 数上限
     package_processing_timeout_hours: int = 6  # Package processing 状态超时（小时）
@@ -141,6 +147,14 @@ def validate_production_config() -> None:
             f"ai_task_timeout({settings.ai_task_timeout})"
             f" 应 >= ai_gateway_poll_max_wait({settings.ai_gateway_poll_max_wait})"
         )
+
+    if settings.ai_callback_mode:
+        if not settings.ai_callback_url:
+            errors.append("VOCAB_QC_AI_CALLBACK_MODE=True 时 VOCAB_QC_AI_CALLBACK_URL 不能为空")
+        if not settings.ai_callback_allowed_ips:
+            errors.append("VOCAB_QC_AI_CALLBACK_MODE=True 时 VOCAB_QC_AI_CALLBACK_ALLOWED_IPS 不能为空")
+        if not settings.ai_use_task_queue:
+            errors.append("VOCAB_QC_AI_CALLBACK_MODE=True 需要 VOCAB_QC_AI_USE_TASK_QUEUE=True")
 
     if not settings.smtp_host:
         errors.append("VOCAB_QC_SMTP_HOST 未配置，无法发送验证码")

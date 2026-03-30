@@ -239,14 +239,19 @@ class PollingPool:
     async def wait_for_batch(self, batch_key: str, timeout: float = 1800.0) -> bool:
         """异步等待某批次全部完成.
 
-        内部自驱动轮询：不依赖后台 run_forever（兼容 run_async_in_sync 场景）。
-        每轮扫描 submitted 任务并 poll，直到全部完成或超时。
+        回调模式（ai_callback_mode=True）：
+          宽限期内仅 DB 轮询（零 HTTP），超时后降级为主动 HTTP 轮询。
+        轮询模式（ai_callback_mode=False）：
+          自驱动 _scan_and_poll 直到完成。
 
         Returns:
             True=全部完成, False=超时.
         """
         import time as _time
         deadline = _time.monotonic() + timeout
+        callback_mode = settings.ai_callback_mode
+        grace_deadline = _time.monotonic() + settings.ai_callback_grace_period
+        degraded_logged = False
 
         while _time.monotonic() < deadline:
             # 检查是否已全部完成
@@ -257,17 +262,24 @@ class PollingPool:
             finally:
                 session.close()
 
-            # 跑一轮扫描 + 轮询
-            try:
-                polled = await self._scan_and_poll()
-            except Exception:
-                logger.exception("wait_for_batch scan 异常")
-                polled = 0
-
-            if polled == 0:
+            if callback_mode and _time.monotonic() < grace_deadline:
+                # 回调宽限期内：只查 DB，不主动轮询 Gateway
                 await asyncio.sleep(settings.ai_poll_scan_interval)
             else:
-                await asyncio.sleep(0.5)
+                # 宽限期后或轮询模式：主动 HTTP 轮询
+                if callback_mode and not degraded_logged:
+                    logger.warning("批次 %s 回调宽限期结束，降级为主动轮询", batch_key)
+                    degraded_logged = True
+                try:
+                    polled = await self._scan_and_poll()
+                except Exception:
+                    logger.exception("wait_for_batch scan 异常")
+                    polled = 0
+
+                if polled == 0:
+                    await asyncio.sleep(settings.ai_poll_scan_interval)
+                else:
+                    await asyncio.sleep(0.5)
 
         logger.warning("等待批次 %s 超时 (%.0fs)", batch_key, timeout)
         return False

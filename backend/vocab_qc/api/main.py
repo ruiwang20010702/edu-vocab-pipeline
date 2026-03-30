@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from vocab_qc.api.deps import get_db
-from vocab_qc.api.routers import admin, auth, batch, export, import_, prompt, qc, review, stats, words
+from vocab_qc.api.routers import admin, auth, batch, callback, export, import_, prompt, qc, review, stats, words
 from vocab_qc.core.config import _INSECURE_JWT_SECRETS, settings, validate_production_config
 from vocab_qc.core.logging_config import (
     AccessLogMiddleware,
@@ -169,6 +169,7 @@ app.include_router(review.router)
 app.include_router(batch.router)
 app.include_router(export.router)
 app.include_router(prompt.router)
+app.include_router(callback.router)
 
 
 @app.get("/health")
