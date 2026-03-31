@@ -6,6 +6,7 @@ from vocab_qc.core.qc.layer1.chunk_rules import (
     C2ChunkLength,
     C4NoBrackets,
     C5ChineseOnSeparateLine,
+    C6ChineseTranslationLength,
 )
 
 
@@ -89,6 +90,40 @@ class TestC4NoBrackets:
 
     def test_clean_content(self):
         result = self.checker.check("a kind of", "kind")
+        assert result.passed
+
+
+class TestC6ChineseTranslationLength:
+    def setup_method(self):
+        self.checker = C6ChineseTranslationLength()
+
+    def test_two_chars_passes(self):
+        result = self.checker.check("absorb water", "absorb", content_cn="吸收")
+        assert result.passed
+
+    def test_six_chars_passes(self):
+        result = self.checker.check("make a decision", "make", content_cn="做出一个决定")
+        assert result.passed
+
+    def test_four_chars_passes(self):
+        result = self.checker.check("absorb water", "absorb", content_cn="吸收水分")
+        assert result.passed
+
+    def test_one_char_fails(self):
+        result = self.checker.check("run fast", "run", content_cn="跑")
+        assert not result.passed
+        assert "过短" in result.detail
+
+    def test_seven_chars_passes(self):
+        result = self.checker.check("play games", "play", content_cn="他每天玩游戏啊哈")
+        assert result.passed
+
+    def test_no_cn_field_passes(self):
+        result = self.checker.check("be kind to sb.", "kind")
+        assert result.passed
+
+    def test_punctuation_excluded(self):
+        result = self.checker.check("run fast", "run", content_cn="跑得快！")
         assert result.passed
 
 
