@@ -73,7 +73,9 @@ async def lifespan(app: FastAPI):
         logger.warning("词根词缀知识库预热失败（不阻塞启动）", exc_info=True)
 
     # 任务队列模式：恢复中断的任务 + 启动后台 polling pool
+    # 使用文件锁确保多 worker 下只有一个 worker 启动 PollingPool
     _poll_task = None
+    _lock_fd = None
     if settings.ai_use_task_queue:
         try:
             from vocab_qc.core.db import SyncSessionLocal
@@ -89,17 +91,26 @@ async def lifespan(app: FastAPI):
                 if cleaned:
                     logger.info("清理 %d 条过期任务记录", cleaned)
 
-            pool = PollingPool.get_instance()
-            import asyncio
-            _poll_task = asyncio.create_task(pool.run_forever())
-            logger.info("任务队列 PollingPool 已启动")
+            # 文件锁：只有获得锁的 worker 启动 PollingPool
+            import fcntl
+            _lock_fd = open("/tmp/.polling_pool.lock", "w")
+            try:
+                fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                pool = PollingPool.get_instance()
+                import asyncio
+                _poll_task = asyncio.create_task(pool.run_forever())
+                logger.info("任务队列 PollingPool 已启动（当前 worker 持锁）")
+            except BlockingIOError:
+                logger.info("PollingPool 已由其他 worker 启动，跳过")
+                _lock_fd.close()
+                _lock_fd = None
         except Exception:
             logger.warning("PollingPool 启动失败（不阻塞启动）", exc_info=True)
 
     yield
 
     # --- shutdown ---
-    # 停止 polling pool
+    # 停止 polling pool + 释放文件锁
     if settings.ai_use_task_queue and _poll_task is not None:
         try:
             from vocab_qc.core.polling_pool import PollingPool
@@ -112,6 +123,9 @@ async def lifespan(app: FastAPI):
             logger.info("PollingPool 已停止")
         except Exception:
             logger.warning("PollingPool 停止失败", exc_info=True)
+        finally:
+            if _lock_fd is not None:
+                _lock_fd.close()
 
     try:
         from vocab_qc.core.generators.base import close_http_clients
