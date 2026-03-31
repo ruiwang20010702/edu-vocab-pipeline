@@ -480,6 +480,10 @@ def produce_batch(
     if pkg is None:
         raise HTTPException(status_code=404, detail="批次不存在")
 
+    # 导入中的批次不能触发生产
+    if pkg.status == "importing":
+        raise HTTPException(status_code=409, detail="批次仍在导入中，请稍候后重试")
+
     # P3: processing 超时保护——卡住超过阈值时强制重置为 failed
     if pkg.status == "processing":
         if pkg.updated_at and (

@@ -83,6 +83,12 @@ export default function ImportPage({ onStartProduction }: Props) {
       if (res.warnings && res.warnings.length > 0) {
         showToast('warning', `导入警告：${res.warnings.join('；')}`)
       }
+      // 等待导入完成（大文件走后台异步，需要轮询状态）
+      for (let i = 0; i < 60; i++) {
+        const info = await api.get<{ status: string }>(`/batches/info/${res.batch_id}`)
+        if (info.status !== 'importing') break
+        await new Promise(r => setTimeout(r, 1000))
+      }
       try {
         await api.post(`/batches/${res.batch_id}/produce`)
       } catch {
