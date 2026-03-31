@@ -83,7 +83,7 @@ export default function ReviewPage({ onBack }: Props) {
       setLoading(false)
       return
     }
-    setLoading(true)
+    if (items.length === 0) setLoading(true)
     try {
       const detail = await api.get<BatchDetail>(`/batches/${batch.id}/words`)
       const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
