@@ -68,7 +68,14 @@ class PollingPool:
         self._shutdown = True
 
     async def _ensure_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        need_new = self._client is None or self._client.is_closed
+        # 检测 event loop 是否已关闭（多 worker 下可能发生）
+        if not need_new:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                need_new = True
+        if need_new:
             pool_size = settings.ai_poll_pool_size * 2
             self._client = httpx.AsyncClient(
                 timeout=30.0,
@@ -358,15 +365,23 @@ class PollingPool:
         url: str,
         task_data: dict[str, Any],
     ) -> str:
-        """提交单个任务到 Gateway，返回 task_no."""
+        """提交单个任务到 Gateway，返回 task_no。失败时重试 1 次（重建 client）."""
         from vocab_qc.core.generators.base import parse_async_submit_response
 
-        response = await client.post(
-            url, headers={"Content-Type": "application/json"}, json=task_data["submit_body"],
-        )
-        if response.status_code == 429:
-            raise RuntimeError(f"Gateway 429 限流, task_id={task_data['id']}")
-        if response.status_code >= 400:
-            raise RuntimeError(f"Gateway HTTP {response.status_code}: {response.text[:200]}")
+        for attempt in range(2):
+            try:
+                response = await client.post(
+                    url, headers={"Content-Type": "application/json"}, json=task_data["submit_body"],
+                )
+                if response.status_code == 429:
+                    raise RuntimeError(f"Gateway 429 限流, task_id={task_data['id']}")
+                if response.status_code >= 400:
+                    raise RuntimeError(f"Gateway HTTP {response.status_code}: {response.text[:200]}")
 
-        return parse_async_submit_response(response.json())
+                return parse_async_submit_response(response.json())
+            except Exception:
+                if attempt == 0:
+                    logger.warning("提交重试 task_id=%d (attempt %d)", task_data["id"], attempt + 1)
+                    client = await self._ensure_client()
+                    continue
+                raise
