@@ -2,15 +2,18 @@
 
 import json
 import logging
+import uuid
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from vocab_qc.api.deps import get_db
+from vocab_qc.api.deps import get_current_user, get_db, require_role
 from vocab_qc.api.schemas.callback import AiTaskCallbackPayload
 from vocab_qc.core.config import settings
 from vocab_qc.core.models.ai_task_queue import AiTaskQueue, AiTaskStatus
+from vocab_qc.core.models.user import User
 from vocab_qc.core.task_queue import TaskQueueService
 
 logger = logging.getLogger(__name__)
@@ -113,3 +116,57 @@ def ai_task_callback(
 
     db.commit()
     return {"code": 10000, "message": "success"}
+
+
+@router.post("/test-gateway")
+def test_gateway_callback(
+    _current_user: User = Depends(require_role("admin")),
+) -> dict:
+    """向 Gateway 提交一次简单测试任务，验证回调链路是否通畅。
+
+    仅提交，不等待结果——回调到达时会出现在服务器日志中。
+    """
+    if not settings.ai_gateway_mode:
+        raise HTTPException(status_code=400, detail="未启用 AI Gateway 模式")
+    if not settings.ai_callback_mode or not settings.ai_callback_url:
+        raise HTTPException(status_code=400, detail="未配置回调地址 (AI_CALLBACK_URL)")
+
+    from vocab_qc.core.generators.base import ContentGenerator
+
+    body = {
+        "model": settings.ai_model,
+        "provider": ContentGenerator._resolve_gateway_provider(settings.ai_model),
+        "api_key": settings.ai_api_key,
+        "biz_type": settings.ai_gateway_biz_type,
+        "biz_id": str(uuid.uuid4()),
+        "stream": False,
+        "async": True,
+        "messages": [
+            {"role": "system", "content": [{"type": "text", "text": "Reply with: {\"status\": \"ok\"}"}]},
+            {"role": "user", "content": [{"type": "text", "text": "ping"}]},
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "client_callback_url": settings.ai_callback_url,
+    }
+
+    submit_url = f"{settings.ai_api_base_url}/chat/completions"
+
+    try:
+        with httpx.Client(timeout=15.0, verify=False) as client:
+            resp = client.post(submit_url, json=body, headers={"Content-Type": "application/json"})
+            data = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Gateway 请求失败: {e}")
+
+    if data.get("code") != 10000:
+        raise HTTPException(status_code=502, detail=f"Gateway 返回异常: {data}")
+
+    task_no = data.get("res", "")
+    logger.info("Gateway 测试任务已提交 task_no=%s callback_url=%s", task_no, settings.ai_callback_url)
+
+    return {
+        "task_no": task_no,
+        "callback_url": settings.ai_callback_url,
+        "message": "已提交测试任务，请在服务器日志中查看回调结果（搜索 '回调详情'）",
+    }

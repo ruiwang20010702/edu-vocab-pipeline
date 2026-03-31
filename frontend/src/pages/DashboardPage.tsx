@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import {
   LayoutDashboard, CheckCircle2, AlertCircle, TrendingUp,
   Clock, Activity, PieChart, Loader2, ArrowRight, ArrowUpRight,
+  Zap,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { DashboardStats, BatchInfo } from '../types'
@@ -108,6 +109,8 @@ export default function DashboardPage({ onViewBatch }: Props) {
   const [batches, setBatches] = useState<BatchInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [activeDim, setActiveDim] = useState<any | null>(null)
+  const [callbackTesting, setCallbackTesting] = useState(false)
+  const [callbackResult, setCallbackResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -382,6 +385,44 @@ export default function DashboardPage({ onViewBatch }: Props) {
               </motion.div>
             )}
           </AnimatePresence>
+        </section>
+
+        {/* Gateway 回调测试 */}
+        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-700">Gateway 回调测试</h3>
+              <p className="text-xs text-slate-400 mt-1">向 AI Gateway 提交一次测试请求，验证回调链路是否通畅</p>
+            </div>
+            <div className="flex items-center gap-3">
+              {callbackResult && (
+                <span className={`text-xs ${callbackResult.ok ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {callbackResult.message}
+                </span>
+              )}
+              <button
+                disabled={callbackTesting}
+                onClick={async () => {
+                  setCallbackTesting(true)
+                  setCallbackResult(null)
+                  try {
+                    const res = await api.post<{ task_no: string; callback_url: string; message: string }>(
+                      '/callback/test-gateway',
+                    )
+                    setCallbackResult({ ok: true, message: `已提交 task_no: ${res.task_no}，请查看服务器日志` })
+                  } catch (e: any) {
+                    setCallbackResult({ ok: false, message: e.detail || '请求失败' })
+                  } finally {
+                    setCallbackTesting(false)
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors disabled:opacity-50"
+              >
+                {callbackTesting ? <Loader2 className="animate-spin" size={14} /> : <Zap size={14} />}
+                测试回调
+              </button>
+            </div>
+          </div>
         </section>
       </div>
     </div>
