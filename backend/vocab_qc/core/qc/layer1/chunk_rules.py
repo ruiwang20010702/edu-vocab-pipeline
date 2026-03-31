@@ -99,6 +99,33 @@ class C4NoBrackets(_RuleCheckerBase):
 
 
 @RuleRegistry.register_layer1
+class C6ChineseTranslationLength(_RuleCheckerBase):
+    """C6: 中文翻译字数 2–6 字（不含标点）."""
+
+    rule_id = "C6"
+    dimension = "chunk"
+    description = "中文翻译字数校验"
+
+    def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
+        content_cn = kwargs.get("content_cn", "")
+        if not content_cn:
+            return RuleResult(rule_id=self.rule_id, passed=True)
+
+        char_count = sum(1 for ch in content_cn if "\u4e00" <= ch <= "\u9fff")
+        if char_count < 2:
+            return RuleResult(
+                rule_id=self.rule_id, passed=False,
+                detail=f"中文翻译过短: {char_count}字，下限2字",
+            )
+        if char_count > 6:
+            return RuleResult(
+                rule_id=self.rule_id, passed=False,
+                detail=f"中文翻译过长: {char_count}字，上限6字",
+            )
+        return RuleResult(rule_id=self.rule_id, passed=True)
+
+
+@RuleRegistry.register_layer1
 class C5ChineseOnSeparateLine(_RuleCheckerBase):
     """C5: 中文对照独立成行，不得包裹在英文后的括号内."""
 
