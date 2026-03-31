@@ -4,7 +4,7 @@
 # GUNICORN_WORKERS 环境变量控制 worker 数量（默认 2）
 cd /app || exit 1
 exec gunicorn \
-    -w "${GUNICORN_WORKERS:-2}" \
+    -w "${GUNICORN_WORKERS:-4}" \
     -k uvicorn.workers.UvicornWorker \
     --bind 127.0.0.1:8000 \
     --timeout 120 \
