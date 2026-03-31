@@ -201,6 +201,10 @@ def configure_logging(log_format: str = "text", log_level: str = "INFO") -> None
     # 注入 request_id filter
     root.addFilter(RequestIdFilter())
 
+    # 确保至少有一个 StreamHandler（gunicorn worker 下可能没有）
+    if not root.handlers:
+        root.addHandler(logging.StreamHandler())
+
     # 设置 formatter
     formatter = JsonFormatter() if log_format == "json" else TextFormatter()
     for handler in root.handlers:
