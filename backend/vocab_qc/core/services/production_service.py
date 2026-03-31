@@ -20,7 +20,7 @@ from vocab_qc.core.generators.syllable import SyllableGenerator
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
 from vocab_qc.core.models.ai_task_queue import AiTaskStatus
-from vocab_qc.core.models.enums import QcStatus
+from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS, QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import AiErrorLog, AiUsageLog, classify_ai_error
 from vocab_qc.core.services.qc_service import QcService
@@ -646,6 +646,11 @@ def _generate_content_queued(
             item.qc_status = QcStatus.LAYER1_FAILED.value
             count += 1
             continue
+
+        # 助记维度：AI 返回 {valid, formula, chant, script}，需要转换为统一格式
+        if item.dimension in MNEMONIC_DIMENSIONS:
+            from vocab_qc.core.generators.mnemonic import _MnemonicBase
+            parsed = _MnemonicBase._process_result(parsed)
 
         if parsed.get("valid") is False:
             item.content = ""
