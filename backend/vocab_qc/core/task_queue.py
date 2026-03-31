@@ -241,6 +241,30 @@ class TaskQueueService:
         return count
 
     @staticmethod
+    def fail_expired_tasks(session: Session, max_age_hours: int = 2) -> int:
+        """将提交超过 max_age_hours 仍 SUBMITTED 的任务标记为 FAILED.
+
+        用于清理 Gateway 已丢失或回调遗漏的僵尸任务。
+        """
+        cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
+        count = session.execute(
+            update(AiTaskQueue)
+            .where(
+                AiTaskQueue.status == AiTaskStatus.SUBMITTED.value,
+                AiTaskQueue.submitted_at < cutoff,
+            )
+            .values(
+                status=AiTaskStatus.FAILED.value,
+                error_type="expired",
+                error_message=f"提交超过 {max_age_hours}h 仍未完成，标记为超时失败",
+                completed_at=datetime.now(UTC),
+            )
+        ).rowcount
+        if count:
+            logger.warning("标记 %d 个超时任务为失败 (超过 %dh)", count, max_age_hours)
+        return count
+
+    @staticmethod
     def cleanup_old(session: Session, days: int = TTL_DAYS) -> int:
         """清理已完成/失败/取消超过 N 天的任务记录.
 

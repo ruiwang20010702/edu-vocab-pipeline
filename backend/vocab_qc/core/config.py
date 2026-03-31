@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     ai_callback_url: str = ""                   # Gateway 回调地址
     ai_callback_allowed_ips: list[str] = []     # 回调来源 IP 白名单
     ai_callback_grace_period: float = 300.0     # 宽限期（秒），超时后降级为轮询
+    ai_poll_callback_scan_interval: float = 30.0   # 回调模式下安全网扫描间隔（秒）
+    ai_poll_stale_threshold_minutes: float = 10.0  # 回调模式下仅轮询提交超过此时间的任务
 
     production_batch_size: int = 50  # 大批量生产时每批处理的词数（fallback）
     production_max_items_per_batch: int = 500  # 智能分批：每批 ContentItem 数上限

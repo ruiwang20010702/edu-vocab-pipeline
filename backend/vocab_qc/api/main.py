@@ -85,11 +85,14 @@ async def lifespan(app: FastAPI):
             with SyncSessionLocal() as session:
                 recovered = TaskQueueService.recover_interrupted(session)
                 cleaned = TaskQueueService.cleanup_old(session)
+                expired = TaskQueueService.fail_expired_tasks(session)
                 session.commit()
                 if recovered:
                     logger.info("恢复 %d 个中断的 AI 任务", recovered)
                 if cleaned:
                     logger.info("清理 %d 条过期任务记录", cleaned)
+                if expired:
+                    logger.info("标记 %d 个超时任务为失败", expired)
 
             # 文件锁：只有获得锁的 worker 启动 PollingPool
             import fcntl

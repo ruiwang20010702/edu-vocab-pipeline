@@ -95,28 +95,40 @@ class PollingPool:
     # ── 核心循环 ────────────────────────────────────────────────────
 
     async def run_forever(self) -> None:
-        """后台运行，持续扫描并轮询任务。应在 lifespan 中作为 background task 启动."""
-        logger.info("PollingPool 启动, pool_size=%d, scan_interval=%.1fs",
-                     settings.ai_poll_pool_size, settings.ai_poll_scan_interval)
+        """后台运行，持续扫描并轮询任务。应在 lifespan 中作为 background task 启动.
+
+        回调模式下作为低频安全网：仅轮询提交超过阈值的 stale 任务，扫描间隔更长。
+        """
+        callback_mode = settings.ai_callback_mode
+        scan_interval = (
+            settings.ai_poll_callback_scan_interval
+            if callback_mode
+            else settings.ai_poll_scan_interval
+        )
+        logger.info("PollingPool 启动, pool_size=%d, scan_interval=%.1fs, callback_mode=%s",
+                     settings.ai_poll_pool_size, scan_interval, callback_mode)
         try:
             while not self._shutdown:
                 try:
-                    polled = await self._scan_and_poll()
+                    polled = await self._scan_and_poll(stale_only=callback_mode)
                     if polled == 0:
-                        # 无任务可轮询，休眠一个扫描间隔
-                        await asyncio.sleep(settings.ai_poll_scan_interval)
+                        await asyncio.sleep(scan_interval)
                     else:
-                        # 有任务处理了，短暂 yield 后继续
-                        await asyncio.sleep(0.1)
+                        # 有任务处理了，缩短等待但不过于激进
+                        await asyncio.sleep(scan_interval / 3)
                 except Exception:
-                    logger.exception("PollingPool scan 异常，5 秒后重试")
-                    await asyncio.sleep(5.0)
+                    logger.exception("PollingPool scan 异常，%.0f 秒后重试", scan_interval)
+                    await asyncio.sleep(scan_interval)
         finally:
             await self.close()
             logger.info("PollingPool 已停止")
 
-    async def _scan_and_poll(self) -> int:
-        """一轮扫描：从 DB 领取 submitted 任务，并发轮询，返回本轮处理数."""
+    async def _scan_and_poll(self, stale_only: bool = False) -> int:
+        """一轮扫描：从 DB 领取 submitted 任务，并发轮询，返回本轮处理数.
+
+        Args:
+            stale_only: True 时仅轮询提交超过 ai_poll_stale_threshold_minutes 的任务（回调模式安全网）。
+        """
         # 全局 429 退避
         if time.monotonic() < self._global_429_until:
             await asyncio.sleep(self._global_429_until - time.monotonic())
@@ -126,15 +138,24 @@ class PollingPool:
         try:
             from datetime import UTC, datetime, timedelta
 
+            query = (
+                session.query(AiTaskQueue)
+                .filter_by(status=AiTaskStatus.SUBMITTED.value)
+            )
+
+            # 回调模式：仅轮询提交超过阈值的 stale 任务
+            if stale_only:
+                stale_cutoff = datetime.now(UTC) - timedelta(
+                    minutes=settings.ai_poll_stale_threshold_minutes,
+                )
+                query = query.filter(AiTaskQueue.submitted_at < stale_cutoff)
+
             # 按自适应间隔过滤：只取 last_polled_at 为 NULL 或已过间隔的任务
-            # 用最短间隔（3s）作为 DB 过滤基线，更精细的过滤在应用层做
             min_interval = settings.ai_gateway_poll_interval
             cutoff = datetime.now(UTC) - timedelta(seconds=min_interval)
 
             tasks = (
-                session.query(AiTaskQueue)
-                .filter_by(status=AiTaskStatus.SUBMITTED.value)
-                .filter(
+                query.filter(
                     (AiTaskQueue.last_polled_at.is_(None))
                     | (AiTaskQueue.last_polled_at < cutoff)
                 )
@@ -190,7 +211,8 @@ class PollingPool:
         try:
             for td, result in zip(task_data, poll_results):
                 if isinstance(result, Exception):
-                    logger.warning("轮询异常 task_id=%d: %s", td["id"], result)
+                    log_level = logging.WARNING if td["poll_count"] > 10 else logging.DEBUG
+                    logger.log(log_level, "轮询异常 task_id=%d: %s", td["id"], result)
                     TaskQueueService.increment_poll(session, td["id"])
                     continue
 
@@ -236,10 +258,21 @@ class PollingPool:
             return ("PENDING", None, "")
 
         if response.status_code >= 400:
-            logger.warning("轮询 HTTP %d, task_no=%s", response.status_code, task_data["gateway_task_no"])
+            log_level = logging.WARNING if task_data["poll_count"] > 10 else logging.DEBUG
+            logger.log(log_level, "轮询 HTTP %d, task_no=%s (poll_count=%d)",
+                       response.status_code, task_data["gateway_task_no"], task_data["poll_count"])
             return ("PENDING", None, "")
 
-        return parse_poll_response(response.json())
+        # 拦截 Gateway 业务错误码（如 502000），避免抛异常刷 WARNING
+        data = response.json()
+        code = data.get("code")
+        if code != 10000:
+            log_level = logging.WARNING if task_data["poll_count"] > 10 else logging.DEBUG
+            logger.log(log_level, "轮询 Gateway code=%s, task_no=%s (poll_count=%d)",
+                       code, task_data["gateway_task_no"], task_data["poll_count"])
+            return ("PENDING", None, "")
+
+        return parse_poll_response(data)
 
     # ── 批次等待 ────────────────────────────────────────────────────
 
