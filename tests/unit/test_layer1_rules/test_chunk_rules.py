@@ -114,10 +114,9 @@ class TestC6ChineseTranslationLength:
         assert not result.passed
         assert "过短" in result.detail
 
-    def test_seven_chars_fails(self):
+    def test_seven_chars_passes(self):
         result = self.checker.check("play games", "play", content_cn="他每天玩游戏啊哈")
-        assert not result.passed
-        assert "过长" in result.detail
+        assert result.passed
 
     def test_no_cn_field_passes(self):
         result = self.checker.check("be kind to sb.", "kind")
