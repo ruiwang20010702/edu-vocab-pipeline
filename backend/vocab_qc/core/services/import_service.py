@@ -481,7 +481,7 @@ def parse_upload(file_content: bytes, filename: str) -> tuple[list[dict[str, Any
 def _get_or_create_package(session: Session, name: str, *, force: bool = False) -> Package:
     pkg = session.query(Package).filter_by(name=name).first()
     if pkg is not None:
-        if pkg.status == "pending":
+        if pkg.status in ("pending", "importing"):
             return pkg
         if not force:
             raise ValueError(f"批次 '{name}' 已在处理中（状态: {pkg.status}），不可重复导入")
