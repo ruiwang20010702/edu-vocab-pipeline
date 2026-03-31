@@ -184,6 +184,36 @@ def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
     if count:
         session.flush()
         logger.info("自动批准 auto_approved=%d (l2_passed=%d no_l2=%d)", count, r1.rowcount, r2.rowcount)
+
+        # 清理已 approved 内容对应的 pending review_items（防止数据不一致）
+        from vocab_qc.core.models.quality_layer import ReviewItem
+        from vocab_qc.core.models.enums import ReviewStatus, ReviewResolution
+        approved_ci_ids = [
+            row[0] for row in
+            session.query(ContentItem.id)
+            .filter(
+                ContentItem.word_id.in_(word_ids),
+                ContentItem.qc_status == QcStatus.APPROVED.value,
+            )
+            .all()
+        ]
+        if approved_ci_ids:
+            resolved = session.execute(
+                update(ReviewItem)
+                .where(
+                    ReviewItem.content_item_id.in_(approved_ci_ids),
+                    ReviewItem.status == ReviewStatus.PENDING.value,
+                )
+                .values(
+                    status=ReviewStatus.RESOLVED.value,
+                    resolution=ReviewResolution.APPROVED.value,
+                    resolved_at=datetime.now(UTC),
+                )
+            )
+            if resolved.rowcount:
+                logger.info("清理已批准内容的残留审核项 count=%d", resolved.rowcount)
+                session.flush()
+
     return count
 
 
