@@ -206,6 +206,12 @@ def update_batch_progress(session: Session, batch_id: int) -> None:
     if len(all_word_ids) == 0 or reviewed_count >= len(all_word_ids):
         batch.status = BatchStatus.COMPLETED.value
         batch.completed_at = datetime.now(UTC)
+        # 释放残留的 pending items 回池中，防止变成僵尸
+        session.execute(
+            update(ReviewItem)
+            .where(ReviewItem.batch_id == batch_id, ReviewItem.status == ReviewStatus.PENDING.value)
+            .values(batch_id=None, assigned_to_id=None)
+        )
 
     session.flush()
 
