@@ -1,5 +1,6 @@
 """FastAPI 依赖注入."""
 
+import logging
 from collections.abc import Generator
 from typing import Callable
 
@@ -14,6 +15,8 @@ from vocab_qc.core.services import auth_service
 from vocab_qc.core.services.qc_service import QcService
 from vocab_qc.core.services.review_service import ReviewService
 
+logger = logging.getLogger(__name__)
+
 security = HTTPBearer(auto_error=False)
 
 
@@ -25,7 +28,10 @@ def get_db() -> Generator[Session, None, None]:
         session.rollback()
         raise
     finally:
-        session.close()
+        try:
+            session.close()
+        except Exception:
+            logger.warning("session.close() 失败（连接可能已断开），已忽略")
 
 
 def get_current_user(
