@@ -663,11 +663,14 @@ class ReviewService:
         self,
         session: Session,
         dimension: Optional[str] = None,
+        batch_id: Optional[int] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[ReviewItem], int]:
         """获取待审核队列，返回 (items, total)."""
         query = session.query(ReviewItem).filter_by(status=ReviewStatus.PENDING.value)
+        if batch_id is not None:
+            query = query.filter_by(batch_id=batch_id)
         if dimension:
             query = query.filter_by(dimension=dimension)
         total = query.count()

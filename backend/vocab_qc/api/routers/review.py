@@ -116,6 +116,7 @@ def _enrich_review(db: Session, review) -> ReviewItemResponse:
 @router.get("", response_model=ReviewListResponse)
 def list_reviews(
     dimension: Optional[str] = Query(default=None),
+    batch_id: Optional[int] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -123,7 +124,7 @@ def list_reviews(
     _current_user: User = Depends(get_current_user),
 ):
     """获取待审核队列."""
-    items, total = service.get_pending_reviews(db, dimension=dimension, limit=limit, offset=offset)
+    items, total = service.get_pending_reviews(db, dimension=dimension, batch_id=batch_id, limit=limit, offset=offset)
     return ReviewListResponse(
         items=_batch_enrich(db, items),
         total=total,

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useToast } from '../components/Toast'
-import type { ReviewItem, ReviewBatch, BatchDetail } from '../types'
+import type { ReviewItem, ReviewBatch } from '../types'
 import { usePolling } from '../hooks/usePolling'
 import type { Tab } from './review/types'
 import { FILTER_GROUPS } from './review/constants'
@@ -85,13 +85,8 @@ export default function ReviewPage({ onBack }: Props) {
     }
     if (items.length === 0) setLoading(true)
     try {
-      const detail = await api.get<BatchDetail>(`/batches/${batch.id}/words`)
-      const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
-      const allReviews = res.items ?? []
-      const batchReviewIds = new Set(
-        detail.words.flatMap(w => w.items.map(i => i.review_id))
-      )
-      setItems(allReviews.filter(r => batchReviewIds.has(r.id)))
+      const res = await api.get<{ items: ReviewItem[]; total: number }>(`/reviews?batch_id=${batch.id}&limit=200`)
+      setItems(res.items ?? [])
     } catch (e) {
       showToast('error', '加载审核列表失败')
       setItems([])
@@ -110,10 +105,8 @@ export default function ReviewPage({ onBack }: Props) {
       const data = await api.get<ReviewBatch | null>('/batches/current')
       setBatch(data)
       if (!data) { setItems([]); return }
-      const detail = await api.get<BatchDetail>(`/batches/${data.id}/words`)
-      const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
-      const batchReviewIds = new Set(detail.words.flatMap(w => w.items.map(i => i.review_id)))
-      const newItems = (res.items ?? []).filter(r => batchReviewIds.has(r.id))
+      const res = await api.get<{ items: ReviewItem[]; total: number }>(`/reviews?batch_id=${data.id}&limit=200`)
+      const newItems = res.items ?? []
       // 仅在数据变化时更新，避免不必要的重渲染导致闪烁
       setItems(prev => {
         if (prev.length !== newItems.length) return newItems
