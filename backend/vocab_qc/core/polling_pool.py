@@ -311,7 +311,7 @@ class PollingPool:
                     logger.warning("批次 %s 回调宽限期结束，降级为主动轮询", batch_key)
                     degraded_logged = True
                 try:
-                    polled = await self._scan_and_poll()
+                    polled = await self._scan_and_poll(stale_only=callback_mode)
                 except Exception:
                     logger.exception("wait_for_batch scan 异常")
                     polled = 0
