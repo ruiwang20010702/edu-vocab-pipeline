@@ -35,7 +35,11 @@ _production_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="pro
 def _bulk_query_package_stats(
     db: Session, package_ids: list[int],
 ) -> dict[int, tuple[int, int, int]]:
-    """批量查询所有 package 的 total/approved/failed 统计，返回 {pkg_id: (total, approved, failed)}。"""
+    """批量查询所有 package 的 total/approved/failed 统计，返回 {pkg_id: (total, approved, failed)}。
+
+    只统计本次生产运行产生的数据（ContentItem.updated_at >= Package.started_at），
+    避免将历史批次的 QC 失败计入新批次的异常拦截。
+    """
     from sqlalchemy import case, func
 
     from vocab_qc.core.models import ContentItem, QcStatus
@@ -61,9 +65,12 @@ def _bulk_query_package_stats(
             )).label("failed"),
         )
         .join(PackageWord, PackageWord.word_id == ContentItem.word_id)
+        .join(Package, Package.id == PackageWord.package_id)
         .filter(
             PackageWord.package_id.in_(package_ids),
             ContentItem.qc_status != QcStatus.REJECTED.value,
+            Package.started_at.isnot(None),
+            ContentItem.updated_at >= Package.started_at,
         )
         .group_by(PackageWord.package_id)
         .all()
