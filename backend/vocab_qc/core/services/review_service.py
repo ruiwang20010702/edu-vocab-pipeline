@@ -219,6 +219,48 @@ class ReviewService:
         self._update_batch_progress(session, review.batch_id)
         return review
 
+    def mark_not_applicable(
+        self,
+        session: Session,
+        review_id: int,
+        reviewer: str,
+        user_id: Optional[int] = None,
+    ) -> ReviewItem:
+        """标记助记内容为不适用（清空内容 + rejected 状态）."""
+        review = self._lock_review_item(session, review_id)
+        self._check_concurrency(review, user_id)
+
+        content_item = session.query(ContentItem).filter_by(id=review.content_item_id).one()
+
+        if not content_item.dimension.startswith("mnemonic_"):
+            raise ValueError("仅助记维度支持标记不适用")
+
+        old_status = review.status
+        review.status = ReviewStatus.RESOLVED.value
+        review.resolution = ReviewResolution.REGENERATE.value
+        review.reviewer = reviewer
+        review.review_note = "人工标记为不适用"
+        review.resolved_at = datetime.now(UTC)
+
+        content_item.content = ""
+        content_item.qc_status = QcStatus.REJECTED.value
+
+        log_action(
+            session,
+            entity_type="review_item",
+            entity_id=review.id,
+            action="mark_not_applicable",
+            actor=reviewer,
+            old_value={"status": old_status},
+            new_value={"status": review.status, "qc_status": "rejected"},
+        )
+
+        logger.info("标记不适用 review_id=%d reviewer=%s content_item_id=%d", review_id, reviewer, review.content_item_id)
+
+        session.flush()
+        self._update_batch_progress(session, review.batch_id)
+        return review
+
     def regenerate(
         self,
         session: Session,

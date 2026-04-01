@@ -169,6 +169,24 @@ export default function ReviewPage({ onBack }: Props) {
     }
   }
 
+  const handleMarkNotApplicable = async (id: number) => {
+    if (actionLoading !== null) return
+    setActionLoading(id)
+    try {
+      await api.post(`/reviews/${id}/mark-not-applicable`)
+      setResolvedIds(prev => new Set(prev).add(id))
+      setActionLoading(null)
+      loadBatch()
+      safeTimeout(() => {
+        setItems(prev => prev.filter(i => i.id !== id))
+        setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+      }, 1200)
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '标记不适用失败')
+      setActionLoading(null)
+    }
+  }
+
   const handleRegenerate = async (id: number) => {
     // F-H2: 防止重复提交 — actionLoading 非 null 时拒绝新请求
     if (actionLoading !== null) return
@@ -561,6 +579,7 @@ export default function ReviewPage({ onBack }: Props) {
             onClose={() => setSelectedWordId(null)}
             onApprove={handleApprove}
             onRegenerate={handleRegenerate}
+            onMarkNotApplicable={handleMarkNotApplicable}
             onSaved={() => { loadItems(); }}
             actionLoading={actionLoading}
             regenResult={regenResult}

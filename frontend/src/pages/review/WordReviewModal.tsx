@@ -99,12 +99,13 @@ function SyllableEditor({ syllable, wordId, onUpdated }: {
 }
 
 export function WordReviewModal({
-  group, onClose, onApprove, onRegenerate, onSaved, actionLoading, regenResult, resolvedIds,
+  group, onClose, onApprove, onRegenerate, onMarkNotApplicable, onSaved, actionLoading, regenResult, resolvedIds,
 }: {
   group: WordGroup
   onClose: () => void
   onApprove: (id: number) => void
   onRegenerate: (id: number) => void
+  onMarkNotApplicable: (id: number) => void
   onSaved: () => void
   actionLoading: number | null
   regenResult: { id: number; passed: boolean; message: string } | null
@@ -287,6 +288,7 @@ export function WordReviewModal({
                   regenResult={regenResult}
                   onApprove={onApprove}
                   onRegenerate={onRegenerate}
+                  onMarkNotApplicable={onMarkNotApplicable}
                   onRegenerated={() => {
                     api.get<WordDetail>(`/words/${group.word_id}`)
                       .then(data => setWordDetail(data))
@@ -309,6 +311,7 @@ export function WordReviewModal({
                       regenResult={regenResult?.id === item.id ? regenResult : null}
                       onApprove={() => onApprove(item.id)}
                       onRegenerate={() => onRegenerate(item.id)}
+                      onMarkNotApplicable={() => onMarkNotApplicable(item.id)}
                     />
                   ))}
                   </AnimatePresence>

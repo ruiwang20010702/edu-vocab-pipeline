@@ -50,7 +50,7 @@ function MnemonicEditFields({
 
 export function ReviewDimensionCard({
   item, isLoading, isResolved, regenResult,
-  onApprove, onRegenerate,
+  onApprove, onRegenerate, onMarkNotApplicable,
   embedded = false,
 }: {
   item: ReviewItem
@@ -59,6 +59,7 @@ export function ReviewDimensionCard({
   regenResult: { passed: boolean; message: string } | null
   onApprove: () => void
   onRegenerate: () => void
+  onMarkNotApplicable?: () => void
   embedded?: boolean
 }) {
   const dim = item.content_item?.dimension ?? ''
@@ -67,6 +68,8 @@ export function ReviewDimensionCard({
   const atLimit = retryCount >= 3
   const content = item.content_item?.content ?? ''
   const issueMsg = item.issues?.[0]?.message ?? ''
+
+  const isMnemonic = dim.startsWith('mnemonic_')
 
   const actionButtons = (
     <div className="flex items-center gap-2 pt-1">
@@ -78,6 +81,13 @@ export function ReviewDimensionCard({
           className="py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 flex items-center gap-1">
           {isLoading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
           AI 修复
+        </button>
+      )}
+      {isMnemonic && onMarkNotApplicable && (
+        <button onClick={onMarkNotApplicable} disabled={isLoading}
+          className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 flex items-center gap-1">
+          <Ban size={11} />
+          不适用
         </button>
       )}
       <span className={`text-[10px] font-bold ml-auto ${atLimit ? 'text-rose-500' : 'text-slate-400'}`}>{retryCount}/3</span>
@@ -331,7 +341,7 @@ function MnemonicDirectEditForm({
 
 export function MnemonicReviewSection({
   mnemonics, reviewItems, actionLoading, resolvedIds, regenResult,
-  onApprove, onRegenerate, onRegenerated,
+  onApprove, onRegenerate, onMarkNotApplicable, onRegenerated,
 }: {
   mnemonics: any[]
   reviewItems: ReviewItem[]
@@ -340,6 +350,7 @@ export function MnemonicReviewSection({
   regenResult: { id: number; passed: boolean; message: string } | null
   onApprove: (id: number) => void
   onRegenerate: (id: number) => void
+  onMarkNotApplicable: (id: number) => void
   onRegenerated: () => void
 }) {
   const {
@@ -458,6 +469,7 @@ export function MnemonicReviewSection({
                 regenResult={regenResult?.id === reviewItem.id ? regenResult : null}
                 onApprove={() => onApprove(reviewItem.id)}
                 onRegenerate={() => onRegenerate(reviewItem.id)}
+                onMarkNotApplicable={() => onMarkNotApplicable(reviewItem.id)}
                 embedded
               />
             )}

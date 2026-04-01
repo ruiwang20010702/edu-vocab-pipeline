@@ -159,6 +159,29 @@ def approve_review(
         raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
+@router.post("/{review_id}/mark-not-applicable", response_model=ReviewItemResponse)
+def mark_not_applicable(
+    review_id: int,
+    db: Session = Depends(get_db),
+    service: ReviewService = Depends(get_review_service),
+    current_user: User = Depends(require_role("admin", "reviewer")),
+):
+    """标记助记内容为不适用."""
+    try:
+        result = service.mark_not_applicable(
+            db, review_id, reviewer=current_user.name, user_id=current_user.id,
+        )
+        db.commit()
+        return _enrich_review(db, result)
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="审核项不存在")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception:
+        logger.exception("标记不适用失败 review_id=%s", review_id)
+        raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
 @router.post("/{review_id}/regenerate", response_model=RegenerateResponse)
 @limiter.limit("20/minute")
 async def regenerate(
