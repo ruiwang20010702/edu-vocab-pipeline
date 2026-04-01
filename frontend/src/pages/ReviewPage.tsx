@@ -434,8 +434,8 @@ export default function ReviewPage({ onBack }: Props) {
                 }
               }
 
-              // 分批并发，每批 2 个，避免打满 worker 导致 504
-              const BATCH_SIZE = 4
+              // 分批并发，每批 8 个（2人×8=16，留余量于 ai_max_concurrency=20）
+              const BATCH_SIZE = 8
               let succeeded = 0
               let failed = 0
               for (let i = 0; i < canRetryItems.length; i += BATCH_SIZE) {
