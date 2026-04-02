@@ -2,9 +2,12 @@
 
 import asyncio
 import logging
+import uuid
+from datetime import UTC, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
@@ -21,6 +24,7 @@ from vocab_qc.api.schemas.review import (
     ReviewListResponse,
 )
 from vocab_qc.core.models import ContentItem, QcRuleResult, Word
+from vocab_qc.core.models.quality_layer import QcRun
 from vocab_qc.core.models.user import User
 from vocab_qc.core.security import reject_html_input
 from vocab_qc.core.services.review_service import ReviewService
@@ -203,6 +207,109 @@ async def regenerate(
     except Exception:
         logger.exception("重新生成操作失败 review_id=%s", review_id)
         raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
+# ---------------------------------------------------------------------------
+# 批量重生成（后台异步）
+# ---------------------------------------------------------------------------
+
+class BatchRegenerateRequest(BaseModel):
+    review_ids: list[int]
+
+
+@router.post("/batch-regenerate")
+async def batch_regenerate(
+    body: BatchRegenerateRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "reviewer")),
+):
+    """提交批量重生成到后台，立即返回 run_id 供轮询进度。"""
+    run_id = f"batch-fix-{uuid.uuid4().hex[:8]}"
+    qc_run = QcRun(
+        id=run_id,
+        layer=0,
+        scope="batch_regenerate",
+        status="running",
+        total_items=len(body.review_ids),
+        passed_items=0,
+        failed_items=0,
+        started_at=datetime.now(UTC),
+    )
+    db.add(qc_run)
+    db.commit()
+
+    background_tasks.add_task(
+        _batch_regenerate_bg, run_id, body.review_ids,
+        current_user.name, current_user.id,
+    )
+    return {"run_id": run_id}
+
+
+async def _batch_regenerate_bg(
+    run_id: str, review_ids: list[int], reviewer: str, user_id: int,
+) -> None:
+    """后台批量重生成：每 4 个并发，每个用独立 session。"""
+    from vocab_qc.core.db import SyncSessionLocal
+
+    def _update_run(status: str, passed: int = 0, failed: int = 0) -> None:
+        s = SyncSessionLocal()
+        try:
+            qr = s.query(QcRun).filter_by(id=run_id).first()
+            if qr:
+                qr.passed_items = passed
+                qr.failed_items = failed
+                qr.status = status
+                if status in ("completed", "failed"):
+                    qr.finished_at = datetime.now(UTC)
+            s.commit()
+        finally:
+            s.close()
+
+    try:
+        service = ReviewService()
+        CONCURRENCY = 4
+        passed = 0
+        failed = 0
+
+        for i in range(0, len(review_ids), CONCURRENCY):
+            chunk = review_ids[i:i + CONCURRENCY]
+
+            async def _process_one(rid: int) -> bool:
+                session = SyncSessionLocal()
+                try:
+                    result = await service.regenerate_async(
+                        session, rid, reviewer=reviewer, user_id=user_id,
+                    )
+                    await asyncio.to_thread(session.commit)
+                    return result.get("qc_passed", False)
+                except Exception:
+                    await asyncio.to_thread(session.rollback)
+                    logger.exception("batch regenerate failed review_id=%d", rid)
+                    return False
+                finally:
+                    session.close()
+
+            results = await asyncio.gather(
+                *[_process_one(rid) for rid in chunk],
+                return_exceptions=True,
+            )
+            for r in results:
+                if r is True:
+                    passed += 1
+                else:
+                    failed += 1
+
+            _update_run("running", passed, failed)
+
+        _update_run("completed", passed, failed)
+        logger.info(
+            "batch regenerate 完成 run_id=%s total=%d passed=%d failed=%d",
+            run_id, len(review_ids), passed, failed,
+        )
+    except Exception:
+        logger.exception("batch regenerate 后台任务崩溃 run_id=%s", run_id)
+        _update_run("failed", passed, failed)
 
 
 @router.post("/{review_id}/edit", response_model=RegenerateResponse)

@@ -68,3 +68,25 @@ def get_summary(
     """按规则维度统计通过率."""
     rows = qc_service.get_summary(db, run_id=run_id)
     return [QcSummaryItem(**row) for row in rows]
+
+
+@router.get("/runs/{run_id}/status")
+def get_run_status(
+    run_id: str,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """查询质检/批量修复任务的进度。"""
+    from vocab_qc.core.models.quality_layer import QcRun
+
+    qc_run = db.query(QcRun).filter_by(id=run_id).first()
+    if not qc_run:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {
+        "done": qc_run.status in ("completed", "failed"),
+        "status": qc_run.status,
+        "total": qc_run.total_items or 0,
+        "completed": (qc_run.passed_items or 0) + (qc_run.failed_items or 0),
+        "passed": qc_run.passed_items or 0,
+        "failed": qc_run.failed_items or 0,
+    }

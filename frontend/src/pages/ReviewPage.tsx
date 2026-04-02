@@ -411,28 +411,38 @@ export default function ReviewPage({ onBack }: Props) {
               setBatchFixing(true)
               try {
                 const canRetryItems = items.filter(i => (i.content_item?.retry_count ?? 0) < 3)
+                const reviewIds = canRetryItems.map(i => i.id)
+                if (reviewIds.length === 0) return
 
-                // 分批并发，每批 8 个
-                const BATCH_SIZE = 8
-                let succeeded = 0
-                let failed = 0
-                for (let i = 0; i < canRetryItems.length; i += BATCH_SIZE) {
-                  const chunk = canRetryItems.slice(i, i + BATCH_SIZE)
-                  const results = await Promise.allSettled(
-                    chunk.map(item => api.post(`/reviews/${item.id}/regenerate`))
+                // 提交到后台异步处理
+                const { run_id } = await api.post<{ run_id: string }>(
+                  '/reviews/batch-regenerate', { review_ids: reviewIds }
+                )
+
+                // 轮询进度直到完成
+                let completed = false
+                const deadline = Date.now() + 600_000
+                while (Date.now() < deadline) {
+                  await new Promise(r => setTimeout(r, 3000))
+                  const status = await api.get<{ done: boolean; passed: number; failed: number }>(
+                    `/qc/runs/${run_id}/status`
                   )
-                  succeeded += results.filter(r => r.status === 'fulfilled').length
-                  failed += results.filter(r => r.status === 'rejected').length
+                  if (status.done) {
+                    completed = true
+                    const msg = status.failed > 0
+                      ? `AI修复完成: ${status.passed} 成功, ${status.failed} 失败`
+                      : `AI修复完成: ${status.passed} 项已处理`
+                    showToast(status.failed > 0 ? 'warning' : 'success', msg)
+                    break
+                  }
+                }
+                if (!completed) {
+                  showToast('warning', 'AI修复仍在后台运行，请稍后刷新查看结果')
                 }
 
-                // 统一从后端重载数据，确保 UI 显示最终状态
+                // 刷新 UI 显示最终状态
                 await loadItems()
                 loadBatch()
-                if (failed > 0) {
-                  showToast('warning', `AI修复完成: ${succeeded} 成功, ${failed} 失败`)
-                } else if (succeeded > 0) {
-                  showToast('success', `AI修复完成: ${succeeded} 项已处理`)
-                }
               } finally {
                 setBatchFixing(false)
               }
