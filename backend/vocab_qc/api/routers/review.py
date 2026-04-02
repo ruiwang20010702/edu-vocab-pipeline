@@ -249,8 +249,19 @@ async def batch_regenerate(
 async def _batch_regenerate_bg(
     run_id: str, review_ids: list[int], reviewer: str, user_id: int,
 ) -> None:
-    """后台批量重生成：每 4 个并发，每个用独立 session。"""
+    """后台批量重生成：任务队列 + 回调模式（和生产批次相同路径）。
+
+    Phase 1: 批量预加载（DB 操作）
+    Phase 2: 批量入队 → PollingPool 提交 → 回调等待（零轮询）
+    Phase 3: 收集 AI 结果 → 逐条写回 + 质检
+    """
+    import json as _json
+
     from vocab_qc.core.db import SyncSessionLocal
+    from vocab_qc.core.generators.base import _strip_markdown_fences, extract_usage, parse_ai_response
+    from vocab_qc.core.models.ai_task_queue import AiTaskStatus
+    from vocab_qc.core.polling_pool import PollingPool
+    from vocab_qc.core.task_queue import TaskQueueService, TaskSpec
 
     def _update_run(status: str, passed: int = 0, failed: int = 0) -> None:
         s = SyncSessionLocal()
@@ -266,41 +277,112 @@ async def _batch_regenerate_bg(
         finally:
             s.close()
 
+    passed = 0
+    failed = 0
+
     try:
         service = ReviewService()
-        CONCURRENCY = 4
-        passed = 0
-        failed = 0
+        session = SyncSessionLocal()
 
-        for i in range(0, len(review_ids), CONCURRENCY):
-            chunk = review_ids[i:i + CONCURRENCY]
-
-            async def _process_one(rid: int) -> bool:
-                session = SyncSessionLocal()
+        try:
+            # ── Phase 1: 批量预加载 ──
+            ctxs: dict[int, dict] = {}  # review_id → ctx
+            for rid in review_ids:
                 try:
-                    result = await service.regenerate_async(
-                        session, rid, reviewer=reviewer, user_id=user_id,
-                    )
-                    await asyncio.to_thread(session.commit)
-                    return result.get("qc_passed", False)
+                    ctx = service._regen_preload(session, rid, reviewer, user_id)
+                    if ctx.get("early_return"):
+                        failed += 1
+                    else:
+                        ctxs[rid] = ctx
                 except Exception:
-                    await asyncio.to_thread(session.rollback)
-                    logger.exception("batch regenerate failed review_id=%d", rid)
-                    return False
-                finally:
-                    session.close()
-
-            results = await asyncio.gather(
-                *[_process_one(rid) for rid in chunk],
-                return_exceptions=True,
-            )
-            for r in results:
-                if r is True:
-                    passed += 1
-                else:
+                    logger.exception("batch regen preload failed review_id=%d", rid)
                     failed += 1
+            session.commit()  # 提交预加载变更（content=""，status=PENDING，retry_count++）
 
+            if not ctxs:
+                _update_run("completed", passed, failed)
+                return
+
+            # ── Phase 2: 批量入队 + 提交 + 等待回调 ──
+            batch_key = f"regen:{uuid.uuid4().hex[:8]}"
+            specs: list[TaskSpec] = []
+
+            for rid, ctx in ctxs.items():
+                submit_body = ctx["generator"].make_submit_body(
+                    word=ctx["word_text"],
+                    meaning=ctx["meaning_text"],
+                    pos=ctx["pos"],
+                    _preloaded_config=ctx["ai_config"],
+                )
+                ci_id = ctx["content_item"].id
+                specs.append(TaskSpec(
+                    batch_key=batch_key,
+                    phase="regeneration",
+                    submit_body=submit_body,
+                    content_item_id=ci_id,
+                    dimension=ctx["content_item"].dimension,
+                    ai_model=ctx["ai_config"].model,
+                    word_id=ctx["content_item"].word_id,
+                ))
+
+            # 入队（独立 session，不破坏主事务）
+            eq_session = SyncSessionLocal()
+            try:
+                TaskQueueService.enqueue_tasks(eq_session, specs)
+                eq_session.commit()
+            finally:
+                eq_session.close()
+
+            # 提交到 Gateway + 等待回调完成
+            pool = PollingPool.get_instance()
+            await pool.submit_batch(batch_key)
             _update_run("running", passed, failed)
+            await pool.wait_for_batch(batch_key, timeout=600)
+
+            # ── Phase 3: 收集结果 + 逐条写回 + 质检（在线程中执行，避免阻塞 event loop）──
+            def _phase3_writeback() -> tuple[int, int]:
+                p, f = 0, 0
+                session.expire_all()
+
+                completed_tasks = TaskQueueService.collect_completed(session, batch_key)
+                task_map = {t.content_item_id: t for t in completed_tasks}
+
+                for rid, ctx in ctxs.items():
+                    ci_id = ctx["content_item"].id
+                    task = task_map.get(ci_id)
+
+                    if task is None or task.status == AiTaskStatus.FAILED.value:
+                        f += 1
+                        continue
+
+                    try:
+                        result_data = task.result_data or {}
+                        raw = _strip_markdown_fences(parse_ai_response(result_data))
+                        gen_result = _json.loads(raw)
+                        gen_result["__usage__"] = extract_usage(result_data)
+
+                        if ctx["content_item"].dimension.startswith("mnemonic_"):
+                            gen_result = ctx["generator"]._process_result(gen_result)
+
+                        result = service._regen_writeback_and_qc(
+                            session, ctx, gen_result, reviewer,
+                        )
+                        if result.get("qc_passed"):
+                            p += 1
+                        else:
+                            f += 1
+                    except Exception:
+                        logger.exception("batch regen writeback failed ci=%d", ci_id)
+                        f += 1
+
+                session.commit()
+                return p, f
+
+            p3_passed, p3_failed = await asyncio.to_thread(_phase3_writeback)
+            passed += p3_passed
+            failed += p3_failed
+        finally:
+            session.close()
 
         _update_run("completed", passed, failed)
         logger.info(
@@ -308,7 +390,7 @@ async def _batch_regenerate_bg(
             run_id, len(review_ids), passed, failed,
         )
     except Exception:
-        logger.exception("batch regenerate 后台任务崩溃 run_id=%s", run_id)
+        logger.exception("batch regenerate 崩溃 run_id=%s", run_id)
         _update_run("failed", passed, failed)
 
 
