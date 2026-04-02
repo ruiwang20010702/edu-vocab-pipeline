@@ -359,7 +359,7 @@ class PollingPool:
                 return_exceptions=True,
             )
 
-            # 写回结果
+            # 写回结果——逐个 commit，确保回调到达时 gateway_task_no 已持久化
             session = SyncSessionLocal()
             try:
                 all_failed = True
@@ -373,7 +373,7 @@ class PollingPool:
                         TaskQueueService.mark_submitted(session, td["id"], result)
                         submitted_count += 1
                         all_failed = False
-                session.commit()
+                    session.commit()
             except Exception:
                 session.rollback()
                 raise
