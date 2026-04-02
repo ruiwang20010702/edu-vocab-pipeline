@@ -42,6 +42,12 @@ def _setup_async_logging() -> QueueListener:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- startup ---
+    # 加大默认线程池：regenerate 的 L2 质检会通过 asyncio.to_thread 长时间占线程，
+    # 默认 min(32, cpu+4) 在低 CPU 容器上太小，显式设为 16 保证并发余量
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=16))
+
     log_listener = _setup_async_logging()
     if settings.jwt_secret_key in _INSECURE_JWT_SECRETS:
         if settings.env == "production":
