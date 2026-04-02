@@ -99,13 +99,14 @@ function SyllableEditor({ syllable, wordId, onUpdated }: {
 }
 
 export function WordReviewModal({
-  group, onClose, onApprove, onRegenerate, onMarkNotApplicable, onSaved, actionLoading, regenResult, resolvedIds,
+  group, onClose, onApprove, onRegenerate, onMarkNotApplicable, onMarkContentNotApplicable, onSaved, actionLoading, regenResult, resolvedIds,
 }: {
   group: WordGroup
   onClose: () => void
   onApprove: (id: number) => void
   onRegenerate: (id: number) => void
   onMarkNotApplicable: (id: number) => void
+  onMarkContentNotApplicable?: (contentItemId: number) => void
   onSaved: () => void
   actionLoading: number | null
   regenResult: { id: number; passed: boolean; message: string } | null
@@ -289,6 +290,12 @@ export function WordReviewModal({
                   onApprove={onApprove}
                   onRegenerate={onRegenerate}
                   onMarkNotApplicable={onMarkNotApplicable}
+                  onMarkContentNotApplicable={onMarkContentNotApplicable ? async (id: number) => {
+                    await onMarkContentNotApplicable(id)
+                    api.get<WordDetail>(`/words/${group.word_id}`)
+                      .then(data => setWordDetail(data))
+                      .catch(() => {})
+                  } : undefined}
                   onRegenerated={() => {
                     api.get<WordDetail>(`/words/${group.word_id}`)
                       .then(data => setWordDetail(data))

@@ -341,7 +341,7 @@ function MnemonicDirectEditForm({
 
 export function MnemonicReviewSection({
   mnemonics, reviewItems, actionLoading, resolvedIds, regenResult,
-  onApprove, onRegenerate, onMarkNotApplicable, onRegenerated,
+  onApprove, onRegenerate, onMarkNotApplicable, onMarkContentNotApplicable, onRegenerated,
 }: {
   mnemonics: any[]
   reviewItems: ReviewItem[]
@@ -351,6 +351,7 @@ export function MnemonicReviewSection({
   onApprove: (id: number) => void
   onRegenerate: (id: number) => void
   onMarkNotApplicable: (id: number) => void
+  onMarkContentNotApplicable?: (contentItemId: number) => void
   onRegenerated: () => void
 }) {
   const {
@@ -472,6 +473,20 @@ export function MnemonicReviewSection({
                 onMarkNotApplicable={() => onMarkNotApplicable(reviewItem.id)}
                 embedded
               />
+            )}
+
+            {/* 已通过且无审核项 → 也提供不适用按钮 */}
+            {!reviewItem && status === 'approved' && onMarkContentNotApplicable && (
+              <div className="flex pt-1">
+                <button
+                  onClick={() => onMarkContentNotApplicable(mn.id)}
+                  disabled={actionLoading !== null}
+                  className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 flex items-center gap-1"
+                >
+                  <Ban size={11} />
+                  不适用
+                </button>
+              </div>
             )}
           </div>
         )
