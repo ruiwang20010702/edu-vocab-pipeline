@@ -412,8 +412,8 @@ export default function ReviewPage({ onBack }: Props) {
               try {
                 const canRetryItems = items.filter(i => (i.content_item?.retry_count ?? 0) < 3)
 
-                // 分批并发，每批 20 个（匹配生产 ai_max_concurrency=20）
-                const BATCH_SIZE = 20
+                // 分批并发，每批 4 个（后端每个 regenerate 占 2-3 线程，4 worker × 6 线程池 = 24 线程上限）
+                const BATCH_SIZE = 4
                 let succeeded = 0
                 let failed = 0
                 for (let i = 0; i < canRetryItems.length; i += BATCH_SIZE) {
