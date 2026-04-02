@@ -285,19 +285,25 @@ async def _batch_regenerate_bg(
         session = SyncSessionLocal()
 
         try:
-            # ── Phase 1: 批量预加载 ──
-            ctxs: dict[int, dict] = {}  # review_id → ctx
-            for rid in review_ids:
-                try:
-                    ctx = service._regen_preload(session, rid, reviewer, user_id)
-                    if ctx.get("early_return"):
-                        failed += 1
-                    else:
-                        ctxs[rid] = ctx
-                except Exception:
-                    logger.exception("batch regen preload failed review_id=%d", rid)
-                    failed += 1
-            session.commit()  # 提交预加载变更（content=""，status=PENDING，retry_count++）
+            # ── Phase 1: 批量预加载（在线程中执行，避免阻塞 event loop）──
+            def _phase1_preload() -> tuple[dict[int, dict], int]:
+                _ctxs: dict[int, dict] = {}
+                _failed = 0
+                for rid in review_ids:
+                    try:
+                        ctx = service._regen_preload(session, rid, reviewer, user_id)
+                        if ctx.get("early_return"):
+                            _failed += 1
+                        else:
+                            _ctxs[rid] = ctx
+                    except Exception:
+                        logger.exception("batch regen preload failed review_id=%d", rid)
+                        _failed += 1
+                session.commit()
+                return _ctxs, _failed
+
+            ctxs, p1_failed = await asyncio.to_thread(_phase1_preload)
+            failed += p1_failed
 
             if not ctxs:
                 _update_run("completed", passed, failed)
