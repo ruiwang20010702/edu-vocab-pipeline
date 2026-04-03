@@ -374,6 +374,7 @@ class Layer2Runner:
         strategy: AiStrategy,
         run_id: str,
         failed_item_ids: frozenset[int] = frozenset(),
+        error_messages: dict[int, str] | None = None,
     ) -> tuple[int, int]:
         """将 AI 结果写入数据库（主线程，session 安全）。"""
         passed_count = 0
@@ -387,6 +388,22 @@ class Layer2Runner:
                     item.qc_status = QcStatus.LAYER2_FAILED.value
                     item.last_qc_run_id = run_id
                     failed_count += 1
+                    # 补写错误原因，让前端能显示
+                    err_msg = (error_messages or {}).get(item.id, "L2 AI 质检调用失败")
+                    dim_client = self._get_client_for_dimension(item.dimension)
+                    session.add(QcRuleResult(
+                        content_item_id=item.id,
+                        word_id=item.word_id,
+                        meaning_id=item.meaning_id,
+                        dimension=item.dimension,
+                        rule_id="L2_ERR",
+                        layer=2,
+                        passed=False,
+                        detail=err_msg,
+                        ai_model=dim_client.model,
+                        ai_strategy=strategy.value,
+                        run_id=run_id,
+                    ))
                 continue
             all_passed = all(r.passed for r in results)
 
@@ -454,8 +471,14 @@ class Layer2Runner:
         failed_ids = frozenset(
             log.content_item_id for log in error_logs if log.content_item_id
         )
+        err_msgs = {
+            log.content_item_id: log.error_message
+            for log in error_logs
+            if log.content_item_id and log.error_message
+        }
         passed_count, failed_count = self._save_results(
-            session, items, results_map, strategy, run_id, failed_item_ids=failed_ids,
+            session, items, results_map, strategy, run_id,
+            failed_item_ids=failed_ids, error_messages=err_msgs,
         )
 
         for log in error_logs:
@@ -527,8 +550,14 @@ class Layer2Runner:
         failed_ids = frozenset(
             log.content_item_id for log in error_logs if log.content_item_id
         )
+        err_msgs = {
+            log.content_item_id: log.error_message
+            for log in error_logs
+            if log.content_item_id and log.error_message
+        }
         passed_count, failed_count = self._save_results(
-            session, items, results_map, strategy, run_id, failed_item_ids=failed_ids,
+            session, items, results_map, strategy, run_id,
+            failed_item_ids=failed_ids, error_messages=err_msgs,
         )
 
         for log in error_logs:
