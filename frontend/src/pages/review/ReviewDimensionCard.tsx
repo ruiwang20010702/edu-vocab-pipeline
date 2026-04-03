@@ -376,9 +376,14 @@ export function MnemonicReviewSection({
     return m
   }, [reviewItems])
 
-  // 分类：有内容的（通过/异常）和 rejected 的
+  // 分类：用合并后的实时数据判断 rejected（避免 stale wordDetail 误分类）
   const rejectedMns = ALL_MNEMONIC_DIMS
-    .map(d => mnMap.get(d))
+    .map(d => {
+      const mn = mnMap.get(d)
+      if (!mn) return null
+      const ri = reviewMap.get(d)
+      return ri?.content_item ? { ...mn, ...ri.content_item } : mn
+    })
     .filter(mn => mn && (mn.qc_status === 'rejected' || !mn.content))
 
   return (
@@ -392,13 +397,12 @@ export function MnemonicReviewSection({
         const mn = mnMap.get(dim)
         if (!mn) return null
         const typeLabel = DIMENSION_LABELS[dim] ?? dim
-        const isRejected = mn.qc_status === 'rejected' || !mn.content
         const reviewItem = reviewMap.get(dim)
+        const live = reviewItem?.content_item ? { ...mn, ...reviewItem.content_item } : mn
+        const isRejected = live.qc_status === 'rejected' || !live.content
 
         if (isRejected) return null // 下面统一渲染 rejected
 
-        // 合并实时数据：reviewItem.content_item 随轮询更新，mn 来自一次性 fetch 的 wordDetail
-        const live = reviewItem?.content_item ? { ...mn, ...reviewItem.content_item } : mn
         const parsed = parseMnemonicJson(live.content)
         const status = live.qc_status ?? 'pending'
         const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending
@@ -549,10 +553,11 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
   }
 
   const startEdit = (mn: any) => {
+    const parsed = parseMnemonicJson(mn.content)
     setEditingId(mn.id)
-    setEditFormula('')
-    setEditChant('')
-    setEditScript('')
+    setEditFormula(parsed?.formula ?? '')
+    setEditChant(parsed?.chant ?? '')
+    setEditScript(parsed?.script ?? '')
     setRegenMsg(null)
   }
 

@@ -145,6 +145,15 @@ export function WordReviewModal({
   // 无义项关联的审核项（音标等词级维度）
   const wordLevelItems = group.items.filter(i => i.meaning_id == null)
 
+  // Syllable 实时数据：优先用轮询更新的 reviewItem，回退到一次性 fetch 的 wordDetail
+  const syllableLive = (() => {
+    const ri = wordLevelItems.find(i => i.content_item?.dimension === 'syllable')
+    if (ri?.content_item && wordDetail?.syllable) {
+      return { ...wordDetail.syllable, ...ri.content_item }
+    }
+    return wordDetail?.syllable
+  })()
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -179,11 +188,11 @@ export function WordReviewModal({
                   {wordDetail?.phonetics?.[0] && (
                     <div className="flex items-center gap-3 mt-2">
                       <span className="font-mono text-sm text-blue-600">{wordDetail.phonetics[0].ipa_uk}{wordDetail.phonetics[0].ipa_us ? ` / ${wordDetail.phonetics[0].ipa_us}` : ''}</span>
-                      {(wordDetail.syllable?.content || wordDetail.phonetics[0].syllables) && (
+                      {(syllableLive?.content || wordDetail.phonetics[0].syllables) && (
                         <>
                           <span className="text-xs text-slate-400">·</span>
-                          {wordDetail.syllable?.id ? (
-                            <SyllableEditor syllable={{ id: wordDetail.syllable.id, content: wordDetail.syllable.content }} wordId={group.word_id} onUpdated={setWordDetail} />
+                          {syllableLive?.id ? (
+                            <SyllableEditor syllable={{ id: syllableLive.id, content: syllableLive.content }} wordId={group.word_id} onUpdated={setWordDetail} />
                           ) : (
                             <span className="text-sm text-slate-500">{wordDetail.phonetics[0].syllables}</span>
                           )}
