@@ -14,6 +14,8 @@ import { groupByWord } from './review/utils'
 import { WordGroupCard } from './review/WordGroupCard'
 import { WordReviewModal } from './review/WordReviewModal'
 
+const BATCH_FIX_KEY = 'batch_fix_run_id'
+
 interface Props {
   onBack: () => void
 }
@@ -42,8 +44,8 @@ export default function ReviewPage({ onBack }: Props) {
   // 提示
   const [noBatchMsg, setNoBatchMsg] = useState('')
 
-  // 一键AI修复
-  const [batchFixing, setBatchFixing] = useState(false)
+  // 一键AI修复（从 sessionStorage 初始化，切回时按钮立即显示 loading）
+  const [batchFixing, setBatchFixing] = useState(() => !!sessionStorage.getItem(BATCH_FIX_KEY))
 
   // 已通过动画
   const [resolvedIds, setResolvedIds] = useState<Set<number>>(new Set())
@@ -97,6 +99,62 @@ export default function ReviewPage({ onBack }: Props) {
 
   useEffect(() => { loadBatch() }, [loadBatch])
   useEffect(() => { if (!batchLoading) loadItems() }, [batchLoading, loadItems])
+
+  // ── 一键修复：跨页面/刷新保持状态 ──
+  const loadBatchRef = useRef(loadBatch)
+  loadBatchRef.current = loadBatch
+
+  const batchFixControllerRef = useRef<AbortController | null>(null)
+
+  const pollBatchFixRef = useRef(async (_runId: string, _signal: AbortSignal) => {})
+  pollBatchFixRef.current = async (runId: string, signal: AbortSignal) => {
+    const deadline = Date.now() + 600_000
+    while (!signal.aborted && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 3000))
+      if (signal.aborted) return
+      try {
+        const status = await api.get<{ done: boolean; passed: number; failed: number }>(
+          `/qc/runs/${runId}/status`
+        )
+        if (status.done) {
+          const msg = status.failed > 0
+            ? `AI修复完成: ${status.passed} 成功, ${status.failed} 失败`
+            : `AI修复完成: ${status.passed} 项已处理`
+          showToast(status.failed > 0 ? 'warning' : 'success', msg)
+          return
+        }
+      } catch {
+        return
+      }
+    }
+    if (!signal.aborted) {
+      showToast('warning', 'AI修复仍在后台运行，请稍后刷新查看结果')
+    }
+  }
+
+  // 卸载时 abort 轮询（覆盖 onClick 和 mount effect 两种来源）
+  useEffect(() => {
+    return () => { batchFixControllerRef.current?.abort() }
+  }, [])
+
+  // 挂载时恢复轮询
+  useEffect(() => {
+    const savedRunId = sessionStorage.getItem(BATCH_FIX_KEY)
+    if (!savedRunId) return
+
+    const controller = new AbortController()
+    batchFixControllerRef.current = controller
+    setBatchFixing(true)
+
+    pollBatchFixRef.current(savedRunId, controller.signal).finally(() => {
+      if (!controller.signal.aborted) {
+        sessionStorage.removeItem(BATCH_FIX_KEY)
+        setBatchFixing(false)
+        batchFixControllerRef.current = null
+        loadBatchRef.current()
+      }
+    })
+  }, [])
 
   // 静默轮询刷新：操作进行中时跳过，防止覆盖乐观更新
   const silentRefresh = useCallback(async () => {
@@ -418,33 +476,21 @@ export default function ReviewPage({ onBack }: Props) {
                 const reviewIds = canRetryItems.map(i => i.id)
                 if (reviewIds.length === 0) return
 
-                // 提交到后台异步处理
                 const { run_id } = await api.post<{ run_id: string }>(
                   '/reviews/batch-regenerate', { review_ids: reviewIds }
                 )
 
-                // 轮询进度直到完成
-                let completed = false
-                const deadline = Date.now() + 600_000
-                while (Date.now() < deadline) {
-                  await new Promise(r => setTimeout(r, 3000))
-                  const status = await api.get<{ done: boolean; passed: number; failed: number }>(
-                    `/qc/runs/${run_id}/status`
-                  )
-                  if (status.done) {
-                    completed = true
-                    const msg = status.failed > 0
-                      ? `AI修复完成: ${status.passed} 成功, ${status.failed} 失败`
-                      : `AI修复完成: ${status.passed} 项已处理`
-                    showToast(status.failed > 0 ? 'warning' : 'success', msg)
-                    break
-                  }
-                }
-                if (!completed) {
-                  showToast('warning', 'AI修复仍在后台运行，请稍后刷新查看结果')
-                }
+                const controller = new AbortController()
+                batchFixControllerRef.current = controller
+                sessionStorage.setItem(BATCH_FIX_KEY, run_id)
 
-                // 刷新 UI 显示最终状态
+                await pollBatchFixRef.current(run_id, controller.signal)
+
+                // 被 abort 说明组件卸载了，不做清理（mount effect 会接管）
+                if (controller.signal.aborted) return
+
+                sessionStorage.removeItem(BATCH_FIX_KEY)
+                batchFixControllerRef.current = null
                 await loadItems()
                 loadBatch()
               } finally {
