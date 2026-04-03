@@ -111,7 +111,11 @@ export default function ReviewPage({ onBack }: Props) {
       setItems(prev => {
         if (prev.length !== newItems.length) return newItems
         const changed = newItems.some((item, i) =>
-          item.id !== prev[i].id || item.status !== prev[i].status || item.resolution !== prev[i].resolution
+          item.id !== prev[i].id
+          || item.status !== prev[i].status
+          || item.resolution !== prev[i].resolution
+          || item.content_item?.content !== prev[i].content_item?.content
+          || item.content_item?.retry_count !== prev[i].content_item?.retry_count
         )
         return changed ? newItems : prev
       })

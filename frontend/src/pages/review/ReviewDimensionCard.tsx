@@ -214,10 +214,13 @@ export function ContentDimensionCard({
     startDirectEdit, cancelDirectEdit, setDirectEditContent, setDirectEditContentCn, handleDirectEditSave,
   } = useReviewEdit()
 
-  const status = content.qc_status ?? 'pending'
+  // 合并实时数据：reviewItem.content_item 随 items 轮询实时更新，
+  // content 仅 Modal 打开时一次性 fetch，后台修复后可能过时
+  const live = reviewItem?.content_item ? { ...content, ...reviewItem.content_item } : content
+  const status = live.qc_status ?? 'pending'
   const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending
   const hasIssue = !!reviewItem
-  const isDirectEditing = directEditId === content.id
+  const isDirectEditing = directEditId === live.id
 
   return (
     <div className={`rounded-2xl border p-4 space-y-2 ${hasIssue ? 'bg-white border-rose-200' : 'bg-slate-50 border-slate-100'}`}>
@@ -250,12 +253,12 @@ export function ContentDimensionCard({
             className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400" />
           {directEditMsg && <QcResultBanner passed={directEditMsg.ok} message={directEditMsg.text} issues={directEditMsg.issues} />}
           <div className="flex items-center gap-2">
-            <button onClick={() => handleDirectEditSave(content.id, { content: directEditContent, content_cn: directEditContentCn || undefined })} disabled={directEditSaving || !directEditContent.trim()}
+            <button onClick={() => handleDirectEditSave(live.id, { content: directEditContent, content_cn: directEditContentCn || undefined })} disabled={directEditSaving || !directEditContent.trim()}
               className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
               {directEditSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存并质检
             </button>
             {directEditMsg && !directEditMsg.ok && (
-              <button onClick={() => handleDirectEditSave(content.id, { content: directEditContent, content_cn: directEditContentCn || undefined, force_approve: true })} disabled={directEditSaving}
+              <button onClick={() => handleDirectEditSave(live.id, { content: directEditContent, content_cn: directEditContentCn || undefined, force_approve: true })} disabled={directEditSaving}
                 className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
                 <CheckCircle2 size={12} /> 强制通过
               </button>
@@ -263,14 +266,14 @@ export function ContentDimensionCard({
             <button onClick={cancelDirectEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
           </div>
         </div>
-      ) : content.content && (
+      ) : live.content && (
         <div
           className="space-y-1 rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
-          onDoubleClick={() => startDirectEdit(content)}
+          onDoubleClick={() => startDirectEdit(live)}
           title="双击编辑"
         >
-          <p className="text-sm text-slate-800">{content.content}</p>
-          {content.content_cn && <p className="text-xs text-slate-500">{content.content_cn}</p>}
+          <p className="text-sm text-slate-800">{live.content}</p>
+          {live.content_cn && <p className="text-xs text-slate-500">{live.content_cn}</p>}
         </div>
       )}
 
@@ -394,9 +397,10 @@ export function MnemonicReviewSection({
 
         if (isRejected) return null // 下面统一渲染 rejected
 
-        // 有内容的助记
-        const parsed = parseMnemonicJson(mn.content)
-        const status = mn.qc_status ?? 'pending'
+        // 合并实时数据：reviewItem.content_item 随轮询更新，mn 来自一次性 fetch 的 wordDetail
+        const live = reviewItem?.content_item ? { ...mn, ...reviewItem.content_item } : mn
+        const parsed = parseMnemonicJson(live.content)
+        const status = live.qc_status ?? 'pending'
         const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending
         const hasIssue = !!reviewItem
 
@@ -419,10 +423,10 @@ export function MnemonicReviewSection({
             )}
 
             {/* 助记内容 — 双击编辑 */}
-            {directEditId === mn.id ? (
+            {directEditId === live.id ? (
               <MnemonicDirectEditForm
-                mnId={mn.id}
-                initialContent={mn.content}
+                mnId={live.id}
+                initialContent={live.content}
                 directEditSaving={directEditSaving}
                 directEditMsg={directEditMsg}
                 onDirectEditSave={handleDirectEditSave}
@@ -431,7 +435,7 @@ export function MnemonicReviewSection({
             ) : parsed ? (
               <div
                 className="space-y-2 text-xs rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
-                onDoubleClick={() => startDirectEdit(mn)}
+                onDoubleClick={() => startDirectEdit(live)}
                 title="双击编辑"
               >
                 {parsed.formula && (
@@ -456,9 +460,9 @@ export function MnemonicReviewSection({
             ) : (
               <p
                 className="text-xs text-slate-500 italic rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
-                onDoubleClick={() => startDirectEdit(mn)}
+                onDoubleClick={() => startDirectEdit(live)}
                 title="双击编辑"
-              >{mn.content || '暂无内容'}</p>
+              >{live.content || '暂无内容'}</p>
             )}
 
             {/* 有审核项 → 审核按钮 */}
