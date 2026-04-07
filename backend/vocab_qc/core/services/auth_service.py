@@ -40,6 +40,17 @@ def validate_email_domain(email: str) -> bool:
     return domain in settings.allowed_email_domains
 
 
+def has_active_code(session: Session, email: str) -> bool:
+    """检查该邮箱是否已有未过期、未使用的验证码。"""
+    now = datetime.now(UTC)
+    return (
+        session.query(VerificationCode)
+        .filter_by(email=email, used=False)
+        .filter(VerificationCode.expires_at > now)
+        .first()
+    ) is not None
+
+
 def generate_code(session: Session, email: str) -> str:
     """生成 6 位验证码，hash 后存入数据库，返回明文用于发送。"""
     # 清理该邮箱的过期验证码

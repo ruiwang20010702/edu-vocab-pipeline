@@ -42,6 +42,10 @@ def send_code(request: Request, body: SendCodeRequest, db: Session = Depends(get
     if not auth_service.validate_email_domain(body.email):
         raise HTTPException(status_code=400, detail="邮箱域名不在白名单中")
 
+    # 已有未过期验证码：跳过生成和发送，直接返回（企业邮箱短时间内不能重复发送）
+    if auth_service.has_active_code(db, body.email):
+        return {"message": "验证码已发送，请查收邮件"}
+
     code = auth_service.generate_code(db, body.email)
 
     # 开发环境：验证码输出到日志，不依赖邮件
