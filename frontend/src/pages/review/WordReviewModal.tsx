@@ -134,6 +134,16 @@ export function WordReviewModal({
     return () => controller.abort()
   }, [regenResult, group.word_id])
 
+  // 审核操作（通过/不适用）后刷新 wordDetail
+  useEffect(() => {
+    if (resolvedIds.size === 0) return
+    const controller = new AbortController()
+    api.get<WordDetail>(`/words/${group.word_id}`, { signal: controller.signal })
+      .then(data => setWordDetail(data))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [resolvedIds.size, group.word_id])
+
   const meanings = wordDetail?.meanings ?? []
   const currentMeaning = meanings[meaningIdx] ?? null
 
