@@ -50,6 +50,7 @@ class PollingPool:
         self._shutdown = False
         self._global_429_until: float = 0.0  # monotonic timestamp
         self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     @classmethod
     def get_instance(cls) -> PollingPool:
@@ -68,14 +69,14 @@ class PollingPool:
         self._shutdown = True
 
     async def _ensure_client(self) -> httpx.AsyncClient:
-        need_new = self._client is None or self._client.is_closed
-        # 检测 event loop 是否已关闭（多 worker 下可能发生）
-        if not need_new:
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                need_new = True
+        loop = asyncio.get_running_loop()
+        need_new = (
+            self._client is None
+            or self._client.is_closed
+            or self._client_loop is not loop
+        )
         if need_new:
+            old = self._client
             pool_size = settings.ai_poll_pool_size * 2
             self._client = httpx.AsyncClient(
                 timeout=30.0,
@@ -85,6 +86,12 @@ class PollingPool:
                     max_keepalive_connections=pool_size,
                 ),
             )
+            self._client_loop = loop
+            if old is not None and not old.is_closed:
+                try:
+                    await old.aclose()
+                except Exception:
+                    pass
         return self._client
 
     async def close(self) -> None:
