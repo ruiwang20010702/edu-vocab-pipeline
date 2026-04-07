@@ -297,6 +297,34 @@ class Layer2Runner:
 
         run_async_in_sync(_submit_and_wait())
 
+        # 将超时仍活跃的任务标记为 FAILED（防止 collect_completed 遗漏）
+        from vocab_qc.core.models.ai_task_queue import AiTaskQueue
+        timeout_session = _SyncSessionLocal()
+        try:
+            timed_out = (
+                timeout_session.query(AiTaskQueue)
+                .filter_by(batch_key=batch_key)
+                .filter(AiTaskQueue.status.in_([
+                    AiTaskStatus.PENDING.value,
+                    AiTaskStatus.SUBMITTED.value,
+                    AiTaskStatus.POLLING.value,
+                ]))
+                .all()
+            )
+            for t in timed_out:
+                t.status = AiTaskStatus.FAILED.value
+                t.error_message = "L2 质检轮询超时"
+            if timed_out:
+                timeout_session.commit()
+                logger.warning(
+                    "L2 标记超时任务 batch=%s count=%d",
+                    batch_key, len(timed_out),
+                )
+        except Exception:
+            timeout_session.rollback()
+        finally:
+            timeout_session.close()
+
         # Step 3: 收集 + 解析
         completed = TaskQueueService.collect_completed(session, batch_key)
         results_map: dict[int, list[RuleResult]] = {}
@@ -404,6 +432,29 @@ class Layer2Runner:
                         ai_strategy=strategy.value,
                         run_id=run_id,
                     ))
+                else:
+                    # 兜底：无结果也不在失败集 → 标记为 LAYER2_FAILED
+                    item.qc_status = QcStatus.LAYER2_FAILED.value
+                    item.last_qc_run_id = run_id
+                    failed_count += 1
+                    dim_client = self._get_client_for_dimension(item.dimension)
+                    session.add(QcRuleResult(
+                        content_item_id=item.id,
+                        word_id=item.word_id,
+                        meaning_id=item.meaning_id,
+                        dimension=item.dimension,
+                        rule_id="L2_UNTRACKED",
+                        layer=2,
+                        passed=False,
+                        detail="L2 质检未返回结果（可能因超时或任务丢失）",
+                        ai_model=dim_client.model,
+                        ai_strategy=strategy.value,
+                        run_id=run_id,
+                    ))
+                    logger.warning(
+                        "L2 未跟踪 item=%d dim=%s → LAYER2_FAILED",
+                        item.id, item.dimension,
+                    )
                 continue
             all_passed = all(r.passed for r in results)
 
