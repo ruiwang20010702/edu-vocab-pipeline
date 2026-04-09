@@ -190,7 +190,7 @@ export default function ReviewPage({ onBack }: Props) {
         await loadBatch()
       } else {
         setBatch(null)
-        showToast('info', '暂无待审核的批次')
+        showToast('warning', '暂无待审核的批次')
       }
     } catch (e) {
       showToast('error', e instanceof ApiError ? e.detail : '领取批次失败')
