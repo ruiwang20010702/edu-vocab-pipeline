@@ -97,6 +97,26 @@ ORM 模型分布在 `core/models/` 下，约 17 张表。测试通过 `conftest.
 - `ALLOWED_EMAIL_DOMAINS`：邮箱域名白名单
 - `ENV`：`development` / `staging` / `production`，生产环境强制校验安全配置（`config.py:validate_production_config`）
 
+## 测试体系
+
+831 个测试，分为 `tests/unit/` 和 `tests/integration/` 两层。`conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离（`session` 级 engine，`function` 级 session）。`sample_word` fixture 创建含多义项、多内容项的测试单词。
+
+Ruff 配置：line-length=120, target-version=py311, select=[E,F,I,N,W]。
+
+## AI 调用链路
+
+```
+Generator.generate()
+  → ai_gateway_mode=True?
+    → Yes: 异步提交到 51talk AI Gateway → PollingPool 轮询结果
+    → No:  直连 OpenAI 格式 API（httpx POST）
+  → CircuitBreaker 保护（连续 15 次失败 → 熔断 30s）
+  → 失败自动重试（最多 3 次）
+  → 响应 JSON 解析 → ContentItem 入库
+```
+
+Task Queue 模式（`ai_use_task_queue=True`）：批量提交（batch_size=20, stagger=0.5s）+ 多 worker 轮询（pool_size=50, scan_interval=2s）。
+
 ## 安全加固
 
 - JWT 4h 过期 + Cookie httpOnly + 邮箱域名白名单 + slowapi 60/min 全局限速
