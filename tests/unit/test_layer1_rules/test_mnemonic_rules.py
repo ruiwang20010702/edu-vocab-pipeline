@@ -282,6 +282,31 @@ class TestN5SoundMeaningBounds:
         assert "上限" in result.detail
 
 
+class TestN5RootAffixBounds:
+    """N5 在 mnemonic_root_affix 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+
+    def setup_method(self):
+        self.checker = N5TeacherScriptLength()
+
+    def test_root_affix_lower_bound(self):
+        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_root_affix")
+        assert result.passed
+
+    def test_root_affix_upper_bound(self):
+        result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_root_affix")
+        assert result.passed
+
+    def test_root_affix_below_lower_fails(self):
+        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_root_affix")
+        assert not result.passed
+        assert "下限" in result.detail
+
+    def test_root_affix_above_upper_fails(self):
+        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_root_affix")
+        assert not result.passed
+        assert "上限" in result.detail
+
+
 class TestN6ExamSentence:
     def setup_method(self):
         self.checker = N6ExamSentence()
