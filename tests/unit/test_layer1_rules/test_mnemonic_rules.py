@@ -257,6 +257,31 @@ class TestN5ExamAppBounds:
         assert "上限" in result.detail
 
 
+class TestN5SoundMeaningBounds:
+    """N5 在 mnemonic_sound_meaning 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+
+    def setup_method(self):
+        self.checker = N5TeacherScriptLength()
+
+    def test_sound_meaning_lower_bound(self):
+        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_sound_meaning")
+        assert result.passed
+
+    def test_sound_meaning_upper_bound(self):
+        result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_sound_meaning")
+        assert result.passed
+
+    def test_sound_meaning_below_lower_fails(self):
+        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_sound_meaning")
+        assert not result.passed
+        assert "下限" in result.detail
+
+    def test_sound_meaning_above_upper_fails(self):
+        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_sound_meaning")
+        assert not result.passed
+        assert "上限" in result.detail
+
+
 class TestN6ExamSentence:
     def setup_method(self):
         self.checker = N6ExamSentence()
