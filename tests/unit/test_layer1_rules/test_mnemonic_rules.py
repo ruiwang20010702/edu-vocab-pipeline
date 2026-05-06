@@ -307,6 +307,31 @@ class TestN5RootAffixBounds:
         assert "上限" in result.detail
 
 
+class TestN5WordInWordBounds:
+    """N5 在 mnemonic_word_in_word 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+
+    def setup_method(self):
+        self.checker = N5TeacherScriptLength()
+
+    def test_word_in_word_lower_bound(self):
+        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_word_in_word")
+        assert result.passed
+
+    def test_word_in_word_upper_bound(self):
+        result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_word_in_word")
+        assert result.passed
+
+    def test_word_in_word_below_lower_fails(self):
+        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_word_in_word")
+        assert not result.passed
+        assert "下限" in result.detail
+
+    def test_word_in_word_above_upper_fails(self):
+        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_word_in_word")
+        assert not result.passed
+        assert "上限" in result.detail
+
+
 class TestN6ExamSentence:
     def setup_method(self):
         self.checker = N6ExamSentence()

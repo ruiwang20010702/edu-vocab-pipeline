@@ -148,10 +148,11 @@ class N4FormulaLength(_RuleCheckerBase):
 
 # 话术字数边界：(下限, 上限)；上限为 None 表示无上限.
 _SCRIPT_LENGTH_BOUNDS: dict[str, tuple[int, Optional[int]]] = {
-    # 1v1 私教风格新版：音义联想/考试应用/词根词缀统一 200-250 字
+    # 1v1 私教风格新版：4 种助记类型话术统一 200-250 字
     "mnemonic_sound_meaning": (200, 250),
     "mnemonic_exam_app": (200, 250),
     "mnemonic_root_affix": (200, 250),
+    "mnemonic_word_in_word": (200, 250),
 }
 _DEFAULT_SCRIPT_LOWER = 500
 
