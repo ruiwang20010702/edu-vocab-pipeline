@@ -26,12 +26,22 @@ export function isMnemonicDim(dim: string): boolean {
   return dim.startsWith('mnemonic_')
 }
 
-export function parseMnemonic(content: string): { formula: string; chant: string; script: string } {
-  if (!content) return { formula: '', chant: '', script: '' }
+export function parseMnemonic(content: string): {
+  formula: string
+  chant: string
+  script: string
+  exam_sentence: string
+} {
+  if (!content) return { formula: '', chant: '', script: '', exam_sentence: '' }
   try {
     const data = JSON.parse(content)
     if (data && typeof data === 'object' && 'formula' in data) {
-      return { formula: data.formula ?? '', chant: data.chant ?? '', script: data.script ?? '' }
+      return {
+        formula: data.formula ?? '',
+        chant: data.chant ?? '',
+        script: data.script ?? '',
+        exam_sentence: data.exam_sentence ?? '',
+      }
     }
   } catch { /* fallback to regex */ }
   const formulaMatch = content.match(/\[核心公式\]\s*([\s\S]*?)(?=\[助记口诀\]|$)/)
@@ -41,9 +51,18 @@ export function parseMnemonic(content: string): { formula: string; chant: string
     formula: formulaMatch?.[1]?.trim() ?? '',
     chant: chantMatch?.[1]?.trim() ?? '',
     script: scriptMatch?.[1]?.trim() ?? '',
+    exam_sentence: '',
   }
 }
 
-export function buildMnemonicJson(formula: string, chant: string, script: string): string {
+export function buildMnemonicJson(
+  formula: string,
+  chant: string,
+  script: string,
+  examSentence?: string,
+): string {
+  if (examSentence !== undefined) {
+    return JSON.stringify({ formula, chant, script, exam_sentence: examSentence })
+  }
   return JSON.stringify({ formula, chant, script })
 }

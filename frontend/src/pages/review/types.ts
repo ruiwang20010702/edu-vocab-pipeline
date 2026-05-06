@@ -10,4 +10,9 @@ export type Tab = 'all' | 'can_retry' | 'must_manual'
 
 export type QcIssue = { rule_id: string; field: string; message: string }
 
-export interface MnemonicData { formula: string; chant: string; script: string }
+export interface MnemonicData {
+  formula: string
+  chant: string
+  script: string
+  exam_sentence?: string
+}

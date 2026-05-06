@@ -18,12 +18,18 @@ function MnemonicEditFields({
   formula, chant, script,
   onFormulaChange, onChantChange, onScriptChange,
   scriptRows = 3,
+  examSentence,
+  onExamSentenceChange,
+  showExamSentence = false,
 }: {
   formula: string; chant: string; script: string
   onFormulaChange: (v: string) => void
   onChantChange: (v: string) => void
   onScriptChange: (v: string) => void
   scriptRows?: number
+  examSentence?: string
+  onExamSentenceChange?: (v: string) => void
+  showExamSentence?: boolean
 }) {
   return (
     <>
@@ -37,6 +43,18 @@ function MnemonicEditFields({
         <textarea value={chant} onChange={e => onChantChange(e.target.value)} rows={2}
           className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
       </div>
+      {showExamSentence && (
+        <div>
+          <label className="text-[10px] font-bold text-slate-400 uppercase">实战例句（英文，8-15 词）</label>
+          <textarea
+            value={examSentence ?? ''}
+            onChange={e => onExamSentenceChange?.(e.target.value)}
+            rows={2}
+            placeholder="纯英文，需含目标词"
+            className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400"
+          />
+        </div>
+      )}
       <div>
         <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
         <textarea value={script} onChange={e => onScriptChange(e.target.value)} rows={scriptRows}
@@ -180,6 +198,16 @@ export function ReviewDimensionCard({
         <div className="space-y-2 text-xs">
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span><span className="text-slate-700">{parseMnemonicJson(content)!.formula}</span></div>
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span><span className="text-slate-700">{parseMnemonicJson(content)!.chant}</span></div>
+          {dim === 'mnemonic_exam_app' && (
+            <div className="flex items-start gap-2">
+              <span className="shrink-0 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-bold text-[10px]">例句</span>
+              {parseMnemonicJson(content)!.exam_sentence ? (
+                <span className="text-slate-700">{parseMnemonicJson(content)!.exam_sentence}</span>
+              ) : (
+                <span className="text-slate-400 italic">（旧数据未生成例句）</span>
+              )}
+            </div>
+          )}
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span><span className="text-slate-500 line-clamp-2">{parseMnemonicJson(content)!.script}</span></div>
         </div>
       ) : (
@@ -296,10 +324,11 @@ export function ContentDimensionCard({
 /* ===== 助记直接编辑表单 ===== */
 
 function MnemonicDirectEditForm({
-  mnId, initialContent, directEditSaving, directEditMsg,
+  mnId, dim, initialContent, directEditSaving, directEditMsg,
   onDirectEditSave, onCancelDirectEdit,
 }: {
   mnId: number
+  dim: string
   initialContent: string
   directEditSaving: boolean
   directEditMsg: { ok: boolean; text: string; issues?: QcIssue[] } | null
@@ -310,9 +339,11 @@ function MnemonicDirectEditForm({
   const [formula, setFormula] = useState(parsed?.formula ?? '')
   const [chant, setChant] = useState(parsed?.chant ?? '')
   const [script, setScript] = useState(parsed?.script ?? '')
+  const [examSentence, setExamSentence] = useState(parsed?.exam_sentence ?? '')
+  const isExamApp = dim === 'mnemonic_exam_app'
 
   const handleSave = (forceApprove?: boolean) => {
-    const content = buildMnemonicJson(formula, chant, script)
+    const content = buildMnemonicJson(formula, chant, script, isExamApp ? examSentence : undefined)
     onDirectEditSave(mnId, { content, force_approve: forceApprove })
   }
 
@@ -321,6 +352,9 @@ function MnemonicDirectEditForm({
       <MnemonicEditFields
         formula={formula} chant={chant} script={script}
         onFormulaChange={setFormula} onChantChange={setChant} onScriptChange={setScript}
+        showExamSentence={isExamApp}
+        examSentence={examSentence}
+        onExamSentenceChange={setExamSentence}
       />
       {directEditMsg && <QcResultBanner passed={directEditMsg.ok} message={directEditMsg.text} issues={directEditMsg.issues} />}
       <div className="flex items-center gap-2">
@@ -430,6 +464,7 @@ export function MnemonicReviewSection({
             {directEditId === live.id ? (
               <MnemonicDirectEditForm
                 mnId={live.id}
+                dim={dim}
                 initialContent={live.content}
                 directEditSaving={directEditSaving}
                 directEditMsg={directEditMsg}
@@ -452,6 +487,16 @@ export function MnemonicReviewSection({
                   <div className="flex items-start gap-2">
                     <span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span>
                     <span className="text-slate-700">{parsed.chant}</span>
+                  </div>
+                )}
+                {dim === 'mnemonic_exam_app' && (
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-bold text-[10px]">例句</span>
+                    {parsed.exam_sentence ? (
+                      <span className="text-slate-700">{parsed.exam_sentence}</span>
+                    ) : (
+                      <span className="text-slate-400 italic">（旧数据未生成例句）</span>
+                    )}
                   </div>
                 )}
                 {parsed.script && (
@@ -518,6 +563,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
   const [editFormula, setEditFormula] = useState('')
   const [editChant, setEditChant] = useState('')
   const [editScript, setEditScript] = useState('')
+  const [editExamSentence, setEditExamSentence] = useState('')
   const [saving, setSaving] = useState(false)
 
   // setTimeout 清理
@@ -558,6 +604,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
     setEditFormula(parsed?.formula ?? '')
     setEditChant(parsed?.chant ?? '')
     setEditScript(parsed?.script ?? '')
+    setEditExamSentence(parsed?.exam_sentence ?? '')
     setRegenMsg(null)
   }
 
@@ -565,7 +612,12 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
     setSaving(true)
     setRegenMsg(null)
     try {
-      const content = JSON.stringify({ formula: editFormula, chant: editChant, script: editScript })
+      const isExamApp = mn.dimension === 'mnemonic_exam_app'
+      const payload: Record<string, string> = {
+        formula: editFormula, chant: editChant, script: editScript,
+      }
+      if (isExamApp) payload.exam_sentence = editExamSentence
+      const content = JSON.stringify(payload)
       const res = await api.post<{ success: boolean; qc_passed: boolean; message: string; new_issues?: QcIssue[] }>(`/words/content-items/${mn.id}/manual-edit`, { content, force_approve: forceApprove })
       setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message, issues: res.new_issues })
       if (res.qc_passed) {
@@ -599,6 +651,9 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
               <MnemonicEditFields
                 formula={editFormula} chant={editChant} script={editScript}
                 onFormulaChange={setEditFormula} onChantChange={setEditChant} onScriptChange={setEditScript}
+                showExamSentence={mn.dimension === 'mnemonic_exam_app'}
+                examSentence={editExamSentence}
+                onExamSentenceChange={setEditExamSentence}
               />
               {regenMsg && regenMsg.id === mn.id && <QcResultBanner passed={regenMsg.ok} message={regenMsg.msg} issues={regenMsg.issues} />}
               <div className="flex items-center gap-2">
