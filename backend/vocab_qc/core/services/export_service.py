@@ -9,11 +9,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.logging_config import log_elapsed
-
-logger = logging.getLogger(__name__)
-
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
 from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS, QC_TERMINAL_STATUSES
+
+logger = logging.getLogger(__name__)
 
 _MNEMONIC_TYPE_LABELS: dict[str, str] = {
     "mnemonic_root_affix": "词根词缀",
@@ -21,6 +20,17 @@ _MNEMONIC_TYPE_LABELS: dict[str, str] = {
     "mnemonic_sound_meaning": "音义联想",
     "mnemonic_exam_app": "考试应用",
 }
+
+# 导出层 POS 规范化映射：去点后若为旧的 art，统一映射到新规范 det
+_POS_NORMALIZE_MAP: dict[str, str] = {"art": "det"}
+
+
+def _normalize_pos_for_export(pos: str | None) -> str:
+    """导出层规范化 POS：去尾部 '.'，并把旧 'art' 映射到新规范 'det'。"""
+    if not pos:
+        return ""
+    stripped = pos.rstrip(".")
+    return _POS_NORMALIZE_MAP.get(stripped, stripped)
 
 
 def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
@@ -185,7 +195,7 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
 
                 first_source = sources[0] if sources else None
                 meaning_data = {
-                    "pos": meaning.pos,
+                    "pos": _normalize_pos_for_export(meaning.pos),
                     "def": meaning.definition,
                     "sources": [s.source_name for s in sources],
                     "textbook_id": first_source.textbook_id if first_source else None,
@@ -295,7 +305,7 @@ class ExportService:
             sources = sources_by_meaning.get(meaning.id, [])
             first_source = sources[0] if sources else None
             meaning_data = {
-                "pos": meaning.pos,
+                "pos": _normalize_pos_for_export(meaning.pos),
                 "def": meaning.definition,
                 "sources": [s.source_name for s in sources],
                 "textbook_id": first_source.textbook_id if first_source else None,

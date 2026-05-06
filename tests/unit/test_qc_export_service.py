@@ -311,3 +311,63 @@ class TestExportServiceAllApproved:
         assert readiness["pending"] == 1
         assert readiness["not_approved"] == 2
         assert readiness["ready_rate"] == pytest.approx(33.3, abs=0.1)
+
+
+class TestExportPosNormalization:
+    """导出层 POS 规范化端到端：旧带点 / art. 在导出时变换；新格式保持不变."""
+
+    def _seed_exportable_word(
+        self,
+        session: Session,
+        word_text: str,
+        pos: str,
+        definition: str,
+    ) -> Word:
+        """造一个可导出的最小词（chunk approved 即可触发义项 exportable）."""
+        word = _make_word(session, word_text)
+        meaning = _make_meaning(session, word, pos, definition)
+        _make_content(
+            session, word, "chunk", f"some {word_text}",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        return word
+
+    def test_legacy_dotted_pos_stripped_in_export_all(self, db_session: Session):
+        """export_all_approved: 'n.' / 'adj.' 等带点格式去点后输出."""
+        self._seed_exportable_word(db_session, "book", "n.", "书")
+        self._seed_exportable_word(db_session, "kind", "adj.", "友好的")
+
+        results = ExportService().export_all_approved(db_session)
+        pos_values = {r["word"]: r["meanings"][0]["pos"] for r in results}
+
+        assert pos_values["book"] == "n"
+        assert pos_values["kind"] == "adj"
+
+    def test_legacy_art_mapped_to_det_in_export_all(self, db_session: Session):
+        """export_all_approved: 旧 'art.' 映射为新规范 'det'."""
+        self._seed_exportable_word(db_session, "the", "art.", "这个")
+
+        results = ExportService().export_all_approved(db_session)
+        assert len(results) == 1
+        assert results[0]["meanings"][0]["pos"] == "det"
+
+    def test_new_format_passthrough_in_export_all(self, db_session: Session):
+        """export_all_approved: 新格式 'n phr' / 'a phr' / 'n' 保持不变."""
+        self._seed_exportable_word(db_session, "look forward to", "n phr", "期待")
+        self._seed_exportable_word(db_session, "lovely to look at", "a phr", "悦目的")
+        self._seed_exportable_word(db_session, "cat", "n", "猫")
+
+        results = ExportService().export_all_approved(db_session)
+        pos_values = {r["word"]: r["meanings"][0]["pos"] for r in results}
+
+        assert pos_values["look forward to"] == "n phr"
+        assert pos_values["lovely to look at"] == "a phr"
+        assert pos_values["cat"] == "n"
+
+    def test_export_word_path_normalizes_pos(self, db_session: Session):
+        """export_word 单词路径独立规范化（覆盖 L298 调用点）."""
+        word = self._seed_exportable_word(db_session, "an", "art.", "一个")
+
+        result = ExportService().export_word(db_session, word.id)
+        assert result is not None
+        assert result["meanings"][0]["pos"] == "det"
