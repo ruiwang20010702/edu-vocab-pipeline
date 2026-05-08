@@ -1,0 +1,41 @@
+<type>(<scope>): <subject> --<resource> <id>
+
+# ─────────────────────────────────────────────────────────────
+# 51Talk AoneFlow Commit 规范
+# 格式：<type>(<scope>): <subject> --<resource> <id>
+#
+# 示例：
+#   feat(generators): 词中词话术降为 200-250 字 --task 1234
+#   fix(qc): L2 质检结果遗漏时兜底标记 LAYER2_FAILED --bug 5678
+#   perf(api): 一键修复批量提交，4 分钟降到 30 秒 --story 9012
+#
+# type（必填，9 选 1）：
+#   feat      新功能
+#   fix       Bug 修复
+#   perf      性能优化
+#   refactor  重构（不改外部行为）
+#   test      测试相关
+#   docs      文档
+#   build     构建系统/依赖
+#   ci        CI/CD 配置
+#   chore     杂项（不进 changelog）
+#
+# scope（必填）：模块名，本仓库常用 scope：
+#   api | core | generators | qc | review | production | export
+#   import | prompt | auth | frontend | cli | migrations | docker
+#
+# subject（必填）：
+#   - 一句话、动词开头、不写句号
+#   - 中文/英文均可
+#
+# resource（强烈推荐）：关联资源类型 + ID
+#   --story <id>    需求
+#   --task  <id>    任务
+#   --bug   <id>    缺陷
+#   --ticket <id>   工单
+#
+# 禁止项：
+#   - 直接提交 master / release / main
+#   - 跳过 MR
+#   - 长期存在的 feature 分支
+# ─────────────────────────────────────────────────────────────
