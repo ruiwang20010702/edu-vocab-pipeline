@@ -1,4 +1,0 @@
-.env
-results/*.xlsx
-__pycache__/
-*.pyc

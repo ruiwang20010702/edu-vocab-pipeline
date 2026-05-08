@@ -27,6 +27,8 @@ htmlcov/
 # Environment
 .env
 .env.local
+docs/gaea-production-env.md
+docs/production-env-template.env
 
 # OS
 .DS_Store
