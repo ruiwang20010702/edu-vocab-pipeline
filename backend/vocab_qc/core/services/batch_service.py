@@ -6,12 +6,90 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import distinct, func, update
+from sqlalchemy import distinct, exists, func, select, update
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models.batch_layer import ReviewBatch
-from vocab_qc.core.models.enums import BatchStatus, ReviewStatus
+from vocab_qc.core.models.content_layer import ContentItem
+from vocab_qc.core.models.enums import BatchStatus, QcStatus, ReviewReason, ReviewStatus
 from vocab_qc.core.models.quality_layer import ReviewItem
+
+
+def _repair_orphan_failed_items(session: Session) -> int:
+    """为异常态且无 pending ReviewItem 的 ContentItem 自动补建审核项。
+
+    覆盖三类孤儿：
+    - layer1_failed / layer2_failed：竞态导致 ReviewItem 已 resolve 但 CI 仍 failed
+    - layer1_passed：L2 QC 未执行或结果丢失，卡在中间态
+
+    使用 savepoint 隔离，避免内部 IntegrityError 回滚影响外层事务。
+    每次最多处理 500 条，超出部分留给下次 assign 处理。
+    """
+    from vocab_qc.core.services.review_service import ReviewService
+
+    orphan_items = (
+        session.query(ContentItem)
+        .filter(
+            ContentItem.qc_status.in_([
+                QcStatus.LAYER1_FAILED.value,
+                QcStatus.LAYER2_FAILED.value,
+                QcStatus.LAYER1_PASSED.value,
+            ]),
+        )
+        .filter(
+            ~exists(
+                select(ReviewItem.id).where(
+                    ReviewItem.content_item_id == ContentItem.id,
+                    ReviewItem.status == ReviewStatus.PENDING.value,
+                )
+            ),
+        )
+        .limit(500)
+        .all()
+    )
+    if not orphan_items:
+        return 0
+
+    # 按实际状态分组，使用正确的 ReviewReason
+    failed_items = [
+        ci for ci in orphan_items
+        if ci.qc_status in (QcStatus.LAYER1_FAILED.value, QcStatus.LAYER2_FAILED.value)
+    ]
+    l1_passed_items = [
+        ci for ci in orphan_items
+        if ci.qc_status == QcStatus.LAYER1_PASSED.value
+    ]
+
+    review_svc = ReviewService()
+    count = 0
+
+    # 用 savepoint 隔离，防止 create_review_items_batch 内部的
+    # IntegrityError 回滚影响 assign_batch 已完成的工作（如批次完结）
+    if failed_items:
+        nested = session.begin_nested()
+        try:
+            count += review_svc.create_review_items_batch(
+                session, failed_items, ReviewReason.LAYER1_FAILED, priority=10,
+            )
+            nested.commit()
+        except Exception:
+            nested.rollback()
+            logger.exception("孤儿修复（failed）写入失败，跳过")
+
+    if l1_passed_items:
+        nested = session.begin_nested()
+        try:
+            count += review_svc.create_review_items_batch(
+                session, l1_passed_items, ReviewReason.LAYER2_FAILED, priority=10,
+            )
+            nested.commit()
+        except Exception:
+            nested.rollback()
+            logger.exception("孤儿修复（l1_passed）写入失败，跳过")
+
+    if count > 0:
+        logger.warning("自动补建孤儿 ReviewItem: %d 条（共 %d 个异常 ContentItem）", count, len(orphan_items))
+    return count
 
 
 def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Optional[ReviewBatch]:
@@ -51,6 +129,9 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
         .filter(Package.status == "processing")
         .all()
     }
+
+    # 孤儿修复：失败的 ContentItem 无 pending ReviewItem 时自动补建
+    _repair_orphan_failed_items(session)
 
     # Step 1: 查 word_ids（不加锁，DISTINCT 不兼容 FOR UPDATE）
     query_step1 = (
@@ -206,6 +287,12 @@ def update_batch_progress(session: Session, batch_id: int) -> None:
     if len(all_word_ids) == 0 or reviewed_count >= len(all_word_ids):
         batch.status = BatchStatus.COMPLETED.value
         batch.completed_at = datetime.now(UTC)
+        # 释放残留的 pending items 回池中，防止变成僵尸
+        session.execute(
+            update(ReviewItem)
+            .where(ReviewItem.batch_id == batch_id, ReviewItem.status == ReviewStatus.PENDING.value)
+            .values(batch_id=None, assigned_to_id=None)
+        )
 
     session.flush()
 

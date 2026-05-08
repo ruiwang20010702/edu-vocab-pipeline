@@ -200,20 +200,23 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
             pending_sources.append((meaning.id, src_name, src_extra))
 
     if pending_sources:
-        existing_source_pairs: set[tuple[int, str]] = set()
+        # 去重 key = (meaning_id, source_name, textbook_id, word_book_id, unit_id)
+        # 同一义项+同一来源名但不同教材/词书/单元 → 保留为不同记录
+        existing_source_keys: set[tuple] = set()
         unique_meaning_ids = list({mid for mid, _, _ in pending_sources})
         for i in range(0, len(unique_meaning_ids), 900):
             chunk = unique_meaning_ids[i:i + 900]
-            for row in session.query(Source.meaning_id, Source.source_name).filter(
-                Source.meaning_id.in_(chunk),
-            ).all():
-                existing_source_pairs.add((row[0], row[1]))
+            for row in session.query(
+                Source.meaning_id, Source.source_name,
+                Source.textbook_id, Source.word_book_id, Source.unit_id,
+            ).filter(Source.meaning_id.in_(chunk)).all():
+                existing_source_keys.add((row[0], row[1], row[2], row[3], row[4]))
 
         new_sources = []
-        seen_pairs: set[tuple[int, str]] = set()
+        seen_keys: set[tuple] = set()
         for mid, sname, src_extra in pending_sources:
-            pair = (mid, sname)
-            if pair not in existing_source_pairs and pair not in seen_pairs:
+            key = (mid, sname, src_extra.get("textbook_id"), src_extra.get("word_book_id"), src_extra.get("unit_id"))
+            if key not in existing_source_keys and key not in seen_keys:
                 new_sources.append(Source(
                     meaning_id=mid,
                     source_name=sname,
@@ -221,7 +224,7 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
                     word_book_id=src_extra.get("word_book_id"),
                     unit_id=src_extra.get("unit_id"),
                 ))
-                seen_pairs.add(pair)
+                seen_keys.add(key)
         if new_sources:
             session.add_all(new_sources)
 
@@ -478,7 +481,7 @@ def parse_upload(file_content: bytes, filename: str) -> tuple[list[dict[str, Any
 def _get_or_create_package(session: Session, name: str, *, force: bool = False) -> Package:
     pkg = session.query(Package).filter_by(name=name).first()
     if pkg is not None:
-        if pkg.status == "pending":
+        if pkg.status in ("pending", "importing"):
             return pkg
         if not force:
             raise ValueError(f"批次 '{name}' 已在处理中（状态: {pkg.status}），不可重复导入")

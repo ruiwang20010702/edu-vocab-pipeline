@@ -99,12 +99,14 @@ function SyllableEditor({ syllable, wordId, onUpdated }: {
 }
 
 export function WordReviewModal({
-  group, onClose, onApprove, onRegenerate, onSaved, actionLoading, regenResult, resolvedIds,
+  group, onClose, onApprove, onRegenerate, onMarkNotApplicable, onMarkContentNotApplicable, onSaved, actionLoading, regenResult, resolvedIds,
 }: {
   group: WordGroup
   onClose: () => void
   onApprove: (id: number) => void
   onRegenerate: (id: number) => void
+  onMarkNotApplicable: (id: number) => void
+  onMarkContentNotApplicable?: (contentItemId: number) => void
   onSaved: () => void
   actionLoading: number | null
   regenResult: { id: number; passed: boolean; message: string } | null
@@ -132,6 +134,16 @@ export function WordReviewModal({
     return () => controller.abort()
   }, [regenResult, group.word_id])
 
+  // 审核操作（通过/不适用）后刷新 wordDetail
+  useEffect(() => {
+    if (resolvedIds.size === 0) return
+    const controller = new AbortController()
+    api.get<WordDetail>(`/words/${group.word_id}`, { signal: controller.signal })
+      .then(data => setWordDetail(data))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [resolvedIds.size, group.word_id])
+
   const meanings = wordDetail?.meanings ?? []
   const currentMeaning = meanings[meaningIdx] ?? null
 
@@ -142,6 +154,15 @@ export function WordReviewModal({
 
   // 无义项关联的审核项（音标等词级维度）
   const wordLevelItems = group.items.filter(i => i.meaning_id == null)
+
+  // Syllable 实时数据：优先用轮询更新的 reviewItem，回退到一次性 fetch 的 wordDetail
+  const syllableLive = (() => {
+    const ri = wordLevelItems.find(i => i.content_item?.dimension === 'syllable')
+    if (ri?.content_item && wordDetail?.syllable) {
+      return { ...wordDetail.syllable, ...ri.content_item }
+    }
+    return wordDetail?.syllable
+  })()
 
   return (
     <motion.div
@@ -177,11 +198,11 @@ export function WordReviewModal({
                   {wordDetail?.phonetics?.[0] && (
                     <div className="flex items-center gap-3 mt-2">
                       <span className="font-mono text-sm text-blue-600">{wordDetail.phonetics[0].ipa_uk}{wordDetail.phonetics[0].ipa_us ? ` / ${wordDetail.phonetics[0].ipa_us}` : ''}</span>
-                      {(wordDetail.syllable?.content || wordDetail.phonetics[0].syllables) && (
+                      {(syllableLive?.content || wordDetail.phonetics[0].syllables) && (
                         <>
                           <span className="text-xs text-slate-400">·</span>
-                          {wordDetail.syllable?.id ? (
-                            <SyllableEditor syllable={{ id: wordDetail.syllable.id, content: wordDetail.syllable.content }} wordId={group.word_id} onUpdated={setWordDetail} />
+                          {syllableLive?.id ? (
+                            <SyllableEditor syllable={{ id: syllableLive.id, content: syllableLive.content }} wordId={group.word_id} onUpdated={setWordDetail} />
                           ) : (
                             <span className="text-sm text-slate-500">{wordDetail.phonetics[0].syllables}</span>
                           )}
@@ -287,6 +308,13 @@ export function WordReviewModal({
                   regenResult={regenResult}
                   onApprove={onApprove}
                   onRegenerate={onRegenerate}
+                  onMarkNotApplicable={onMarkNotApplicable}
+                  onMarkContentNotApplicable={onMarkContentNotApplicable ? async (id: number) => {
+                    await onMarkContentNotApplicable(id)
+                    api.get<WordDetail>(`/words/${group.word_id}`)
+                      .then(data => setWordDetail(data))
+                      .catch(() => {})
+                  } : undefined}
                   onRegenerated={() => {
                     api.get<WordDetail>(`/words/${group.word_id}`)
                       .then(data => setWordDetail(data))
@@ -309,6 +337,7 @@ export function WordReviewModal({
                       regenResult={regenResult?.id === item.id ? regenResult : null}
                       onApprove={() => onApprove(item.id)}
                       onRegenerate={() => onRegenerate(item.id)}
+                      onMarkNotApplicable={() => onMarkNotApplicable(item.id)}
                     />
                   ))}
                   </AnimatePresence>

@@ -9,11 +9,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.logging_config import log_elapsed
-
-logger = logging.getLogger(__name__)
-
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
 from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS, QC_TERMINAL_STATUSES
+
+logger = logging.getLogger(__name__)
 
 _MNEMONIC_TYPE_LABELS: dict[str, str] = {
     "mnemonic_root_affix": "词根词缀",
@@ -21,6 +20,17 @@ _MNEMONIC_TYPE_LABELS: dict[str, str] = {
     "mnemonic_sound_meaning": "音义联想",
     "mnemonic_exam_app": "考试应用",
 }
+
+# 导出层 POS 规范化映射：去点后若为旧的 art，统一映射到新规范 det
+_POS_NORMALIZE_MAP: dict[str, str] = {"art": "det"}
+
+
+def _normalize_pos_for_export(pos: str | None) -> str:
+    """导出层规范化 POS：去尾部 '.'，并把旧 'art' 映射到新规范 'det'。"""
+    if not pos:
+        return ""
+    stripped = pos.rstrip(".")
+    return _POS_NORMALIZE_MAP.get(stripped, stripped)
 
 
 def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
@@ -37,14 +47,21 @@ def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
     return base
 
 
+_MNEMONIC_FIELD_KEYS: tuple[str, ...] = ("formula", "chant", "exam_sentence", "script")
+
+
 def _parse_mnemonic_fields(content: str) -> dict[str, str]:
-    """从助记 content 中提取 formula/chant/script。"""
+    """从助记 content 中提取 formula/chant/exam_sentence/script。
+
+    旧数据无 exam_sentence 字段时返回空串。
+    """
+    empty = dict.fromkeys(_MNEMONIC_FIELD_KEYS, "")
     if not content:
-        return {"formula": "", "chant": "", "script": ""}
+        return empty
     try:
         data = json.loads(content)
         if isinstance(data, dict) and "formula" in data:
-            return {k: data.get(k, "") for k in ("formula", "chant", "script")}
+            return {k: data.get(k, "") for k in _MNEMONIC_FIELD_KEYS}
     except (json.JSONDecodeError, TypeError):
         pass
     formula = re.search(r"\[核心公式\]\s*([\s\S]*?)(?=\[助记口诀\]|$)", content)
@@ -53,6 +70,7 @@ def _parse_mnemonic_fields(content: str) -> dict[str, str]:
     return {
         "formula": (formula.group(1).strip() if formula else ""),
         "chant": (chant.group(1).strip() if chant else ""),
+        "exam_sentence": "",
         "script": (script.group(1).strip() if script else ""),
     }
 
@@ -185,7 +203,7 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
 
                 first_source = sources[0] if sources else None
                 meaning_data = {
-                    "pos": meaning.pos,
+                    "pos": _normalize_pos_for_export(meaning.pos),
                     "def": meaning.definition,
                     "sources": [s.source_name for s in sources],
                     "textbook_id": first_source.textbook_id if first_source else None,
@@ -295,7 +313,7 @@ class ExportService:
             sources = sources_by_meaning.get(meaning.id, [])
             first_source = sources[0] if sources else None
             meaning_data = {
-                "pos": meaning.pos,
+                "pos": _normalize_pos_for_export(meaning.pos),
                 "def": meaning.definition,
                 "sources": [s.source_name for s in sources],
                 "textbook_id": first_source.textbook_id if first_source else None,
@@ -349,12 +367,19 @@ class ExportService:
         ws = wb.active
         ws.title = "词表导出"
 
-        # 4 种助记类型，每种 3 列（公式/口诀/话术）
-        mnemonic_types = [
-            ("mnemonic_root_affix", "词根词缀"),
-            ("mnemonic_word_in_word", "词中词"),
-            ("mnemonic_sound_meaning", "谐音联想"),
-            ("mnemonic_exam_app", "考试应用"),
+        # 助记类型与各自要导出的列：通用 3 列，考试应用额外含"例句"为 4 列
+        basic_mn_cols: list[tuple[str, str]] = [
+            ("formula", "公式"), ("chant", "口诀"), ("script", "话术"),
+        ]
+        exam_mn_cols: list[tuple[str, str]] = [
+            ("formula", "公式"), ("chant", "口诀"),
+            ("exam_sentence", "例句"), ("script", "话术"),
+        ]
+        mnemonic_types: list[tuple[str, str, list[tuple[str, str]]]] = [
+            ("mnemonic_root_affix", "词根词缀", basic_mn_cols),
+            ("mnemonic_word_in_word", "词中词", basic_mn_cols),
+            ("mnemonic_sound_meaning", "谐音联想", basic_mn_cols),
+            ("mnemonic_exam_app", "考试应用", exam_mn_cols),
         ]
 
         base_headers = [
@@ -363,9 +388,10 @@ class ExportService:
             "教材ID", "词书ID", "单元ID",
             "语块", "语块翻译", "例句", "例句翻译",
         ]
-        mn_headers = []
-        for _, label in mnemonic_types:
-            mn_headers += [f"{label}·公式", f"{label}·口诀", f"{label}·话术"]
+        mn_headers: list[str] = []
+        for _, label, cols in mnemonic_types:
+            for _, suffix in cols:
+                mn_headers.append(f"{label}·{suffix}")
         headers = base_headers + mn_headers
 
         # 表头样式
@@ -423,19 +449,16 @@ class ExportService:
                 for mn in m.get("mnemonics", []):
                     mn_by_type[mn["type"]] = _parse_mnemonic_fields(mn.get("content", ""))
 
-                # 4 种类型各写 3 列，缺失填 false
+                # 各类型按其 columns 写入，缺失填 false
                 col_offset = len(base_headers) + 1
-                for mn_key, _ in mnemonic_types:
+                for mn_key, _, cols in mnemonic_types:
                     fields = mn_by_type.get(mn_key)
-                    if fields:
-                        ws.cell(row=row, column=col_offset, value=fields["formula"])
-                        ws.cell(row=row, column=col_offset + 1, value=fields["chant"])
-                        ws.cell(row=row, column=col_offset + 2, value=fields["script"])
-                    else:
-                        ws.cell(row=row, column=col_offset, value="false")
-                        ws.cell(row=row, column=col_offset + 1, value="false")
-                        ws.cell(row=row, column=col_offset + 2, value="false")
-                    col_offset += 3
+                    for i, (field_name, _) in enumerate(cols):
+                        ws.cell(
+                            row=row, column=col_offset + i,
+                            value=(fields[field_name] if fields else "false"),
+                        )
+                    col_offset += len(cols)
 
                 for c in range(1, len(headers) + 1):
                     ws.cell(row=row, column=c).alignment = wrap_align
@@ -444,7 +467,12 @@ class ExportService:
 
         # 列宽
         base_widths = [15, 22, 22, 40, 40, 18, 8, 30, 24, 12, 12, 12, 28, 28, 42, 42]
-        mn_widths = [22, 22, 30] * 4
+        # 通用助记列宽 = [公式 22, 口诀 22, 话术 30]；考试应用 = [22, 22, 例句 35, 30]
+        basic_mn_widths: list[int] = [22, 22, 30]
+        exam_mn_widths: list[int] = [22, 22, 35, 30]
+        mn_widths: list[int] = []
+        for mn_key, _, _ in mnemonic_types:
+            mn_widths += exam_mn_widths if mn_key == "mnemonic_exam_app" else basic_mn_widths
         for i, w in enumerate(base_widths + mn_widths, 1):
             ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
 

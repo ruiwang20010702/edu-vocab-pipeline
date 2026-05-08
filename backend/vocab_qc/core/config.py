@@ -37,6 +37,21 @@ class Settings(BaseSettings):
     ai_circuit_breaker_threshold: int = 15  # 连续失败次数触发熔断
     ai_circuit_breaker_recovery: int = 30   # 熔断恢复冷却时间（秒）
 
+    # 任务队列（提交/轮询解耦）
+    ai_use_task_queue: bool = False         # 开关：True=新队列模式，False=原轮询模式
+    ai_submit_batch_size: int = 20          # 每批提交数（匹配 Gateway 限制）
+    ai_submit_stagger: float = 0.5          # 批次间提交间隔（秒），防 429
+    ai_poll_pool_size: int = 50             # 轮询 worker 数
+    ai_poll_scan_interval: float = 2.0      # 轮询扫描间隔（秒）
+
+    # 回调模式（替代轮询，需 ai_use_task_queue=True）
+    ai_callback_mode: bool = False              # 开关：True=回调主驱+轮询兜底
+    ai_callback_url: str = ""                   # Gateway 回调地址
+    ai_callback_allowed_ips: list[str] = []     # 回调来源 IP 白名单
+    ai_callback_grace_period: float = 300.0     # 宽限期（秒），超时后降级为轮询
+    ai_poll_callback_scan_interval: float = 30.0   # 回调模式下安全网扫描间隔（秒）
+    ai_poll_stale_threshold_minutes: float = 10.0  # 回调模式下仅轮询提交超过此时间的任务
+
     production_batch_size: int = 50  # 大批量生产时每批处理的词数（fallback）
     production_max_items_per_batch: int = 500  # 智能分批：每批 ContentItem 数上限
     package_processing_timeout_hours: int = 6  # Package processing 状态超时（小时）
@@ -134,6 +149,14 @@ def validate_production_config() -> None:
             f"ai_task_timeout({settings.ai_task_timeout})"
             f" 应 >= ai_gateway_poll_max_wait({settings.ai_gateway_poll_max_wait})"
         )
+
+    if settings.ai_callback_mode:
+        if not settings.ai_callback_url:
+            errors.append("VOCAB_QC_AI_CALLBACK_MODE=True 时 VOCAB_QC_AI_CALLBACK_URL 不能为空")
+        if not settings.ai_callback_allowed_ips:
+            logger.warning("VOCAB_QC_AI_CALLBACK_ALLOWED_IPS 为空，回调端点不校验来源 IP（建议配置）")
+        if not settings.ai_use_task_queue:
+            errors.append("VOCAB_QC_AI_CALLBACK_MODE=True 需要 VOCAB_QC_AI_USE_TASK_QUEUE=True")
 
     if not settings.smtp_host:
         errors.append("VOCAB_QC_SMTP_HOST 未配置，无法发送验证码")

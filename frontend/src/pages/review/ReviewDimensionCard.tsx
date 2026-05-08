@@ -18,12 +18,18 @@ function MnemonicEditFields({
   formula, chant, script,
   onFormulaChange, onChantChange, onScriptChange,
   scriptRows = 3,
+  examSentence,
+  onExamSentenceChange,
+  showExamSentence = false,
 }: {
   formula: string; chant: string; script: string
   onFormulaChange: (v: string) => void
   onChantChange: (v: string) => void
   onScriptChange: (v: string) => void
   scriptRows?: number
+  examSentence?: string
+  onExamSentenceChange?: (v: string) => void
+  showExamSentence?: boolean
 }) {
   return (
     <>
@@ -37,6 +43,18 @@ function MnemonicEditFields({
         <textarea value={chant} onChange={e => onChantChange(e.target.value)} rows={2}
           className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
       </div>
+      {showExamSentence && (
+        <div>
+          <label className="text-[10px] font-bold text-slate-400 uppercase">实战例句（英文，8-15 词）</label>
+          <textarea
+            value={examSentence ?? ''}
+            onChange={e => onExamSentenceChange?.(e.target.value)}
+            rows={2}
+            placeholder="纯英文，需含目标词"
+            className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400"
+          />
+        </div>
+      )}
       <div>
         <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
         <textarea value={script} onChange={e => onScriptChange(e.target.value)} rows={scriptRows}
@@ -50,7 +68,7 @@ function MnemonicEditFields({
 
 export function ReviewDimensionCard({
   item, isLoading, isResolved, regenResult,
-  onApprove, onRegenerate,
+  onApprove, onRegenerate, onMarkNotApplicable,
   embedded = false,
 }: {
   item: ReviewItem
@@ -59,6 +77,7 @@ export function ReviewDimensionCard({
   regenResult: { passed: boolean; message: string } | null
   onApprove: () => void
   onRegenerate: () => void
+  onMarkNotApplicable?: () => void
   embedded?: boolean
 }) {
   const dim = item.content_item?.dimension ?? ''
@@ -67,6 +86,8 @@ export function ReviewDimensionCard({
   const atLimit = retryCount >= 3
   const content = item.content_item?.content ?? ''
   const issueMsg = item.issues?.[0]?.message ?? ''
+
+  const isMnemonic = dim.startsWith('mnemonic_')
 
   const actionButtons = (
     <div className="flex items-center gap-2 pt-1">
@@ -78,6 +99,13 @@ export function ReviewDimensionCard({
           className="py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 flex items-center gap-1">
           {isLoading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
           AI 修复
+        </button>
+      )}
+      {isMnemonic && onMarkNotApplicable && (
+        <button onClick={onMarkNotApplicable} disabled={isLoading}
+          className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 flex items-center gap-1">
+          <Ban size={11} />
+          不适用
         </button>
       )}
       <span className={`text-[10px] font-bold ml-auto ${atLimit ? 'text-rose-500' : 'text-slate-400'}`}>{retryCount}/3</span>
@@ -170,6 +198,16 @@ export function ReviewDimensionCard({
         <div className="space-y-2 text-xs">
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span><span className="text-slate-700">{parseMnemonicJson(content)!.formula}</span></div>
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span><span className="text-slate-700">{parseMnemonicJson(content)!.chant}</span></div>
+          {dim === 'mnemonic_exam_app' && (
+            <div className="flex items-start gap-2">
+              <span className="shrink-0 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-bold text-[10px]">例句</span>
+              {parseMnemonicJson(content)!.exam_sentence ? (
+                <span className="text-slate-700">{parseMnemonicJson(content)!.exam_sentence}</span>
+              ) : (
+                <span className="text-slate-400 italic">（旧数据未生成例句）</span>
+              )}
+            </div>
+          )}
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span><span className="text-slate-500 line-clamp-2">{parseMnemonicJson(content)!.script}</span></div>
         </div>
       ) : (
@@ -204,10 +242,13 @@ export function ContentDimensionCard({
     startDirectEdit, cancelDirectEdit, setDirectEditContent, setDirectEditContentCn, handleDirectEditSave,
   } = useReviewEdit()
 
-  const status = content.qc_status ?? 'pending'
+  // 合并实时数据：reviewItem.content_item 随 items 轮询实时更新，
+  // content 仅 Modal 打开时一次性 fetch，后台修复后可能过时
+  const live = reviewItem?.content_item ? { ...content, ...reviewItem.content_item } : content
+  const status = live.qc_status ?? 'pending'
   const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending
   const hasIssue = !!reviewItem
-  const isDirectEditing = directEditId === content.id
+  const isDirectEditing = directEditId === live.id
 
   return (
     <div className={`rounded-2xl border p-4 space-y-2 ${hasIssue ? 'bg-white border-rose-200' : 'bg-slate-50 border-slate-100'}`}>
@@ -240,12 +281,12 @@ export function ContentDimensionCard({
             className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400" />
           {directEditMsg && <QcResultBanner passed={directEditMsg.ok} message={directEditMsg.text} issues={directEditMsg.issues} />}
           <div className="flex items-center gap-2">
-            <button onClick={() => handleDirectEditSave(content.id, { content: directEditContent, content_cn: directEditContentCn || undefined })} disabled={directEditSaving || !directEditContent.trim()}
+            <button onClick={() => handleDirectEditSave(live.id, { content: directEditContent, content_cn: directEditContentCn || undefined })} disabled={directEditSaving || !directEditContent.trim()}
               className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
               {directEditSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存并质检
             </button>
             {directEditMsg && !directEditMsg.ok && (
-              <button onClick={() => handleDirectEditSave(content.id, { content: directEditContent, content_cn: directEditContentCn || undefined, force_approve: true })} disabled={directEditSaving}
+              <button onClick={() => handleDirectEditSave(live.id, { content: directEditContent, content_cn: directEditContentCn || undefined, force_approve: true })} disabled={directEditSaving}
                 className="py-1.5 px-3 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">
                 <CheckCircle2 size={12} /> 强制通过
               </button>
@@ -253,14 +294,14 @@ export function ContentDimensionCard({
             <button onClick={cancelDirectEdit} className="px-3 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold">取消</button>
           </div>
         </div>
-      ) : content.content && (
+      ) : live.content && (
         <div
           className="space-y-1 rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
-          onDoubleClick={() => startDirectEdit(content)}
+          onDoubleClick={() => startDirectEdit(live)}
           title="双击编辑"
         >
-          <p className="text-sm text-slate-800">{content.content}</p>
-          {content.content_cn && <p className="text-xs text-slate-500">{content.content_cn}</p>}
+          <p className="text-sm text-slate-800">{live.content}</p>
+          {live.content_cn && <p className="text-xs text-slate-500">{live.content_cn}</p>}
         </div>
       )}
 
@@ -283,10 +324,11 @@ export function ContentDimensionCard({
 /* ===== 助记直接编辑表单 ===== */
 
 function MnemonicDirectEditForm({
-  mnId, initialContent, directEditSaving, directEditMsg,
+  mnId, dim, initialContent, directEditSaving, directEditMsg,
   onDirectEditSave, onCancelDirectEdit,
 }: {
   mnId: number
+  dim: string
   initialContent: string
   directEditSaving: boolean
   directEditMsg: { ok: boolean; text: string; issues?: QcIssue[] } | null
@@ -297,9 +339,11 @@ function MnemonicDirectEditForm({
   const [formula, setFormula] = useState(parsed?.formula ?? '')
   const [chant, setChant] = useState(parsed?.chant ?? '')
   const [script, setScript] = useState(parsed?.script ?? '')
+  const [examSentence, setExamSentence] = useState(parsed?.exam_sentence ?? '')
+  const isExamApp = dim === 'mnemonic_exam_app'
 
   const handleSave = (forceApprove?: boolean) => {
-    const content = buildMnemonicJson(formula, chant, script)
+    const content = buildMnemonicJson(formula, chant, script, isExamApp ? examSentence : undefined)
     onDirectEditSave(mnId, { content, force_approve: forceApprove })
   }
 
@@ -308,6 +352,9 @@ function MnemonicDirectEditForm({
       <MnemonicEditFields
         formula={formula} chant={chant} script={script}
         onFormulaChange={setFormula} onChantChange={setChant} onScriptChange={setScript}
+        showExamSentence={isExamApp}
+        examSentence={examSentence}
+        onExamSentenceChange={setExamSentence}
       />
       {directEditMsg && <QcResultBanner passed={directEditMsg.ok} message={directEditMsg.text} issues={directEditMsg.issues} />}
       <div className="flex items-center gap-2">
@@ -331,7 +378,7 @@ function MnemonicDirectEditForm({
 
 export function MnemonicReviewSection({
   mnemonics, reviewItems, actionLoading, resolvedIds, regenResult,
-  onApprove, onRegenerate, onRegenerated,
+  onApprove, onRegenerate, onMarkNotApplicable, onMarkContentNotApplicable, onRegenerated,
 }: {
   mnemonics: any[]
   reviewItems: ReviewItem[]
@@ -340,6 +387,8 @@ export function MnemonicReviewSection({
   regenResult: { id: number; passed: boolean; message: string } | null
   onApprove: (id: number) => void
   onRegenerate: (id: number) => void
+  onMarkNotApplicable: (id: number) => void
+  onMarkContentNotApplicable?: (contentItemId: number) => void
   onRegenerated: () => void
 }) {
   const {
@@ -361,9 +410,14 @@ export function MnemonicReviewSection({
     return m
   }, [reviewItems])
 
-  // 分类：有内容的（通过/异常）和 rejected 的
+  // 分类：用合并后的实时数据判断 rejected（避免 stale wordDetail 误分类）
   const rejectedMns = ALL_MNEMONIC_DIMS
-    .map(d => mnMap.get(d))
+    .map(d => {
+      const mn = mnMap.get(d)
+      if (!mn) return null
+      const ri = reviewMap.get(d)
+      return ri?.content_item ? { ...mn, ...ri.content_item } : mn
+    })
     .filter(mn => mn && (mn.qc_status === 'rejected' || !mn.content))
 
   return (
@@ -377,14 +431,14 @@ export function MnemonicReviewSection({
         const mn = mnMap.get(dim)
         if (!mn) return null
         const typeLabel = DIMENSION_LABELS[dim] ?? dim
-        const isRejected = mn.qc_status === 'rejected' || !mn.content
         const reviewItem = reviewMap.get(dim)
+        const live = reviewItem?.content_item ? { ...mn, ...reviewItem.content_item } : mn
+        const isRejected = live.qc_status === 'rejected' || !live.content
 
         if (isRejected) return null // 下面统一渲染 rejected
 
-        // 有内容的助记
-        const parsed = parseMnemonicJson(mn.content)
-        const status = mn.qc_status ?? 'pending'
+        const parsed = parseMnemonicJson(live.content)
+        const status = live.qc_status ?? 'pending'
         const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending
         const hasIssue = !!reviewItem
 
@@ -407,10 +461,11 @@ export function MnemonicReviewSection({
             )}
 
             {/* 助记内容 — 双击编辑 */}
-            {directEditId === mn.id ? (
+            {directEditId === live.id ? (
               <MnemonicDirectEditForm
-                mnId={mn.id}
-                initialContent={mn.content}
+                mnId={live.id}
+                dim={dim}
+                initialContent={live.content}
                 directEditSaving={directEditSaving}
                 directEditMsg={directEditMsg}
                 onDirectEditSave={handleDirectEditSave}
@@ -419,7 +474,7 @@ export function MnemonicReviewSection({
             ) : parsed ? (
               <div
                 className="space-y-2 text-xs rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
-                onDoubleClick={() => startDirectEdit(mn)}
+                onDoubleClick={() => startDirectEdit(live)}
                 title="双击编辑"
               >
                 {parsed.formula && (
@@ -434,6 +489,16 @@ export function MnemonicReviewSection({
                     <span className="text-slate-700">{parsed.chant}</span>
                   </div>
                 )}
+                {dim === 'mnemonic_exam_app' && (
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-bold text-[10px]">例句</span>
+                    {parsed.exam_sentence ? (
+                      <span className="text-slate-700">{parsed.exam_sentence}</span>
+                    ) : (
+                      <span className="text-slate-400 italic">（旧数据未生成例句）</span>
+                    )}
+                  </div>
+                )}
                 {parsed.script && (
                   <div className="flex items-start gap-2">
                     <span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span>
@@ -444,9 +509,9 @@ export function MnemonicReviewSection({
             ) : (
               <p
                 className="text-xs text-slate-500 italic rounded-lg px-1 -mx-1 cursor-text hover:bg-blue-50/50 transition-colors"
-                onDoubleClick={() => startDirectEdit(mn)}
+                onDoubleClick={() => startDirectEdit(live)}
                 title="双击编辑"
-              >{mn.content || '暂无内容'}</p>
+              >{live.content || '暂无内容'}</p>
             )}
 
             {/* 有审核项 → 审核按钮 */}
@@ -458,8 +523,23 @@ export function MnemonicReviewSection({
                 regenResult={regenResult?.id === reviewItem.id ? regenResult : null}
                 onApprove={() => onApprove(reviewItem.id)}
                 onRegenerate={() => onRegenerate(reviewItem.id)}
+                onMarkNotApplicable={() => onMarkNotApplicable(reviewItem.id)}
                 embedded
               />
+            )}
+
+            {/* 已通过且无审核项 → 也提供不适用按钮 */}
+            {!reviewItem && status === 'approved' && onMarkContentNotApplicable && (
+              <div className="flex pt-1">
+                <button
+                  onClick={() => onMarkContentNotApplicable(mn.id)}
+                  disabled={actionLoading !== null}
+                  className="py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 flex items-center gap-1"
+                >
+                  <Ban size={11} />
+                  不适用
+                </button>
+              </div>
             )}
           </div>
         )
@@ -483,6 +563,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
   const [editFormula, setEditFormula] = useState('')
   const [editChant, setEditChant] = useState('')
   const [editScript, setEditScript] = useState('')
+  const [editExamSentence, setEditExamSentence] = useState('')
   const [saving, setSaving] = useState(false)
 
   // setTimeout 清理
@@ -518,10 +599,12 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
   }
 
   const startEdit = (mn: any) => {
+    const parsed = parseMnemonicJson(mn.content)
     setEditingId(mn.id)
-    setEditFormula('')
-    setEditChant('')
-    setEditScript('')
+    setEditFormula(parsed?.formula ?? '')
+    setEditChant(parsed?.chant ?? '')
+    setEditScript(parsed?.script ?? '')
+    setEditExamSentence(parsed?.exam_sentence ?? '')
     setRegenMsg(null)
   }
 
@@ -529,7 +612,12 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
     setSaving(true)
     setRegenMsg(null)
     try {
-      const content = JSON.stringify({ formula: editFormula, chant: editChant, script: editScript })
+      const isExamApp = mn.dimension === 'mnemonic_exam_app'
+      const payload: Record<string, string> = {
+        formula: editFormula, chant: editChant, script: editScript,
+      }
+      if (isExamApp) payload.exam_sentence = editExamSentence
+      const content = JSON.stringify(payload)
       const res = await api.post<{ success: boolean; qc_passed: boolean; message: string; new_issues?: QcIssue[] }>(`/words/content-items/${mn.id}/manual-edit`, { content, force_approve: forceApprove })
       setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message, issues: res.new_issues })
       if (res.qc_passed) {
@@ -563,6 +651,9 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
               <MnemonicEditFields
                 formula={editFormula} chant={editChant} script={editScript}
                 onFormulaChange={setEditFormula} onChantChange={setEditChant} onScriptChange={setEditScript}
+                showExamSentence={mn.dimension === 'mnemonic_exam_app'}
+                examSentence={editExamSentence}
+                onExamSentenceChange={setEditExamSentence}
               />
               {regenMsg && regenMsg.id === mn.id && <QcResultBanner passed={regenMsg.ok} message={regenMsg.msg} issues={regenMsg.issues} />}
               <div className="flex items-center gap-2">

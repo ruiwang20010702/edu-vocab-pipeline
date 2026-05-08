@@ -13,14 +13,17 @@ from vocab_qc.core.generators.morpheme_kb import format_kb_for_prompt
 class _MnemonicBase(ContentGenerator):
     """助记生成器基类，统一处理 valid/false 逻辑."""
 
+    # 子类可声明额外 content JSON 字段（例如 mnemonic_exam_app 的 exam_sentence）
+    extra_content_keys: tuple[str, ...] = ()
+
     def _build_user_prompt(self, word: str, pos: Optional[str], meaning: Optional[str]) -> str:
         word_s = sanitize_prompt_input(word)
         pos_s = sanitize_prompt_input(pos or "未知")
         meaning_s = sanitize_prompt_input(meaning or "未知")
         return f"Word: {word_s} | POS: {pos_s} | Meaning: {meaning_s}"
 
-    @staticmethod
-    def _process_result(result: dict | None) -> dict:
+    @classmethod
+    def _process_result(cls, result: dict | None) -> dict:
         if not result:
             return {"valid": False, "content": None, "content_cn": None}
         raw_valid = result.get("valid")
@@ -31,10 +34,10 @@ class _MnemonicBase(ContentGenerator):
         formula = result.get("formula", "")
         chant = result.get("chant", "")
         script = result.get("script", "")
-        content = json.dumps(
-            {"formula": formula, "chant": chant, "script": script},
-            ensure_ascii=False,
-        )
+        content_dict: dict[str, str] = {"formula": formula, "chant": chant, "script": script}
+        extras: dict[str, str] = {key: result.get(key, "") for key in cls.extra_content_keys}
+        content_dict.update(extras)
+        content = json.dumps(content_dict, ensure_ascii=False)
         return {
             "valid": True,
             "content": content,
@@ -42,6 +45,7 @@ class _MnemonicBase(ContentGenerator):
             "formula": formula,
             "chant": chant,
             "script": script,
+            **extras,
         }
 
     def generate(
@@ -120,3 +124,4 @@ class ExamAppMnemonicGenerator(_MnemonicBase):
 
     dimension = "mnemonic_exam_app"
     prompt_filename = "助记-考试应用.md"
+    extra_content_keys = ("exam_sentence",)

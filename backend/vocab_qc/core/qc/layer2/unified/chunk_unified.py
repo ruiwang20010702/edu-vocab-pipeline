@@ -22,6 +22,30 @@ class UnifiedChunkChecker:
     dimension = "chunk"
     rule_ids = ["C3"]
 
+    def build_prompts(
+        self, content: str, word: str, meaning: Optional[str] = None, **kwargs,
+    ) -> tuple[str, str, bool]:
+        """返回 (system_prompt, user_prompt, use_json_format)，不发 AI 请求."""
+        content_cn = kwargs.get("content_cn", "")
+        pos = kwargs.get("pos", "")
+        user_prompt = (
+            f"Word: {word} | POS: {pos or '未知'} | Meaning: {meaning or '无'} "
+            f"| Chunk: {content} | Chinese: {content_cn or '无'}"
+        )
+        full_prompt = load_full_prompt("chunk")
+        if full_prompt:
+            return full_prompt + TEXT_OUTPUT_INSTRUCTION, user_prompt, False
+        return UNIFIED_CHUNK_SYSTEM, user_prompt, True
+
+    def parse_ai_response(self, response: dict, use_json_format: bool) -> list[RuleResult]:
+        """解析 AI 返回，还原 list[RuleResult]."""
+        if not use_json_format:
+            return parse_text_result(response.get("raw_text", ""), self.rule_ids)
+        return [
+            RuleResult(rule_id=item["rule_id"], passed=item.get("passed", False), detail=item.get("detail"))
+            for item in response.get("results", [])
+        ]
+
     async def check(
         self, client: AiClient, content: str, word: str,
         meaning: Optional[str] = None, **kwargs,

@@ -251,3 +251,43 @@ def manual_edit_content_item(
         "new_content": item.content,
         "new_issues": new_issues,
     }
+
+
+@router.post("/content-items/{content_item_id}/mark-not-applicable")
+def mark_content_item_not_applicable(
+    content_item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "reviewer")),
+):
+    """直接将已通过的助记 ContentItem 标记为不适用（无需 review_item）。"""
+    from vocab_qc.core.services.audit_service import log_action
+
+    item = db.query(ContentItem).filter_by(id=content_item_id).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="内容项不存在")
+
+    if not item.dimension.startswith("mnemonic_"):
+        raise HTTPException(status_code=400, detail="仅助记维度支持标记不适用")
+
+    if item.qc_status != QcStatus.APPROVED.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"仅已通过的助记项可标记不适用（当前状态：{item.qc_status}）",
+        )
+
+    old_status = item.qc_status
+    item.content = ""
+    item.qc_status = QcStatus.REJECTED.value
+
+    log_action(
+        db,
+        entity_type="content_item",
+        entity_id=item.id,
+        action="mark_not_applicable",
+        actor=current_user.name,
+        old_value={"qc_status": old_status},
+        new_value={"qc_status": "rejected"},
+    )
+
+    db.commit()
+    return {"success": True, "message": "已标记为不适用"}

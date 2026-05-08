@@ -8,6 +8,7 @@ from vocab_qc.core.qc.layer1.mnemonic_rules import (
     N3FormulaSymbol,
     N4FormulaLength,
     N5TeacherScriptLength,
+    N6ExamSentence,
     count_logical_chars,
 )
 
@@ -15,6 +16,19 @@ from vocab_qc.core.qc.layer1.mnemonic_rules import (
 def _mj(formula: str = "a + b", chant: str = "记住", script: str = "这" * 500) -> str:
     """构造助记 JSON 字符串."""
     return json.dumps({"formula": formula, "chant": chant, "script": script}, ensure_ascii=False)
+
+
+def _mj_exam(
+    formula: str = "consistent(adj.) + with = 一致",
+    chant: str = "consistent后锁with",
+    exam_sentence: str = "His words are consistent with his actions in every situation.",
+    script: str = "字" * 220,
+) -> str:
+    """构造 mnemonic_exam_app 助记 JSON（含 exam_sentence 字段）."""
+    return json.dumps(
+        {"formula": formula, "chant": chant, "exam_sentence": exam_sentence, "script": script},
+        ensure_ascii=False,
+    )
 
 
 VALID_MNEMONIC = _mj(formula="kind = k + ind", chant="kind里藏着king", script="这" * 500)
@@ -216,3 +230,210 @@ class TestCountLogicalChars:
     def test_mixed_with_numbers(self):
         # "hello123" → 英文1（hello算英文词，123不计）
         assert count_logical_chars("hello123") == 1
+
+
+class TestN5ExamAppBounds:
+    """N5 在 mnemonic_exam_app 维度的特殊上下限：200-250."""
+
+    def setup_method(self):
+        self.checker = N5TeacherScriptLength()
+
+    def test_exam_app_lower_bound(self):
+        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_exam_app")
+        assert result.passed
+
+    def test_exam_app_upper_bound(self):
+        result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_exam_app")
+        assert result.passed
+
+    def test_exam_app_below_lower_fails(self):
+        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_exam_app")
+        assert not result.passed
+        assert "下限" in result.detail
+
+    def test_exam_app_above_upper_fails(self):
+        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_exam_app")
+        assert not result.passed
+        assert "上限" in result.detail
+
+
+class TestN5SoundMeaningBounds:
+    """N5 在 mnemonic_sound_meaning 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+
+    def setup_method(self):
+        self.checker = N5TeacherScriptLength()
+
+    def test_sound_meaning_lower_bound(self):
+        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_sound_meaning")
+        assert result.passed
+
+    def test_sound_meaning_upper_bound(self):
+        result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_sound_meaning")
+        assert result.passed
+
+    def test_sound_meaning_below_lower_fails(self):
+        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_sound_meaning")
+        assert not result.passed
+        assert "下限" in result.detail
+
+    def test_sound_meaning_above_upper_fails(self):
+        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_sound_meaning")
+        assert not result.passed
+        assert "上限" in result.detail
+
+
+class TestN5RootAffixBounds:
+    """N5 在 mnemonic_root_affix 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+
+    def setup_method(self):
+        self.checker = N5TeacherScriptLength()
+
+    def test_root_affix_lower_bound(self):
+        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_root_affix")
+        assert result.passed
+
+    def test_root_affix_upper_bound(self):
+        result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_root_affix")
+        assert result.passed
+
+    def test_root_affix_below_lower_fails(self):
+        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_root_affix")
+        assert not result.passed
+        assert "下限" in result.detail
+
+    def test_root_affix_above_upper_fails(self):
+        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_root_affix")
+        assert not result.passed
+        assert "上限" in result.detail
+
+
+class TestN5WordInWordBounds:
+    """N5 在 mnemonic_word_in_word 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+
+    def setup_method(self):
+        self.checker = N5TeacherScriptLength()
+
+    def test_word_in_word_lower_bound(self):
+        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_word_in_word")
+        assert result.passed
+
+    def test_word_in_word_upper_bound(self):
+        result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_word_in_word")
+        assert result.passed
+
+    def test_word_in_word_below_lower_fails(self):
+        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_word_in_word")
+        assert not result.passed
+        assert "下限" in result.detail
+
+    def test_word_in_word_above_upper_fails(self):
+        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_word_in_word")
+        assert not result.passed
+        assert "上限" in result.detail
+
+
+class TestN6ExamSentence:
+    def setup_method(self):
+        self.checker = N6ExamSentence()
+
+    def test_other_dimension_passes(self):
+        # 非 mnemonic_exam_app 维度直接 pass，无论 exam_sentence 是否存在
+        result = self.checker.check(_mj(), "kind", dimension="mnemonic_root_affix")
+        assert result.passed
+        # 即使无 dimension 参数也 pass（默认非 exam_app）
+        result = self.checker.check(_mj(), "kind")
+        assert result.passed
+
+    def test_valid_exam_sentence(self):
+        result = self.checker.check(_mj_exam(), "consistent", dimension="mnemonic_exam_app")
+        assert result.passed
+
+    def test_empty_sentence_fails(self):
+        result = self.checker.check(_mj_exam(exam_sentence=""), "consistent", dimension="mnemonic_exam_app")
+        assert not result.passed
+        assert "为空" in result.detail
+
+    def test_missing_field_fails(self):
+        # JSON 不含 exam_sentence 键 → 视为空
+        bad = json.dumps({"formula": "a+b", "chant": "x", "script": "y" * 220}, ensure_ascii=False)
+        result = self.checker.check(bad, "consistent", dimension="mnemonic_exam_app")
+        assert not result.passed
+
+    def test_chinese_in_sentence_fails(self):
+        result = self.checker.check(
+            _mj_exam(exam_sentence="His 言行 are consistent with his actions every day."),
+            "consistent", dimension="mnemonic_exam_app",
+        )
+        assert not result.passed
+        assert "中文" in result.detail
+
+    def test_too_few_words_fails(self):
+        # 7 词 < 下限 8
+        result = self.checker.check(
+            _mj_exam(exam_sentence="He is consistent with his actions every day."),
+            "consistent", dimension="mnemonic_exam_app",
+        )
+        # 上面恰好 9 词，需要构造 7 词的
+        result = self.checker.check(
+            _mj_exam(exam_sentence="He is consistent with his actions today."),
+            "consistent", dimension="mnemonic_exam_app",
+        )
+        assert not result.passed
+        assert "词数" in result.detail
+
+    def test_too_many_words_fails(self):
+        # 16 词 > 上限 15
+        sentence = " ".join(["word"] * 15) + " consistent."
+        result = self.checker.check(
+            _mj_exam(exam_sentence=sentence), "consistent", dimension="mnemonic_exam_app",
+        )
+        assert not result.passed
+        assert "词数" in result.detail
+
+    def test_target_word_missing_fails(self):
+        # 例句不含目标词
+        result = self.checker.check(
+            _mj_exam(exam_sentence="The cat is sitting on the mat by the door."),
+            "consistent", dimension="mnemonic_exam_app",
+        )
+        assert not result.passed
+        assert "不含目标词" in result.detail
+
+    def test_target_word_inflection_plural(self):
+        # 复数形式 cats
+        result = self.checker.check(
+            _mj_exam(exam_sentence="The cats are sitting on the mat by the door."),
+            "cat", dimension="mnemonic_exam_app",
+        )
+        assert result.passed
+
+    def test_target_word_inflection_past_tense(self):
+        # 过去式 studied (study)
+        result = self.checker.check(
+            _mj_exam(exam_sentence="She studied hard for the exam yesterday afternoon and night."),
+            "study", dimension="mnemonic_exam_app",
+        )
+        assert result.passed
+
+    def test_target_word_inflection_ing(self):
+        # 现在分词 making (make)
+        result = self.checker.check(
+            _mj_exam(exam_sentence="He is making a plan for the upcoming exam this week."),
+            "make", dimension="mnemonic_exam_app",
+        )
+        assert result.passed
+
+    def test_target_word_case_insensitive(self):
+        result = self.checker.check(
+            _mj_exam(exam_sentence="CONSISTENT with his actions, he completed the task on time."),
+            "consistent", dimension="mnemonic_exam_app",
+        )
+        assert result.passed
+
+    def test_invalid_json_fails(self):
+        result = self.checker.check("not json", "x", dimension="mnemonic_exam_app")
+        assert not result.passed
+
+    def test_empty_content_fails(self):
+        result = self.checker.check("", "x", dimension="mnemonic_exam_app")
+        assert not result.passed

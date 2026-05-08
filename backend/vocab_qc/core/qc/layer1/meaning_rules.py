@@ -6,7 +6,19 @@ from typing import Optional
 from vocab_qc.core.qc.base import RuleResult
 from vocab_qc.core.qc.registry import RuleRegistry, _RuleCheckerBase
 
-VALID_POS_TAGS = {"n.", "v.", "adj.", "adv.", "prep.", "conj.", "pron.", "num.", "art.", "int."}
+# 旧带点格式（向后兼容，保留以避免历史数据被打回）
+_LEGACY_POS_TAGS = frozenset({
+    "n.", "v.", "adj.", "adv.", "prep.", "conj.", "pron.", "num.", "art.", "int.",
+})
+
+# 新规范不带点格式
+_NEW_POS_TAGS = frozenset({
+    "n", "v", "adj", "adv", "prep", "pron", "num",
+    "mod", "aux", "conj", "int", "abbr", "det",
+    "phr", "n phr", "a phr",
+})
+
+VALID_POS_TAGS = _LEGACY_POS_TAGS | _NEW_POS_TAGS
 
 
 @RuleRegistry.register_layer1
@@ -39,8 +51,11 @@ class M4PosNewlineSeparation(_RuleCheckerBase):
             return RuleResult(rule_id=self.rule_id, passed=True)
 
         # 用正则找出所有词性标签出现的位置
-        pos_escaped = "|".join(re.escape(p) for p in VALID_POS_TAGS)
-        pos_re = re.compile(r"(?:^|\s)(" + pos_escaped + r")")
+        # 按长度降序排列，确保长 token (如 "n phr") 优先匹配，避免被短 token (如 "n") 抢先
+        # 后行断言 (?=\s|$) 防止单字符 POS 误匹配普通单词首字母（如 "apple" 的 "a"）
+        sorted_tags = sorted(VALID_POS_TAGS, key=len, reverse=True)
+        pos_escaped = "|".join(re.escape(p) for p in sorted_tags)
+        pos_re = re.compile(r"(?:^|\s)(" + pos_escaped + r")(?=\s|$)")
 
         lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
 

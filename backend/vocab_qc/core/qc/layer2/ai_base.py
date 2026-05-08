@@ -189,6 +189,21 @@ class AiClient:
                 response_body=content[:500], detail=str(e),
             ) from e
 
+    def make_submit_body(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        use_json_format: bool = True,
+    ) -> dict[str, Any]:
+        """构造 Gateway 请求 body（不发请求），用于任务队列持久化."""
+        _url, _headers, body = build_ai_request(
+            self.base_url, self.api_key, self.model,
+            system_prompt, user_prompt, temperature=0,
+            use_json_format=use_json_format,
+        )
+        return body
+
     def drain_usage_records(self) -> list[AiUsageInfo]:
         """取出并清空累积的用量记录。"""
         records = self._usage_records[:]

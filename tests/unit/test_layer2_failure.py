@@ -148,7 +148,7 @@ class TestLayer2Failure:
         assert total == 1
 
     def test_layer2_ai_exception_failsafe_without_failed_ids(self, db_session):
-        """无 results 且不在 failed_item_ids 中时，保持原状态（兼容旧行为）。"""
+        """无 results 且不在 failed_item_ids 中时，兜底标记为 LAYER2_FAILED。"""
         word = Word(word="dog")
         db_session.add(word)
         db_session.flush()
@@ -187,8 +187,8 @@ class TestLayer2Failure:
         db_session.flush()
 
         assert passed == 0
-        assert failed == 0
-        assert item.qc_status == QcStatus.LAYER1_PASSED.value  # 保持原状态
+        assert failed == 1
+        assert item.qc_status == QcStatus.LAYER2_FAILED.value  # 兜底标记为失败
 
     def test_layer2_ai_exception_marks_failed(self, db_session):
         """AI 调用失败且 item 在 failed_item_ids 中时，应标记为 LAYER2_FAILED。"""

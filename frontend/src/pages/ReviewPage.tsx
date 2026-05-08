@@ -6,13 +6,15 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useToast } from '../components/Toast'
-import type { ReviewItem, ReviewBatch, BatchDetail } from '../types'
+import type { ReviewItem, ReviewBatch } from '../types'
 import { usePolling } from '../hooks/usePolling'
 import type { Tab } from './review/types'
 import { FILTER_GROUPS } from './review/constants'
 import { groupByWord } from './review/utils'
 import { WordGroupCard } from './review/WordGroupCard'
 import { WordReviewModal } from './review/WordReviewModal'
+
+const BATCH_FIX_KEY = 'batch_fix_run_id'
 
 interface Props {
   onBack: () => void
@@ -42,8 +44,8 @@ export default function ReviewPage({ onBack }: Props) {
   // 提示
   const [noBatchMsg, setNoBatchMsg] = useState('')
 
-  // 一键AI修复
-  const [batchFixing, setBatchFixing] = useState(false)
+  // 一键AI修复（从 sessionStorage 初始化，切回时按钮立即显示 loading）
+  const [batchFixing, setBatchFixing] = useState(() => !!sessionStorage.getItem(BATCH_FIX_KEY))
 
   // 已通过动画
   const [resolvedIds, setResolvedIds] = useState<Set<number>>(new Set())
@@ -85,13 +87,8 @@ export default function ReviewPage({ onBack }: Props) {
     }
     if (items.length === 0) setLoading(true)
     try {
-      const detail = await api.get<BatchDetail>(`/batches/${batch.id}/words`)
-      const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
-      const allReviews = res.items ?? []
-      const batchReviewIds = new Set(
-        detail.words.flatMap(w => w.items.map(i => i.review_id))
-      )
-      setItems(allReviews.filter(r => batchReviewIds.has(r.id)))
+      const res = await api.get<{ items: ReviewItem[]; total: number }>(`/reviews?batch_id=${batch.id}&limit=200`)
+      setItems(res.items ?? [])
     } catch (e) {
       showToast('error', '加载审核列表失败')
       setItems([])
@@ -103,6 +100,62 @@ export default function ReviewPage({ onBack }: Props) {
   useEffect(() => { loadBatch() }, [loadBatch])
   useEffect(() => { if (!batchLoading) loadItems() }, [batchLoading, loadItems])
 
+  // ── 一键修复：跨页面/刷新保持状态 ──
+  const loadBatchRef = useRef(loadBatch)
+  loadBatchRef.current = loadBatch
+
+  const batchFixControllerRef = useRef<AbortController | null>(null)
+
+  const pollBatchFixRef = useRef(async (_runId: string, _signal: AbortSignal) => {})
+  pollBatchFixRef.current = async (runId: string, signal: AbortSignal) => {
+    const deadline = Date.now() + 600_000
+    while (!signal.aborted && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 3000))
+      if (signal.aborted) return
+      try {
+        const status = await api.get<{ done: boolean; passed: number; failed: number }>(
+          `/qc/runs/${runId}/status`
+        )
+        if (status.done) {
+          const msg = status.failed > 0
+            ? `AI修复完成: ${status.passed} 成功, ${status.failed} 失败`
+            : `AI修复完成: ${status.passed} 项已处理`
+          showToast(status.failed > 0 ? 'warning' : 'success', msg)
+          return
+        }
+      } catch {
+        return
+      }
+    }
+    if (!signal.aborted) {
+      showToast('warning', 'AI修复仍在后台运行，请稍后刷新查看结果')
+    }
+  }
+
+  // 卸载时 abort 轮询（覆盖 onClick 和 mount effect 两种来源）
+  useEffect(() => {
+    return () => { batchFixControllerRef.current?.abort() }
+  }, [])
+
+  // 挂载时恢复轮询
+  useEffect(() => {
+    const savedRunId = sessionStorage.getItem(BATCH_FIX_KEY)
+    if (!savedRunId) return
+
+    const controller = new AbortController()
+    batchFixControllerRef.current = controller
+    setBatchFixing(true)
+
+    pollBatchFixRef.current(savedRunId, controller.signal).finally(() => {
+      if (!controller.signal.aborted) {
+        sessionStorage.removeItem(BATCH_FIX_KEY)
+        setBatchFixing(false)
+        batchFixControllerRef.current = null
+        loadBatchRef.current()
+      }
+    })
+  }, [])
+
   // 静默轮询刷新：操作进行中时跳过，防止覆盖乐观更新
   const silentRefresh = useCallback(async () => {
     if (actionLoading !== null || batchFixing) return
@@ -110,15 +163,17 @@ export default function ReviewPage({ onBack }: Props) {
       const data = await api.get<ReviewBatch | null>('/batches/current')
       setBatch(data)
       if (!data) { setItems([]); return }
-      const detail = await api.get<BatchDetail>(`/batches/${data.id}/words`)
-      const res = await api.get<{ items: ReviewItem[]; total: number }>('/reviews?limit=200')
-      const batchReviewIds = new Set(detail.words.flatMap(w => w.items.map(i => i.review_id)))
-      const newItems = (res.items ?? []).filter(r => batchReviewIds.has(r.id))
+      const res = await api.get<{ items: ReviewItem[]; total: number }>(`/reviews?batch_id=${data.id}&limit=200`)
+      const newItems = res.items ?? []
       // 仅在数据变化时更新，避免不必要的重渲染导致闪烁
       setItems(prev => {
         if (prev.length !== newItems.length) return newItems
         const changed = newItems.some((item, i) =>
-          item.id !== prev[i].id || item.status !== prev[i].status || item.resolution !== prev[i].resolution
+          item.id !== prev[i].id
+          || item.status !== prev[i].status
+          || item.resolution !== prev[i].resolution
+          || item.content_item?.content !== prev[i].content_item?.content
+          || item.content_item?.retry_count !== prev[i].content_item?.retry_count
         )
         return changed ? newItems : prev
       })
@@ -135,6 +190,7 @@ export default function ReviewPage({ onBack }: Props) {
         await loadBatch()
       } else {
         setBatch(null)
+        showToast('warning', '暂无待审核的批次')
       }
     } catch (e) {
       showToast('error', e instanceof ApiError ? e.detail : '领取批次失败')
@@ -173,6 +229,39 @@ export default function ReviewPage({ onBack }: Props) {
     } catch (e) {
       showToast('error', e instanceof ApiError ? e.detail : '审核通过失败')
       setActionLoading(null)
+    }
+  }
+
+  const handleMarkNotApplicable = async (id: number) => {
+    if (actionLoading !== null) return
+    setActionLoading(id)
+    try {
+      await api.post(`/reviews/${id}/mark-not-applicable`)
+      setResolvedIds(prev => new Set(prev).add(id))
+      setActionLoading(null)
+      loadBatch()
+      safeTimeout(() => {
+        setItems(prev => prev.filter(i => i.id !== id))
+        setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+      }, 1200)
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '标记不适用失败')
+      setActionLoading(null)
+    }
+  }
+
+  const handleMarkContentNotApplicable = async (contentItemId: number) => {
+    if (actionLoading !== null) return
+    setActionLoading(contentItemId)
+    try {
+      await api.post(`/words/content-items/${contentItemId}/mark-not-applicable`)
+      setActionLoading(null)
+      showToast('success', '已标记为不适用')
+      loadItems()
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '标记不适用失败')
+      setActionLoading(null)
+      throw e
     }
   }
 
@@ -361,7 +450,7 @@ export default function ReviewPage({ onBack }: Props) {
               <span className="text-slate-400">{batch.reviewed_count}/{batch.word_count}</span>
               <button
                 onClick={handleReleaseBatch}
-                disabled={releaseLoading}
+                disabled={releaseLoading || batchFixing}
                 className="text-slate-300 hover:text-red-500 ml-1 transition-colors"
                 title="释放批次"
               >
@@ -383,66 +472,31 @@ export default function ReviewPage({ onBack }: Props) {
           <button
             onClick={async () => {
               setBatchFixing(true)
-              const canRetryItems = filtered.filter(i => (i.content_item?.retry_count ?? 0) < 3)
+              try {
+                const canRetryItems = items.filter(i => (i.content_item?.retry_count ?? 0) < 3)
+                const reviewIds = canRetryItems.map(i => i.id)
+                if (reviewIds.length === 0) return
 
-              // 静默版 regenerate：不设 actionLoading 锁，不弹 toast，支持并发
-              const handleRegenerateSilent = async (id: number) => {
-                const res = await api.post<{
-                  success: boolean; qc_passed: boolean; retry_count: number; message: string
-                  new_content: string | null; new_content_cn: string | null
-                  new_issues: Array<{ rule_id: string; field: string; message: string }>
-                }>(`/reviews/${id}/regenerate`)
-                if (res.qc_passed) {
-                  setResolvedIds(prev => new Set(prev).add(id))
-                  safeTimeout(() => {
-                    setItems(prev => prev.filter(i => i.id !== id))
-                    setResolvedIds(prev => { const next = new Set(prev); next.delete(id); return next })
-                  }, 1500)
-                } else {
-                  setItems(prev => prev.map(item =>
-                    item.id === id
-                      ? {
-                          ...item,
-                          content_item: item.content_item ? {
-                            ...item.content_item,
-                            content: res.new_content ?? item.content_item.content,
-                            content_cn: res.new_content_cn ?? item.content_item.content_cn,
-                            retry_count: res.retry_count,
-                          } : item.content_item,
-                          issues: res.new_issues.map((iss, idx) => ({
-                            id: -(idx + 1),
-                            content_item_id: item.content_item_id,
-                            rule_id: iss.rule_id,
-                            field: iss.field,
-                            message: iss.message,
-                            severity: 'error',
-                          })),
-                        }
-                      : item
-                  ))
-                }
-              }
-
-              // 分批并发，每批 2 个，避免打满 worker 导致 504
-              const BATCH_SIZE = 4
-              let succeeded = 0
-              let failed = 0
-              for (let i = 0; i < canRetryItems.length; i += BATCH_SIZE) {
-                const batch = canRetryItems.slice(i, i + BATCH_SIZE)
-                const results = await Promise.allSettled(
-                  batch.map(item => handleRegenerateSilent(item.id))
+                const { run_id } = await api.post<{ run_id: string }>(
+                  '/reviews/batch-regenerate', { review_ids: reviewIds }
                 )
-                succeeded += results.filter(r => r.status === 'fulfilled').length
-                failed += results.filter(r => r.status === 'rejected').length
-              }
 
-              loadBatch()
-              if (failed > 0) {
-                showToast('warning', `AI修复完成: ${succeeded} 成功, ${failed} 失败`)
-              } else if (succeeded > 0) {
-                showToast('success', `AI修复完成: ${succeeded} 项已处理`)
+                const controller = new AbortController()
+                batchFixControllerRef.current = controller
+                sessionStorage.setItem(BATCH_FIX_KEY, run_id)
+
+                await pollBatchFixRef.current(run_id, controller.signal)
+
+                // 被 abort 说明组件卸载了，不做清理（mount effect 会接管）
+                if (controller.signal.aborted) return
+
+                sessionStorage.removeItem(BATCH_FIX_KEY)
+                batchFixControllerRef.current = null
+                await loadItems()
+                loadBatch()
+              } finally {
+                setBatchFixing(false)
               }
-              setBatchFixing(false)
             }}
             disabled={!batch || counts.can_retry === 0 || actionLoading !== null || batchFixing}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all disabled:opacity-40 shadow-lg shadow-blue-600/20 hover:-translate-y-0.5 active:scale-95"
@@ -568,6 +622,8 @@ export default function ReviewPage({ onBack }: Props) {
             onClose={() => setSelectedWordId(null)}
             onApprove={handleApprove}
             onRegenerate={handleRegenerate}
+            onMarkNotApplicable={handleMarkNotApplicable}
+            onMarkContentNotApplicable={handleMarkContentNotApplicable}
             onSaved={() => { loadItems(); }}
             actionLoading={actionLoading}
             regenResult={regenResult}
