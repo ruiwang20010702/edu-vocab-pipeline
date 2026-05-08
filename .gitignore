@@ -37,3 +37,6 @@ Thumbs.db
 
 # Generated data files
 *.xlsx
+
+# Local DB backup snapshots (script: scripts/normalize_meanings.py)
+backup/

@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import logging
+import re
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -31,6 +32,51 @@ def _truncate_field(value: str, max_len: int, field_name: str, word: str) -> str
         _logger.warning("字段 %s 超长截断 (len=%d>%d) word=%s", field_name, len(value), max_len, word)
         return value[:max_len]
     return value
+
+
+# 项目约定：内部存储统一为带点裸标签格式（n. / v. / adj. ...），导出层去点。
+# 见 export_service._normalize_pos_for_export。
+_POS_BARE_TAGS = frozenset({
+    "n", "v", "vi", "vt", "adj", "adv", "pron", "prep", "num",
+    "conj", "interj", "det", "aux", "abbr", "art", "phr",
+    "modal v", "phr v",
+})
+
+# 项目约定：释义内统一为全角中文标点。
+# QC 规则 meaning_rules.py 依赖全角分号 `；` 作为合法多义项分隔符。
+_PUNCT_HALF_TO_FULL = str.maketrans({
+    ";": "；", ",": "，", ":": "：",
+    "(": "（", ")": "）",
+    "!": "！", "?": "？",
+})
+
+
+def _normalize_pos(pos: str) -> str:
+    """规范化词性标签：去重复点 + 已知裸标签补点。
+
+    例: 'n' → 'n.'  /  'N' → 'n.'  /  'adj.' → 'adj.'  /  'adj..' → 'adj.'
+    未识别的复合标签（如 'n., vi.'）保持原样仅去尾部点和小写。
+    """
+    p = pos.strip()
+    if not p:
+        return ""
+    # 去尾部连续的点，统一小写
+    bare = p.rstrip(".").strip().lower()
+    if bare in _POS_BARE_TAGS:
+        return f"{bare}."
+    # 不是已知裸标签 → 至少把多个尾点压成单点
+    return f"{bare}." if p.endswith(".") else bare
+
+
+def _normalize_definition(d: str) -> str:
+    """规范化释义：半角中文标点转全角 + 折叠空白。
+
+    例: '焰火;烟花' → '焰火；烟花'  /  '开心的, 满意的' → '开心的，满意的'
+    保留多义项分隔符 `；` 用于 QC 规则识别。
+    """
+    s = d.strip().translate(_PUNCT_HALF_TO_FULL)
+    # 折叠连续空白为单空格（不做完全去空白以保留英文短语中的空格）
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: str, *, force: bool = False, warnings: list[str] | None = None) -> dict:
@@ -150,8 +196,8 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
                 existing_phonetic_ids.add(word.id)
 
         for m_data in entry.get("meanings", []):
-            pos = m_data.get("pos", "").strip()
-            definition = m_data.get("definition", "").strip()
+            pos = _normalize_pos(m_data.get("pos", ""))
+            definition = _normalize_definition(m_data.get("definition", ""))
             if not pos or not definition:
                 if not definition:
                     msg = f"单词 '{word_text}' 缺失释义，已跳过该义项"
@@ -286,8 +332,8 @@ def _parse_csv_text(text: str) -> tuple[list[dict[str, Any]], list[str]]:
             continue
         if word not in entries:
             entries[word] = {"word": word, "meanings": []}
-        pos = _truncate_field(row.get("pos", "").strip(), _MAX_POS_LEN, "pos", word)
-        definition = _truncate_field(row.get("definition", "").strip(), _MAX_DEFINITION_LEN, "definition", word)
+        pos = _truncate_field(_normalize_pos(row.get("pos", "")), _MAX_POS_LEN, "pos", word)
+        definition = _truncate_field(_normalize_definition(row.get("definition", "")), _MAX_DEFINITION_LEN, "definition", word)
         source = _truncate_field(row.get("source", "").strip(), _MAX_SOURCE_LEN, "source", word)
         ipa_uk = _truncate_field(row.get("ipa_uk", row.get("ipa", "")).strip(), _MAX_IPA_LEN, "ipa_uk", word)
         ipa_us = _truncate_field(row.get("ipa_us", "").strip(), _MAX_IPA_LEN, "ipa_us", word)
@@ -378,11 +424,11 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
         if word not in entries:
             entries[word] = {"word": word, "meanings": []}
         pos = _truncate_field(
-            str(row[col_map.get("pos", -1)] or "").strip() if "pos" in col_map else "",
+            _normalize_pos(str(row[col_map.get("pos", -1)] or "")) if "pos" in col_map else "",
             _MAX_POS_LEN, "pos", word,
         )
         definition = _truncate_field(
-            str(row[col_map.get("definition", -1)] or "").strip() if "definition" in col_map else "",
+            _normalize_definition(str(row[col_map.get("definition", -1)] or "")) if "definition" in col_map else "",
             _MAX_DEFINITION_LEN, "definition", word,
         )
         source = _truncate_field(

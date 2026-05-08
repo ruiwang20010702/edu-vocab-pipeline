@@ -175,3 +175,97 @@ class TestParseUpload:
     def test_unsupported_format(self):
         with pytest.raises(ValueError, match="不支持"):
             import_service.parse_upload(b"data", "test.txt")
+
+
+class TestNormalizePos:
+    """词性规范化：内部统一为带点裸标签格式。"""
+
+    @pytest.mark.parametrize("inp,expected", [
+        ("n", "n."),
+        ("N", "n."),
+        ("n.", "n."),
+        ("n..", "n."),
+        ("adj", "adj."),
+        ("ADJ", "adj."),
+        ("adj.", "adj."),
+        ("phr", "phr."),
+        ("modal v.", "modal v."),
+        ("n., vi.", "n., vi."),
+        (" v ", "v."),
+        ("", ""),
+    ])
+    def test_normalize_pos(self, inp, expected):
+        assert import_service._normalize_pos(inp) == expected
+
+
+class TestNormalizeDefinition:
+    """释义规范化：半角中文标点转全角，折叠空白。"""
+
+    @pytest.mark.parametrize("inp,expected", [
+        ("焰火;烟花", "焰火；烟花"),
+        ("焰火；烟花", "焰火；烟花"),
+        ("开心的,满意的", "开心的，满意的"),
+        ("优美，优雅", "优美，优雅"),
+        ("(数字)零", "（数字）零"),
+        ("好!坏?", "好！坏？"),
+        ("  前后空白 ", "前后空白"),
+        ("多\n\t空白", "多 空白"),
+        ("", ""),
+    ])
+    def test_normalize_definition(self, inp, expected):
+        assert import_service._normalize_definition(inp) == expected
+
+
+class TestDedupAcrossStyles:
+    """跨风格去重：模拟历史/新版两种格式同义项的合并行为。"""
+
+    def test_old_style_then_new_style_creates_one_meaning(self, db_session):
+        """先导入老风格 (n. + 全角分号)，再导入新风格 (n + 半角分号)，应只产生 1 条 Meaning。"""
+        old_style = [{"word": "firework", "meanings": [
+            {"pos": "n.", "definition": "焰火；烟花", "sources": ["旧批次"]},
+        ]}]
+        new_style = [{"word": "firework", "meanings": [
+            {"pos": "n", "definition": "焰火;烟花", "sources": ["新批次"]},
+        ]}]
+
+        import_service.import_from_json(db_session, old_style, "batch_old")
+        import_service.import_from_json(db_session, new_style, "batch_new")
+
+        word = db_session.query(Word).filter_by(word="firework").first()
+        meanings = db_session.query(Meaning).filter_by(word_id=word.id).all()
+        assert len(meanings) == 1
+        assert meanings[0].pos == "n."
+        assert meanings[0].definition == "焰火；烟花"
+
+        # 两个批次的 source 都应挂在同一 meaning 上
+        sources = db_session.query(Source).filter_by(meaning_id=meanings[0].id).all()
+        source_names = sorted(s.source_name for s in sources)
+        assert source_names == ["新批次", "旧批次"]
+
+    def test_reverse_order_also_dedupes(self, db_session):
+        """反向顺序：先新风格再老风格，结果同样应只有 1 条 Meaning。"""
+        new_style = [{"word": "tent", "meanings": [
+            {"pos": "n", "definition": "帐篷", "sources": ["a"]},
+        ]}]
+        old_style = [{"word": "tent", "meanings": [
+            {"pos": "n.", "definition": "帐篷", "sources": ["b"]},
+        ]}]
+
+        import_service.import_from_json(db_session, new_style, "b1")
+        import_service.import_from_json(db_session, old_style, "b2")
+
+        word = db_session.query(Word).filter_by(word="tent").first()
+        meanings = db_session.query(Meaning).filter_by(word_id=word.id).all()
+        assert len(meanings) == 1
+        assert meanings[0].pos == "n."  # 规范化为带点格式
+
+    def test_csv_normalization_applied(self, db_session):
+        """CSV 路径同样应触发规范化。"""
+        csv_content = "word,pos,definition,source\ncarnival,n,狂欢节;嘉年华会,csv_src"
+        import_service.import_from_csv(db_session, csv_content, "csv_norm")
+
+        word = db_session.query(Word).filter_by(word="carnival").first()
+        meanings = db_session.query(Meaning).filter_by(word_id=word.id).all()
+        assert len(meanings) == 1
+        assert meanings[0].pos == "n."
+        assert meanings[0].definition == "狂欢节；嘉年华会"
