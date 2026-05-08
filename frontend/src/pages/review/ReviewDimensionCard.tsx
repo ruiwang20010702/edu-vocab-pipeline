@@ -204,7 +204,7 @@ export function ReviewDimensionCard({
               {parseMnemonicJson(content)!.exam_sentence ? (
                 <span className="text-slate-700">{parseMnemonicJson(content)!.exam_sentence}</span>
               ) : (
-                <span className="text-slate-400 italic">（旧数据未生成例句）</span>
+                <span className="text-slate-400 italic">（未提取独立例句）</span>
               )}
             </div>
           )}
@@ -495,7 +495,7 @@ export function MnemonicReviewSection({
                     {parsed.exam_sentence ? (
                       <span className="text-slate-700">{parsed.exam_sentence}</span>
                     ) : (
-                      <span className="text-slate-400 italic">（旧数据未生成例句）</span>
+                      <span className="text-slate-400 italic">（未提取独立例句）</span>
                     )}
                   </div>
                 )}
