@@ -377,7 +377,10 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
     from openpyxl import load_workbook
 
     try:
-        wb = load_workbook(filename=io.BytesIO(file_content), read_only=True, data_only=True)
+        # 不使用 read_only：Numbers/WPS 等导出的 xlsx 有时 sheet dimensions 元数据不准，
+        # read_only 模式会按 dimensions 读取导致漏读列。本系统单次导入文件小（<1MB 量级），
+        # 不需要 read_only 的内存优化。
+        wb = load_workbook(filename=io.BytesIO(file_content), data_only=True)
     except Exception as exc:
         raise ValueError(f"无法解析 Excel 文件: {exc}") from exc
     ws = wb.active
