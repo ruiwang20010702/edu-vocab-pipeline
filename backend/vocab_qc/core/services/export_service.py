@@ -449,14 +449,14 @@ class ExportService:
                 for mn in m.get("mnemonics", []):
                     mn_by_type[mn["type"]] = _parse_mnemonic_fields(mn.get("content", ""))
 
-                # 各类型按其 columns 写入，缺失填 false
+                # 各类型按其 columns 写入，缺失（LLM 判定 valid:false / 该维度 rejected）留空
                 col_offset = len(base_headers) + 1
                 for mn_key, _, cols in mnemonic_types:
                     fields = mn_by_type.get(mn_key)
                     for i, (field_name, _) in enumerate(cols):
                         ws.cell(
                             row=row, column=col_offset + i,
-                            value=(fields[field_name] if fields else "false"),
+                            value=(fields[field_name] if fields else ""),
                         )
                     col_offset += len(cols)
 
