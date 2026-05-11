@@ -148,18 +148,18 @@ class N4FormulaLength(_RuleCheckerBase):
 
 # 话术字数边界：(下限, 上限)；上限为 None 表示无上限.
 _SCRIPT_LENGTH_BOUNDS: dict[str, tuple[int, Optional[int]]] = {
-    # 1v1 私教风格新版：4 种助记类型话术统一 200-250 字
-    "mnemonic_sound_meaning": (200, 250),
-    "mnemonic_exam_app": (200, 250),
-    "mnemonic_root_affix": (200, 250),
-    "mnemonic_word_in_word": (200, 250),
+    # 1v1 私教风格新版：4 种助记类型话术统一 ≥175 字，无上限
+    "mnemonic_sound_meaning": (175, None),
+    "mnemonic_exam_app": (175, None),
+    "mnemonic_root_affix": (175, None),
+    "mnemonic_word_in_word": (175, None),
 }
 _DEFAULT_SCRIPT_LOWER = 500
 
 
 @RuleRegistry.register_layer1
 class N5TeacherScriptLength(_RuleCheckerBase):
-    """N5: 老师话术字数校验（音义联想 ≥400，考试应用 200-250，词中词/词根词缀 ≥500）."""
+    """N5: 老师话术字数校验（4 种助记类型统一 ≥175 字，无上限）."""
 
     rule_id = "N5"
     dimension = "mnemonic"

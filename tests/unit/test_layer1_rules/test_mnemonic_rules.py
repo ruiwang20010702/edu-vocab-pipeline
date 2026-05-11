@@ -233,103 +233,103 @@ class TestCountLogicalChars:
 
 
 class TestN5ExamAppBounds:
-    """N5 在 mnemonic_exam_app 维度的特殊上下限：200-250."""
+    """N5 在 mnemonic_exam_app 维度的边界：下限 175，无上限."""
 
     def setup_method(self):
         self.checker = N5TeacherScriptLength()
 
-    def test_exam_app_lower_bound(self):
-        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_exam_app")
+    def test_exam_app_at_lower_bound_175_passes(self):
+        result = self.checker.check(_mj(script="字" * 175), "x", dimension="mnemonic_exam_app")
         assert result.passed
 
-    def test_exam_app_upper_bound(self):
+    def test_exam_app_old_upper_250_passes(self):
         result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_exam_app")
         assert result.passed
 
     def test_exam_app_below_lower_fails(self):
-        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_exam_app")
+        result = self.checker.check(_mj(script="字" * 174), "x", dimension="mnemonic_exam_app")
         assert not result.passed
         assert "下限" in result.detail
 
-    def test_exam_app_above_upper_fails(self):
-        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_exam_app")
-        assert not result.passed
-        assert "上限" in result.detail
+    def test_exam_app_above_old_upper_passes(self):
+        # 上限已移除：500 字仍应通过
+        result = self.checker.check(_mj(script="字" * 500), "x", dimension="mnemonic_exam_app")
+        assert result.passed
 
 
 class TestN5SoundMeaningBounds:
-    """N5 在 mnemonic_sound_meaning 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+    """N5 在 mnemonic_sound_meaning 维度的边界：下限 175，无上限（1v1 私教风格升级）."""
 
     def setup_method(self):
         self.checker = N5TeacherScriptLength()
 
-    def test_sound_meaning_lower_bound(self):
-        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_sound_meaning")
+    def test_sound_meaning_at_lower_bound_175_passes(self):
+        result = self.checker.check(_mj(script="字" * 175), "x", dimension="mnemonic_sound_meaning")
         assert result.passed
 
-    def test_sound_meaning_upper_bound(self):
+    def test_sound_meaning_old_upper_250_passes(self):
         result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_sound_meaning")
         assert result.passed
 
     def test_sound_meaning_below_lower_fails(self):
-        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_sound_meaning")
+        result = self.checker.check(_mj(script="字" * 174), "x", dimension="mnemonic_sound_meaning")
         assert not result.passed
         assert "下限" in result.detail
 
-    def test_sound_meaning_above_upper_fails(self):
-        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_sound_meaning")
-        assert not result.passed
-        assert "上限" in result.detail
+    def test_sound_meaning_above_old_upper_passes(self):
+        # 上限已移除：500 字仍应通过
+        result = self.checker.check(_mj(script="字" * 500), "x", dimension="mnemonic_sound_meaning")
+        assert result.passed
 
 
 class TestN5RootAffixBounds:
-    """N5 在 mnemonic_root_affix 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+    """N5 在 mnemonic_root_affix 维度的边界：下限 175，无上限（1v1 私教风格升级）."""
 
     def setup_method(self):
         self.checker = N5TeacherScriptLength()
 
-    def test_root_affix_lower_bound(self):
-        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_root_affix")
+    def test_root_affix_at_lower_bound_175_passes(self):
+        result = self.checker.check(_mj(script="字" * 175), "x", dimension="mnemonic_root_affix")
         assert result.passed
 
-    def test_root_affix_upper_bound(self):
+    def test_root_affix_old_upper_250_passes(self):
         result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_root_affix")
         assert result.passed
 
     def test_root_affix_below_lower_fails(self):
-        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_root_affix")
+        result = self.checker.check(_mj(script="字" * 174), "x", dimension="mnemonic_root_affix")
         assert not result.passed
         assert "下限" in result.detail
 
-    def test_root_affix_above_upper_fails(self):
-        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_root_affix")
-        assert not result.passed
-        assert "上限" in result.detail
+    def test_root_affix_above_old_upper_passes(self):
+        # 上限已移除：500 字仍应通过
+        result = self.checker.check(_mj(script="字" * 500), "x", dimension="mnemonic_root_affix")
+        assert result.passed
 
 
 class TestN5WordInWordBounds:
-    """N5 在 mnemonic_word_in_word 维度的特殊上下限：200-250（1v1 私教风格升级）."""
+    """N5 在 mnemonic_word_in_word 维度的边界：下限 175，无上限（1v1 私教风格升级）."""
 
     def setup_method(self):
         self.checker = N5TeacherScriptLength()
 
-    def test_word_in_word_lower_bound(self):
-        result = self.checker.check(_mj(script="字" * 200), "x", dimension="mnemonic_word_in_word")
+    def test_word_in_word_at_lower_bound_175_passes(self):
+        result = self.checker.check(_mj(script="字" * 175), "x", dimension="mnemonic_word_in_word")
         assert result.passed
 
-    def test_word_in_word_upper_bound(self):
+    def test_word_in_word_old_upper_250_passes(self):
         result = self.checker.check(_mj(script="字" * 250), "x", dimension="mnemonic_word_in_word")
         assert result.passed
 
     def test_word_in_word_below_lower_fails(self):
-        result = self.checker.check(_mj(script="字" * 199), "x", dimension="mnemonic_word_in_word")
+        result = self.checker.check(_mj(script="字" * 174), "x", dimension="mnemonic_word_in_word")
         assert not result.passed
         assert "下限" in result.detail
 
-    def test_word_in_word_above_upper_fails(self):
-        result = self.checker.check(_mj(script="字" * 251), "x", dimension="mnemonic_word_in_word")
-        assert not result.passed
-        assert "上限" in result.detail
+    def test_word_in_word_above_old_upper_passes(self):
+        # 上限已移除：500 字仍应通过
+        result = self.checker.check(_mj(script="字" * 500), "x", dimension="mnemonic_word_in_word")
+        assert result.passed
 
 
 class TestN6ExamSentence:
