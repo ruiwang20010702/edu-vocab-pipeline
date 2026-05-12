@@ -278,3 +278,47 @@ class N6ExamSentence(_RuleCheckerBase):
             )
 
         return RuleResult(rule_id=self.rule_id, passed=True)
+
+
+@RuleRegistry.register_layer1
+class N7ExamSentenceTranslation(_RuleCheckerBase):
+    """N7: 实战例句中文翻译校验（仅 mnemonic_exam_app 维度）.
+
+    检查项：字段存在时必须非空 + 至少含 1 个中文字符（允许人名/地名英文混排）.
+    旧数据（无 exam_sentence_translation 字段）直接 pass，不回打已 approved 内容.
+    其他 mnemonic 维度直接 pass.
+    """
+
+    rule_id = "N7"
+    dimension = "mnemonic"
+    description = "实战例句中文翻译校验（仅 mnemonic_exam_app）"
+
+    def check(self, content: str, word: str, meaning: Optional[str] = None, **kwargs) -> RuleResult:
+        if kwargs.get("dimension", "") != "mnemonic_exam_app":
+            return RuleResult(rule_id=self.rule_id, passed=True)
+
+        if not content:
+            return RuleResult(rule_id=self.rule_id, passed=False, detail="缺少助记内容")
+
+        data = _parse_mnemonic_json(content)
+        if data is None:
+            return RuleResult(rule_id=self.rule_id, passed=False, detail="助记内容不是合法 JSON 格式")
+
+        # 旧数据兼容：字段不存在直接 pass，避免回打历史 approved 数据
+        if "exam_sentence_translation" not in data:
+            return RuleResult(rule_id=self.rule_id, passed=True)
+
+        translation = str(data.get("exam_sentence_translation", "")).strip()
+        if not translation:
+            return RuleResult(
+                rule_id=self.rule_id, passed=False,
+                detail="exam_sentence_translation 字段为空",
+            )
+
+        if not _CHINESE_RE.search(translation):
+            return RuleResult(
+                rule_id=self.rule_id, passed=False,
+                detail=f"exam_sentence_translation 不含中文字符: {translation!r}",
+            )
+
+        return RuleResult(rule_id=self.rule_id, passed=True)

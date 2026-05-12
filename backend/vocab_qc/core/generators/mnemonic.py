@@ -124,4 +124,4 @@ class ExamAppMnemonicGenerator(_MnemonicBase):
 
     dimension = "mnemonic_exam_app"
     prompt_filename = "助记-考试应用.md"
-    extra_content_keys = ("exam_sentence",)
+    extra_content_keys = ("exam_sentence", "exam_sentence_translation")

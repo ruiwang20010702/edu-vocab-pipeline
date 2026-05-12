@@ -5,7 +5,7 @@ import {
   Lightbulb, Ban,
 } from 'lucide-react'
 import { api } from '../../lib/api'
-import type { ReviewItem } from '../../types'
+import type { ReviewItem, ContentItem } from '../../types'
 import type { QcIssue } from './types'
 import { DIMENSION_LABELS, STATUS_BADGE, ALL_MNEMONIC_DIMS } from './constants'
 import { parseMnemonicJson, isMnemonicDim, buildMnemonicJson } from './utils'
@@ -20,6 +20,8 @@ function MnemonicEditFields({
   scriptRows = 3,
   examSentence,
   onExamSentenceChange,
+  examSentenceTranslation,
+  onExamSentenceTranslationChange,
   showExamSentence = false,
 }: {
   formula: string; chant: string; script: string
@@ -29,6 +31,8 @@ function MnemonicEditFields({
   scriptRows?: number
   examSentence?: string
   onExamSentenceChange?: (v: string) => void
+  examSentenceTranslation?: string
+  onExamSentenceTranslationChange?: (v: string) => void
   showExamSentence?: boolean
 }) {
   return (
@@ -44,16 +48,28 @@ function MnemonicEditFields({
           className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none" />
       </div>
       {showExamSentence && (
-        <div>
-          <label className="text-[10px] font-bold text-slate-400 uppercase">实战例句（英文，8-15 词）</label>
-          <textarea
-            value={examSentence ?? ''}
-            onChange={e => onExamSentenceChange?.(e.target.value)}
-            rows={2}
-            placeholder="纯英文，需含目标词"
-            className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400"
-          />
-        </div>
+        <>
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase">实战例句（英文，8-15 词）</label>
+            <textarea
+              value={examSentence ?? ''}
+              onChange={e => onExamSentenceChange?.(e.target.value)}
+              rows={2}
+              placeholder="纯英文，需含目标词"
+              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase">例句释义（中文）</label>
+            <textarea
+              value={examSentenceTranslation ?? ''}
+              onChange={e => onExamSentenceTranslationChange?.(e.target.value)}
+              rows={2}
+              placeholder="必含中文，人名/地名可保留英文"
+              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-300 resize-none placeholder:text-slate-400"
+            />
+          </div>
+        </>
       )}
       <div>
         <label className="text-[10px] font-bold text-slate-400 uppercase">老师话术</label>
@@ -199,14 +215,24 @@ export function ReviewDimensionCard({
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-bold text-[10px]">公式</span><span className="text-slate-700">{parseMnemonicJson(content)!.formula}</span></div>
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded font-bold text-[10px]">口诀</span><span className="text-slate-700">{parseMnemonicJson(content)!.chant}</span></div>
           {dim === 'mnemonic_exam_app' && (
-            <div className="flex items-start gap-2">
-              <span className="shrink-0 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-bold text-[10px]">例句</span>
-              {parseMnemonicJson(content)!.exam_sentence ? (
-                <span className="text-slate-700">{parseMnemonicJson(content)!.exam_sentence}</span>
-              ) : (
-                <span className="text-slate-400 italic">（未提取独立例句）</span>
-              )}
-            </div>
+            <>
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-bold text-[10px]">例句</span>
+                {parseMnemonicJson(content)!.exam_sentence ? (
+                  <span className="text-slate-700">{parseMnemonicJson(content)!.exam_sentence}</span>
+                ) : (
+                  <span className="text-slate-400 italic">（未提取独立例句）</span>
+                )}
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 px-1.5 py-0.5 bg-sky-50 text-sky-600 rounded font-bold text-[10px]">释义</span>
+                {parseMnemonicJson(content)!.exam_sentence_translation ? (
+                  <span className="text-slate-700">{parseMnemonicJson(content)!.exam_sentence_translation}</span>
+                ) : (
+                  <span className="text-slate-400 italic">（未提取例句释义）</span>
+                )}
+              </div>
+            </>
           )}
           <div className="flex items-start gap-2"><span className="shrink-0 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold text-[10px]">话术</span><span className="text-slate-500 line-clamp-2">{parseMnemonicJson(content)!.script}</span></div>
         </div>
@@ -229,7 +255,7 @@ export function ContentDimensionCard({
 }: {
   icon: React.ReactNode
   label: string
-  content: any
+  content: ContentItem
   reviewItem?: ReviewItem
   actionLoading: number | null
   resolvedIds: Set<number>
@@ -340,10 +366,15 @@ function MnemonicDirectEditForm({
   const [chant, setChant] = useState(parsed?.chant ?? '')
   const [script, setScript] = useState(parsed?.script ?? '')
   const [examSentence, setExamSentence] = useState(parsed?.exam_sentence ?? '')
+  const [examSentenceTranslation, setExamSentenceTranslation] = useState(parsed?.exam_sentence_translation ?? '')
   const isExamApp = dim === 'mnemonic_exam_app'
 
   const handleSave = (forceApprove?: boolean) => {
-    const content = buildMnemonicJson(formula, chant, script, isExamApp ? examSentence : undefined)
+    const content = buildMnemonicJson(
+      formula, chant, script,
+      isExamApp ? examSentence : undefined,
+      isExamApp ? examSentenceTranslation : undefined,
+    )
     onDirectEditSave(mnId, { content, force_approve: forceApprove })
   }
 
@@ -355,6 +386,8 @@ function MnemonicDirectEditForm({
         showExamSentence={isExamApp}
         examSentence={examSentence}
         onExamSentenceChange={setExamSentence}
+        examSentenceTranslation={examSentenceTranslation}
+        onExamSentenceTranslationChange={setExamSentenceTranslation}
       />
       {directEditMsg && <QcResultBanner passed={directEditMsg.ok} message={directEditMsg.text} issues={directEditMsg.issues} />}
       <div className="flex items-center gap-2">
@@ -380,7 +413,7 @@ export function MnemonicReviewSection({
   mnemonics, reviewItems, actionLoading, resolvedIds, regenResult,
   onApprove, onRegenerate, onMarkNotApplicable, onMarkContentNotApplicable, onRegenerated,
 }: {
-  mnemonics: any[]
+  mnemonics: ContentItem[]
   reviewItems: ReviewItem[]
   actionLoading: number | null
   resolvedIds: Set<number>
@@ -397,7 +430,7 @@ export function MnemonicReviewSection({
   } = useReviewEdit()
 
   const mnMap = useMemo(() => {
-    const m = new Map<string, any>()
+    const m = new Map<string, ContentItem>()
     for (const mn of mnemonics) m.set(mn.dimension, mn)
     return m
   }, [mnemonics])
@@ -418,7 +451,7 @@ export function MnemonicReviewSection({
       const ri = reviewMap.get(d)
       return ri?.content_item ? { ...mn, ...ri.content_item } : mn
     })
-    .filter(mn => mn && (mn.qc_status === 'rejected' || !mn.content))
+    .filter((mn): mn is ContentItem => !!mn && (mn.qc_status === 'rejected' || !mn.content))
 
   return (
     <div className="space-y-3 pt-2 border-t border-slate-100">
@@ -490,14 +523,24 @@ export function MnemonicReviewSection({
                   </div>
                 )}
                 {dim === 'mnemonic_exam_app' && (
-                  <div className="flex items-start gap-2">
-                    <span className="shrink-0 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-bold text-[10px]">例句</span>
-                    {parsed.exam_sentence ? (
-                      <span className="text-slate-700">{parsed.exam_sentence}</span>
-                    ) : (
-                      <span className="text-slate-400 italic">（未提取独立例句）</span>
-                    )}
-                  </div>
+                  <>
+                    <div className="flex items-start gap-2">
+                      <span className="shrink-0 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-bold text-[10px]">例句</span>
+                      {parsed.exam_sentence ? (
+                        <span className="text-slate-700">{parsed.exam_sentence}</span>
+                      ) : (
+                        <span className="text-slate-400 italic">（未提取独立例句）</span>
+                      )}
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="shrink-0 px-1.5 py-0.5 bg-sky-50 text-sky-600 rounded font-bold text-[10px]">释义</span>
+                      {parsed.exam_sentence_translation ? (
+                        <span className="text-slate-700">{parsed.exam_sentence_translation}</span>
+                      ) : (
+                        <span className="text-slate-400 italic">（未提取例句释义）</span>
+                      )}
+                    </div>
+                  </>
                 )}
                 {parsed.script && (
                   <div className="flex items-start gap-2">
@@ -555,7 +598,7 @@ export function MnemonicReviewSection({
 
 /* ===== 不适用助记维度区块 ===== */
 
-function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any[]; onRegenerated: () => void }) {
+function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: ContentItem[]; onRegenerated: () => void }) {
   const [regenLoading, setRegenLoading] = useState<number | null>(null)
   const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string; issues?: QcIssue[] } | null>(null)
   const [regenCount, setRegenCount] = useState<Map<number, number>>(new Map())
@@ -564,6 +607,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
   const [editChant, setEditChant] = useState('')
   const [editScript, setEditScript] = useState('')
   const [editExamSentence, setEditExamSentence] = useState('')
+  const [editExamSentenceTranslation, setEditExamSentenceTranslation] = useState('')
   const [saving, setSaving] = useState(false)
 
   // setTimeout 清理
@@ -580,7 +624,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
     return id
   }
 
-  const handleRegenerate = async (mn: any) => {
+  const handleRegenerate = async (mn: ContentItem) => {
     setRegenLoading(mn.id)
     setRegenMsg(null)
     const count = (regenCount.get(mn.id) ?? 0) + 1
@@ -598,17 +642,18 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
     }
   }
 
-  const startEdit = (mn: any) => {
+  const startEdit = (mn: ContentItem) => {
     const parsed = parseMnemonicJson(mn.content)
     setEditingId(mn.id)
     setEditFormula(parsed?.formula ?? '')
     setEditChant(parsed?.chant ?? '')
     setEditScript(parsed?.script ?? '')
     setEditExamSentence(parsed?.exam_sentence ?? '')
+    setEditExamSentenceTranslation(parsed?.exam_sentence_translation ?? '')
     setRegenMsg(null)
   }
 
-  const handleSaveEdit = async (mn: any, forceApprove?: boolean) => {
+  const handleSaveEdit = async (mn: ContentItem, forceApprove?: boolean) => {
     setSaving(true)
     setRegenMsg(null)
     try {
@@ -616,7 +661,10 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
       const payload: Record<string, string> = {
         formula: editFormula, chant: editChant, script: editScript,
       }
-      if (isExamApp) payload.exam_sentence = editExamSentence
+      if (isExamApp) {
+        payload.exam_sentence = editExamSentence
+        payload.exam_sentence_translation = editExamSentenceTranslation
+      }
       const content = JSON.stringify(payload)
       const res = await api.post<{ success: boolean; qc_passed: boolean; message: string; new_issues?: QcIssue[] }>(`/words/content-items/${mn.id}/manual-edit`, { content, force_approve: forceApprove })
       setRegenMsg({ id: mn.id, ok: res.qc_passed, msg: res.message, issues: res.new_issues })
@@ -637,7 +685,7 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
         <Lightbulb size={11} /> 助记维度（不适用）
       </p>
-      {mnemonics.map((mn: any) => {
+      {mnemonics.map((mn: ContentItem) => {
         const typeLabel = DIMENSION_LABELS[mn.dimension] ?? mn.dimension
         const isEditing = editingId === mn.id
 
@@ -654,6 +702,8 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: any
                 showExamSentence={mn.dimension === 'mnemonic_exam_app'}
                 examSentence={editExamSentence}
                 onExamSentenceChange={setEditExamSentence}
+                examSentenceTranslation={editExamSentenceTranslation}
+                onExamSentenceTranslationChange={setEditExamSentenceTranslation}
               />
               {regenMsg && regenMsg.id === mn.id && <QcResultBanner passed={regenMsg.ok} message={regenMsg.msg} issues={regenMsg.issues} />}
               <div className="flex items-center gap-2">

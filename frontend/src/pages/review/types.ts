@@ -15,4 +15,5 @@ export interface MnemonicData {
   chant: string
   script: string
   exam_sentence?: string
+  exam_sentence_translation?: string
 }

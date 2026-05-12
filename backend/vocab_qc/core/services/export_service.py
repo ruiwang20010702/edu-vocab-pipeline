@@ -47,13 +47,15 @@ def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
     return base
 
 
-_MNEMONIC_FIELD_KEYS: tuple[str, ...] = ("formula", "chant", "exam_sentence", "script")
+_MNEMONIC_FIELD_KEYS: tuple[str, ...] = (
+    "formula", "chant", "exam_sentence", "exam_sentence_translation", "script",
+)
 
 
 def _parse_mnemonic_fields(content: str) -> dict[str, str]:
-    """从助记 content 中提取 formula/chant/exam_sentence/script。
+    """从助记 content 中提取 formula/chant/exam_sentence/exam_sentence_translation/script。
 
-    旧数据无 exam_sentence 字段时返回空串。
+    旧数据无 exam_sentence / exam_sentence_translation 字段时返回空串。
     """
     empty = dict.fromkeys(_MNEMONIC_FIELD_KEYS, "")
     if not content:
@@ -71,6 +73,7 @@ def _parse_mnemonic_fields(content: str) -> dict[str, str]:
         "formula": (formula.group(1).strip() if formula else ""),
         "chant": (chant.group(1).strip() if chant else ""),
         "exam_sentence": "",
+        "exam_sentence_translation": "",
         "script": (script.group(1).strip() if script else ""),
     }
 
@@ -373,7 +376,8 @@ class ExportService:
         ]
         exam_mn_cols: list[tuple[str, str]] = [
             ("formula", "公式"), ("chant", "口诀"),
-            ("exam_sentence", "例句"), ("script", "话术"),
+            ("exam_sentence", "例句"), ("exam_sentence_translation", "例句释义"),
+            ("script", "话术"),
         ]
         mnemonic_types: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("mnemonic_root_affix", "词根词缀", basic_mn_cols),

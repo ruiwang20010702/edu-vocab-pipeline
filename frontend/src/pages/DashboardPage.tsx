@@ -92,7 +92,17 @@ const DIMENSION_BACKEND_KEY: Record<string, string | null> = {
   '助记·考试应用': 'mnemonic_exam_app',
 }
 
-const DIMENSION_COLORS: Record<string, { bar: string; bg: string; text: string }> = {
+interface DimensionColor { bar: string; bg: string; text: string }
+interface BadCaseField { field: string; label: string; count: number }
+interface BadCase {
+  label: string
+  value: number
+  fields: BadCaseField[]
+  color: string
+  colors: DimensionColor
+}
+
+const DIMENSION_COLORS: Record<string, DimensionColor> = {
   '语音 Sound': { bar: 'bg-blue-400', bg: 'bg-blue-50', text: 'text-blue-600' },
   '释义 Definition': { bar: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-600' },
   '音节 Syllables': { bar: 'bg-purple-500', bg: 'bg-purple-50', text: 'text-purple-600' },
@@ -108,7 +118,7 @@ export default function DashboardPage({ onViewBatch }: Props) {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [batches, setBatches] = useState<BatchInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeDim, setActiveDim] = useState<any | null>(null)
+  const [activeDim, setActiveDim] = useState<BadCase | null>(null)
   const [callbackTesting, setCallbackTesting] = useState(false)
   const [callbackResult, setCallbackResult] = useState<{ ok: boolean; message: string } | null>(null)
 
@@ -347,7 +357,7 @@ export default function DashboardPage({ onViewBatch }: Props) {
 
                 {/* Rules list */}
                 <div className="flex-1 p-5 space-y-2 overflow-y-auto">
-                  {activeDim.fields.map((field: any, j: number) => (
+                  {activeDim.fields.map((field, j) => (
                     <motion.div
                       key={j}
                       initial={{ opacity: 0, y: 8 }}
@@ -410,8 +420,9 @@ export default function DashboardPage({ onViewBatch }: Props) {
                       '/callback/test-gateway',
                     )
                     setCallbackResult({ ok: true, message: `已提交 task_no: ${res.task_no}，请查看服务器日志` })
-                  } catch (e: any) {
-                    setCallbackResult({ ok: false, message: e.detail || '请求失败' })
+                  } catch (e) {
+                    const detail = (e as { detail?: string })?.detail
+                    setCallbackResult({ ok: false, message: detail || '请求失败' })
                   } finally {
                     setCallbackTesting(false)
                   }

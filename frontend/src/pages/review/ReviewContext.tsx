@@ -21,6 +21,7 @@ interface ReviewEditContextValue extends DirectEditState {
 
 const ReviewEditContext = createContext<ReviewEditContextValue | null>(null)
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useReviewEdit() {
   const ctx = useContext(ReviewEditContext)
   if (!ctx) throw new Error('useReviewEdit must be used within ReviewEditProvider')

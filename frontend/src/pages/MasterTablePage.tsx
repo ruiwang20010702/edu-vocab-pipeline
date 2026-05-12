@@ -6,7 +6,18 @@ import {
 import { api, ApiError } from '../lib/api'
 import { usePolling } from '../hooks/usePolling'
 import { useToast } from '../components/Toast'
-import type { WordDetail, PaginatedResponse, StatusCounts } from '../types'
+import type { WordDetail, PaginatedResponse, StatusCounts, Source, ContentItem } from '../types'
+
+/** MasterTable 渲染时 meaning 携带的内容字段（后端 word_detail 接口返回值） */
+interface MasterMeaning {
+  id: number
+  pos: string
+  definition: string
+  sources?: Source[]
+  chunk?: ContentItem
+  sentence?: ContentItem
+  mnemonics?: ContentItem[]
+}
 import WordDetailModal from './mastertable/WordDetailModal'
 import { ALL_MNEMONIC_DIMS, MNEMONIC_TYPE_LABELS } from './review/constants'
 import { parseMnemonic } from './review/utils'
@@ -97,9 +108,10 @@ export default function MasterTablePage() {
       a.download = `vocab_export_${new Date().toISOString().slice(0, 10)}.xlsx`
       a.click()
       URL.revokeObjectURL(url)
-    } catch (e: any) {
+    } catch (e) {
       console.error('导出失败', e)
-      alert(e?.detail || e?.message || '导出失败，请重试')
+      const err = e as { detail?: string; message?: string }
+      alert(err?.detail || err?.message || '导出失败，请重试')
     } finally {
       setExportLoading(false)
     }
@@ -222,8 +234,8 @@ export default function MasterTablePage() {
                     )
                   }
 
-                  return meanings.map((m: any, mi: number) => {
-                    const mnemonicsMap = new Map<string, any>()
+                  return (meanings as MasterMeaning[]).map((m, mi) => {
+                    const mnemonicsMap = new Map<string, ContentItem>()
                     for (const mn of (m.mnemonics ?? [])) {
                       mnemonicsMap.set(mn.dimension, mn)
                     }
@@ -263,7 +275,7 @@ export default function MasterTablePage() {
                             <span className="text-xs text-slate-700 line-clamp-1">{m.definition}</span>
                           </div>
                         </td>
-                        <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[130px]">{m.sources?.map((s: any) => s.source_name).join('; ') ?? ''}</span></td>
+                        <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[130px]">{m.sources?.map(s => s.source_name).join('; ') ?? ''}</span></td>
                         <td className="px-5 py-2"><span className="text-xs text-slate-500 italic line-clamp-1 max-w-[130px]">{m.chunk?.content ?? ''}</span></td>
                         <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[130px]">{m.chunk?.content_cn ?? ''}</span></td>
                         <td className="px-5 py-2"><span className="text-xs text-slate-400 line-clamp-1 max-w-[180px]">{m.sentence?.content ?? ''}</span></td>

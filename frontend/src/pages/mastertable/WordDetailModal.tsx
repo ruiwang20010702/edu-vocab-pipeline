@@ -44,8 +44,9 @@ function useContentEdit(itemId: number, onSaved: () => void) {
           onSaved()
         }, 1500)
       }
-    } catch (err: any) {
-      setResult({ ok: false, text: err?.message ?? '保存失败' })
+    } catch (err) {
+      const msg = (err as { message?: string })?.message ?? '保存失败'
+      setResult({ ok: false, text: msg })
     } finally {
       setSaving(false)
     }
@@ -58,7 +59,6 @@ function useContentEdit(itemId: number, onSaved: () => void) {
 function groupIssuesByMeaning(
   issues: WordDetail['issues'],
   meanings: WordDetail['meanings'],
-  _syllable?: ContentItem,
 ) {
   const meaningIssuesMap = new Map<number, typeof issues>()
   const wordLevelIssues: typeof issues = []
@@ -147,6 +147,8 @@ function EditableContentItem({
   const [editContentCn, setEditContentCn] = useState(item.content_cn ?? '')
   const { saving, result, save } = useContentEdit(item.id, onSaved)
 
+  // 用 prop 变化重置本地编辑态：父组件切换 item 后需要重置输入框
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setEditContent(item.content); setEditContentCn(item.content_cn ?? '') }, [item.content, item.content_cn])
 
   const cancel = () => { setEditContent(item.content); setEditContentCn(item.content_cn ?? ''); setEditing(false) }
@@ -237,7 +239,7 @@ function CollapsibleIssues({ issues, label }: { issues: WordDetail['issues']; la
 }
 
 /** 单条助记编辑器 */
-function MnemonicItemEditor({ mn, onSaved, editable = true }: { mn: any; onSaved: () => void; editable?: boolean }) {
+function MnemonicItemEditor({ mn, onSaved, editable = true }: { mn: ContentItem; onSaved: () => void; editable?: boolean }) {
   const parsed = parseMnemonic(mn.content)
   const [editing, setEditing] = useState(false)
   const [formula, setFormula] = useState(parsed.formula)
@@ -245,8 +247,10 @@ function MnemonicItemEditor({ mn, onSaved, editable = true }: { mn: any; onSaved
   const [script, setScript] = useState(parsed.script)
   const { saving, result, save } = useContentEdit(mn.id, onSaved)
 
+  // 用 prop 变化重置本地编辑态：mn.content 被父刷新后同步解析回本地输入
   useEffect(() => {
     const p = parseMnemonic(mn.content)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFormula(p.formula); setChant(p.chant); setScript(p.script)
   }, [mn.content])
 
@@ -332,8 +336,8 @@ function MnemonicItemEditor({ mn, onSaved, editable = true }: { mn: any; onSaved
   )
 }
 
-function MnemonicSection({ mnemonics, onSaved, editable = true }: { mnemonics: any[]; onSaved: () => void; editable?: boolean }) {
-  const mnMap = new Map<string, any>()
+function MnemonicSection({ mnemonics, onSaved, editable = true }: { mnemonics: ContentItem[]; onSaved: () => void; editable?: boolean }) {
+  const mnMap = new Map<string, ContentItem>()
   for (const mn of mnemonics) mnMap.set(mn.dimension, mn)
 
   return (
@@ -385,6 +389,8 @@ function SyllableInlineEditor({ syllable, onSaved, editable = true }: { syllable
   const { saving, result, save } = useContentEdit(syllable.id, onSaved)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // 用 prop 变化重置本地输入：父切换 syllable 后同步
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setValue(syllable.content) }, [syllable.content])
   useEffect(() => { if (editing) inputRef.current?.focus() }, [editing])
 
@@ -434,15 +440,18 @@ export default function WordDetailModal({ word, loading, onClose, onWordUpdate, 
   const currentMeaning = meanings[meaningIdx] ?? null
 
   const { meaningIssuesMap, wordLevelIssues } = word
-    ? groupIssuesByMeaning(word.issues ?? [], meanings, word.syllable)
+    ? groupIssuesByMeaning(word.issues ?? [], meanings)
     : { meaningIssuesMap: new Map(), wordLevelIssues: [] }
 
+  // 故意只依赖 word?.id：避免 word 整体引用变化导致 callback 失效
+  /* eslint-disable react-hooks/preserve-manual-memoization, react-hooks/exhaustive-deps */
   const refreshWord = useCallback(() => {
     if (!word) return
     api.get<WordDetail>(`/words/${word.id}`)
       .then(data => onWordUpdate?.(data))
-      .catch(() => {})
+      .catch(() => { /* 刷新失败忽略 */ })
   }, [word?.id, onWordUpdate])
+  /* eslint-enable react-hooks/preserve-manual-memoization, react-hooks/exhaustive-deps */
 
   return (
     <motion.div
@@ -534,7 +543,7 @@ export default function WordDetailModal({ word, loading, onClose, onWordUpdate, 
                       {m.sources && m.sources.length > 0 && (
                         <div className="flex items-center gap-2 flex-wrap">
                           <GraduationCap size={13} className="text-slate-400 shrink-0" />
-                          {m.sources.map((s: any, si: number) => (
+                          {m.sources.map((s, si) => (
                             <span key={si} className="text-[10px] px-2 py-0.5 bg-white border border-slate-200 rounded-md text-slate-500">{s.source_name}</span>
                           ))}
                         </div>

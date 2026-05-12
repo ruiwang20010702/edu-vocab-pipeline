@@ -9,6 +9,7 @@ from vocab_qc.core.qc.layer1.mnemonic_rules import (
     N4FormulaLength,
     N5TeacherScriptLength,
     N6ExamSentence,
+    N7ExamSentenceTranslation,
     count_logical_chars,
 )
 
@@ -22,11 +23,17 @@ def _mj_exam(
     formula: str = "consistent(adj.) + with = 一致",
     chant: str = "consistent后锁with",
     exam_sentence: str = "His words are consistent with his actions in every situation.",
+    exam_sentence_translation: str = "他的言行在任何情况下都保持一致。",
     script: str = "字" * 220,
 ) -> str:
-    """构造 mnemonic_exam_app 助记 JSON（含 exam_sentence 字段）."""
+    """构造 mnemonic_exam_app 助记 JSON（含 exam_sentence + exam_sentence_translation 字段）."""
     return json.dumps(
-        {"formula": formula, "chant": chant, "exam_sentence": exam_sentence, "script": script},
+        {
+            "formula": formula, "chant": chant,
+            "exam_sentence": exam_sentence,
+            "exam_sentence_translation": exam_sentence_translation,
+            "script": script,
+        },
         ensure_ascii=False,
     )
 
@@ -426,6 +433,68 @@ class TestN6ExamSentence:
     def test_target_word_case_insensitive(self):
         result = self.checker.check(
             _mj_exam(exam_sentence="CONSISTENT with his actions, he completed the task on time."),
+            "consistent", dimension="mnemonic_exam_app",
+        )
+        assert result.passed
+
+    def test_invalid_json_fails(self):
+        result = self.checker.check("not json", "x", dimension="mnemonic_exam_app")
+        assert not result.passed
+
+    def test_empty_content_fails(self):
+        result = self.checker.check("", "x", dimension="mnemonic_exam_app")
+        assert not result.passed
+
+
+class TestN7ExamSentenceTranslation:
+    def setup_method(self):
+        self.checker = N7ExamSentenceTranslation()
+
+    def test_other_dimension_passes(self):
+        # 非 mnemonic_exam_app 维度直接 pass
+        result = self.checker.check(_mj(), "kind", dimension="mnemonic_root_affix")
+        assert result.passed
+        # 未指定 dimension 视为非 exam_app，pass
+        result = self.checker.check(_mj(), "kind")
+        assert result.passed
+
+    def test_valid_translation_passes(self):
+        result = self.checker.check(_mj_exam(), "consistent", dimension="mnemonic_exam_app")
+        assert result.passed
+
+    def test_legacy_data_without_field_passes(self):
+        """旧数据兼容：JSON 不含 exam_sentence_translation 键 → pass，避免回打 approved."""
+        legacy = json.dumps(
+            {
+                "formula": "a+b", "chant": "x",
+                "exam_sentence": "He is consistent with the plan in every meeting.",
+                "script": "y" * 220,
+            },
+            ensure_ascii=False,
+        )
+        result = self.checker.check(legacy, "consistent", dimension="mnemonic_exam_app")
+        assert result.passed
+
+    def test_empty_translation_fails(self):
+        result = self.checker.check(
+            _mj_exam(exam_sentence_translation=""),
+            "consistent", dimension="mnemonic_exam_app",
+        )
+        assert not result.passed
+        assert "为空" in result.detail
+
+    def test_translation_without_chinese_fails(self):
+        result = self.checker.check(
+            _mj_exam(exam_sentence_translation="He is consistent with his actions."),
+            "consistent", dimension="mnemonic_exam_app",
+        )
+        assert not result.passed
+        assert "中文" in result.detail
+
+    def test_translation_with_proper_noun_mix_passes(self):
+        """允许人名/地名英文混排，只要含至少 1 个中文字符."""
+        result = self.checker.check(
+            _mj_exam(exam_sentence_translation="Mary 的报告与团队数据一致。"),
             "consistent", dimension="mnemonic_exam_app",
         )
         assert result.passed

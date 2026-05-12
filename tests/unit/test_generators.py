@@ -172,17 +172,20 @@ class TestExamAppMnemonicGenerator:
         assert gen.dimension == "mnemonic_exam_app"
 
     def test_extra_content_keys(self):
-        """exam_app 子类必须声明 exam_sentence 为扩展字段."""
-        assert ExamAppMnemonicGenerator.extra_content_keys == ("exam_sentence",)
+        """exam_app 子类必须声明 exam_sentence 和 exam_sentence_translation 为扩展字段."""
+        assert ExamAppMnemonicGenerator.extra_content_keys == (
+            "exam_sentence", "exam_sentence_translation",
+        )
 
-    def test_ai_valid_with_exam_sentence(self):
-        """AI 返回 exam_sentence 时应解析并写入 content JSON."""
+    def test_ai_valid_with_exam_sentence_and_translation(self):
+        """AI 返回 exam_sentence + 翻译时应解析并写入 content JSON."""
         gen = ExamAppMnemonicGenerator()
         ai_resp = {
             "valid": True,
             "formula": "consistent(形容词) + with(核心介词) = 与...一致",
             "chant": "consistent后锁with",
             "exam_sentence": "His words are consistent with his actions in every situation.",
+            "exam_sentence_translation": "他的言行在任何情况下都保持一致。",
             "script": "咱看这个公式哈... 你看上面这个例句哈... 出题人最爱在这儿挖坑...",
         }
         with patch.object(gen, "_call_ai", return_value=ai_resp):
@@ -190,13 +193,15 @@ class TestExamAppMnemonicGenerator:
         assert result["valid"] is True
         parsed = json.loads(result["content"])
         assert parsed["exam_sentence"] == ai_resp["exam_sentence"]
+        assert parsed["exam_sentence_translation"] == ai_resp["exam_sentence_translation"]
         assert parsed["formula"] == ai_resp["formula"]
         assert parsed["chant"] == ai_resp["chant"]
         assert parsed["script"] == ai_resp["script"]
         assert result["exam_sentence"] == ai_resp["exam_sentence"]
+        assert result["exam_sentence_translation"] == ai_resp["exam_sentence_translation"]
 
-    def test_ai_valid_missing_exam_sentence_defaults_empty(self):
-        """AI 漏返 exam_sentence 时（向后兼容旧响应）默认空串，不报错."""
+    def test_ai_valid_missing_extras_defaults_empty(self):
+        """AI 漏返 exam_sentence / translation 时（向后兼容旧响应）默认空串，不报错."""
         gen = ExamAppMnemonicGenerator()
         ai_resp = {
             "valid": True,
@@ -209,9 +214,10 @@ class TestExamAppMnemonicGenerator:
         assert result["valid"] is True
         parsed = json.loads(result["content"])
         assert parsed["exam_sentence"] == ""
+        assert parsed["exam_sentence_translation"] == ""
 
     def test_other_mnemonic_subclasses_no_exam_sentence(self):
-        """其他 3 个 mnemonic 子类的 content JSON 不应包含 exam_sentence."""
+        """其他 3 个 mnemonic 子类的 content JSON 不应包含 exam_sentence / translation."""
         for cls in (RootAffixMnemonicGenerator, WordInWordMnemonicGenerator, SoundMeaningMnemonicGenerator):
             gen = cls()
             ai_resp = {"valid": True, "formula": "f", "chant": "c", "script": "s"}
@@ -219,6 +225,7 @@ class TestExamAppMnemonicGenerator:
                 result = gen.generate("x", meaning="y", pos="adj.")
             parsed = json.loads(result["content"])
             assert "exam_sentence" not in parsed, f"{cls.__name__} 不应有 exam_sentence 字段"
+            assert "exam_sentence_translation" not in parsed, f"{cls.__name__} 不应有 exam_sentence_translation 字段"
 
 
 class TestIsTransientError:

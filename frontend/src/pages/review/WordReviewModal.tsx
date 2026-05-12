@@ -43,8 +43,9 @@ function SyllableEditor({ syllable, wordId, onUpdated }: {
             .catch(() => {})
         }, 1500)
       }
-    } catch (err: any) {
-      setResult({ ok: false, text: err?.message ?? '保存失败' })
+    } catch (err) {
+      const msg = (err as { message?: string })?.message ?? '保存失败'
+      setResult({ ok: false, text: msg })
     } finally { setSaving(false) }
   }
 
@@ -116,7 +117,9 @@ export function WordReviewModal({
   const [detailLoading, setDetailLoading] = useState(true)
   const [meaningIdx, setMeaningIdx] = useState(0)
 
+  // 跟随 group.word_id 切换加载详情：setDetailLoading 必须在 effect 中同步触发，让首屏立刻进 loading 态
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDetailLoading(true)
     api.get<WordDetail>(`/words/${group.word_id}`)
       .then(data => setWordDetail(data))

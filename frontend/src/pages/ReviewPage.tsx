@@ -70,7 +70,7 @@ export default function ReviewPage({ onBack }: Props) {
     try {
       const data = await api.get<ReviewBatch | null>('/batches/current')
       setBatch(data)
-    } catch (e) {
+    } catch {
       showToast('error', '加载批次信息失败')
       setBatch(null)
     } finally {
@@ -89,7 +89,7 @@ export default function ReviewPage({ onBack }: Props) {
     try {
       const res = await api.get<{ items: ReviewItem[]; total: number }>(`/reviews?batch_id=${batch.id}&limit=200`)
       setItems(res.items ?? [])
-    } catch (e) {
+    } catch {
       showToast('error', '加载审核列表失败')
       setItems([])
     } finally {
@@ -106,7 +106,9 @@ export default function ReviewPage({ onBack }: Props) {
 
   const batchFixControllerRef = useRef<AbortController | null>(null)
 
-  const pollBatchFixRef = useRef(async (_runId: string, _signal: AbortSignal) => {})
+  const pollBatchFixRef = useRef<(runId: string, signal: AbortSignal) => Promise<void>>(
+    async () => { /* placeholder, assigned below */ },
+  )
   pollBatchFixRef.current = async (runId: string, signal: AbortSignal) => {
     const deadline = Date.now() + 600_000
     while (!signal.aborted && Date.now() < deadline) {
@@ -575,7 +577,7 @@ export default function ReviewPage({ onBack }: Props) {
                 try {
                   // 释放当前批次（可能已自动完成，忽略错误），不提前清空 batch 避免 UI 闪跳
                   if (batch) {
-                    try { await api.post(`/batches/${batch.id}/release`) } catch {}
+                    try { await api.post(`/batches/${batch.id}/release`) } catch { /* 可能已自动完成，忽略 */ }
                   }
                   const data = await api.post<ReviewBatch | null>('/batches/assign')
                   if (!data) {

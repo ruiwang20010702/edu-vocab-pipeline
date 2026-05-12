@@ -5,13 +5,21 @@ import json
 from vocab_qc.core.services.export_service import _parse_mnemonic_fields
 
 
+_EMPTY = {
+    "formula": "", "chant": "",
+    "exam_sentence": "", "exam_sentence_translation": "",
+    "script": "",
+}
+
+
 class TestParseMnemonicFields:
-    def test_full_json_with_exam_sentence(self):
+    def test_full_json_with_exam_sentence_and_translation(self):
         content = json.dumps(
             {
                 "formula": "consistent + with",
                 "chant": "锁with",
                 "exam_sentence": "His words are consistent with his actions every single day.",
+                "exam_sentence_translation": "他的言行每天都保持一致。",
                 "script": "话术内容",
             },
             ensure_ascii=False,
@@ -20,33 +28,50 @@ class TestParseMnemonicFields:
         assert result["formula"] == "consistent + with"
         assert result["chant"] == "锁with"
         assert result["exam_sentence"] == "His words are consistent with his actions every single day."
+        assert result["exam_sentence_translation"] == "他的言行每天都保持一致。"
         assert result["script"] == "话术内容"
 
     def test_legacy_3key_json_defaults_exam_sentence_empty(self):
-        """旧数据不含 exam_sentence 字段时，导出应填空串."""
+        """旧数据不含 exam_sentence/translation 字段时，导出应填空串."""
         content = json.dumps({"formula": "f", "chant": "c", "script": "s"}, ensure_ascii=False)
         result = _parse_mnemonic_fields(content)
         assert result["formula"] == "f"
         assert result["chant"] == "c"
         assert result["script"] == "s"
         assert result["exam_sentence"] == ""
+        assert result["exam_sentence_translation"] == ""
+
+    def test_legacy_4key_json_with_exam_sentence_only(self):
+        """仅含 exam_sentence 无 translation 的过渡期数据：translation 默认空，例句保留."""
+        content = json.dumps(
+            {
+                "formula": "f", "chant": "c",
+                "exam_sentence": "He is consistent with the plan in every meeting always.",
+                "script": "s",
+            },
+            ensure_ascii=False,
+        )
+        result = _parse_mnemonic_fields(content)
+        assert result["exam_sentence"] == "He is consistent with the plan in every meeting always."
+        assert result["exam_sentence_translation"] == ""
 
     def test_empty_content_returns_all_empty(self):
         result = _parse_mnemonic_fields("")
-        assert result == {"formula": "", "chant": "", "exam_sentence": "", "script": ""}
+        assert result == _EMPTY
 
     def test_invalid_json_returns_all_empty(self):
         result = _parse_mnemonic_fields("not json at all")
-        assert result == {"formula": "", "chant": "", "exam_sentence": "", "script": ""}
+        assert result == _EMPTY
 
     def test_legacy_tag_format_no_exam_sentence(self):
-        """老的 [核心公式] / [助记口诀] / [老师话术] 标签格式仍能解析，例句默认空."""
+        """老的 [核心公式] / [助记口诀] / [老师话术] 标签格式仍能解析，例句和释义默认空."""
         content = "[核心公式] a + b\n[助记口诀] 记住\n[老师话术] 话术内容"
         result = _parse_mnemonic_fields(content)
         assert result["formula"] == "a + b"
         assert result["chant"] == "记住"
         assert result["script"] == "话术内容"
         assert result["exam_sentence"] == ""
+        assert result["exam_sentence_translation"] == ""
 
     def test_partial_json_missing_keys_default_empty(self):
         """JSON 仅含 formula 时其他字段默认空串."""
@@ -55,4 +80,5 @@ class TestParseMnemonicFields:
         assert result["formula"] == "only formula"
         assert result["chant"] == ""
         assert result["exam_sentence"] == ""
+        assert result["exam_sentence_translation"] == ""
         assert result["script"] == ""
