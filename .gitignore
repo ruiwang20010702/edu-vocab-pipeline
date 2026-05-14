@@ -40,3 +40,6 @@ Thumbs.db
 
 # Local DB backup snapshots (script: scripts/normalize_meanings.py)
 backup/
+
+# Local planning / review reports (not part of codebase)
+plans/
