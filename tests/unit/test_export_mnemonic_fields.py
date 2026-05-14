@@ -7,6 +7,7 @@ from vocab_qc.core.services.export_service import _parse_mnemonic_fields
 
 _EMPTY = {
     "formula": "", "chant": "",
+    "extension_words": "",
     "exam_sentence": "", "exam_sentence_translation": "",
     "script": "",
 }
@@ -79,6 +80,37 @@ class TestParseMnemonicFields:
         result = _parse_mnemonic_fields(content)
         assert result["formula"] == "only formula"
         assert result["chant"] == ""
+        assert result["extension_words"] == ""
         assert result["exam_sentence"] == ""
         assert result["exam_sentence_translation"] == ""
         assert result["script"] == ""
+
+    def test_root_affix_json_with_extension_words(self):
+        """词根词缀维度新版 JSON 含 extension_words 字段时正常解析."""
+        content = json.dumps(
+            {
+                "formula": "in(不) + vis(看) + ible(能…的，形容词后缀)",
+                "chant": "不能被看见。",
+                "extension_words": "vision (视力); visual (视觉的); visit (去看望)",
+                "script": "话术内容",
+            },
+            ensure_ascii=False,
+        )
+        result = _parse_mnemonic_fields(content)
+        assert result["formula"] == "in(不) + vis(看) + ible(能…的，形容词后缀)"
+        assert result["chant"] == "不能被看见。"
+        assert result["extension_words"] == "vision (视力); visual (视觉的); visit (去看望)"
+        assert result["script"] == "话术内容"
+        # 不应混入 exam_app 维度字段
+        assert result["exam_sentence"] == ""
+        assert result["exam_sentence_translation"] == ""
+
+    def test_legacy_3key_json_defaults_extension_words_empty(self):
+        """老的词根词缀 3-key JSON（无 extension_words）解析后该字段默认空串，不报错."""
+        content = json.dumps(
+            {"formula": "f", "chant": "c", "script": "s"},
+            ensure_ascii=False,
+        )
+        result = _parse_mnemonic_fields(content)
+        assert result["extension_words"] == ""
+        assert result["formula"] == "f"

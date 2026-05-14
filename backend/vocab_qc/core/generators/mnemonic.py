@@ -88,6 +88,7 @@ class RootAffixMnemonicGenerator(_MnemonicBase):
 
     dimension = "mnemonic_root_affix"
     prompt_filename = "助记-词根词缀.md"
+    extra_content_keys = ("extension_words",)
 
     def get_ai_config(self, session: Any = None) -> AiConfig:
         config = super().get_ai_config(session)

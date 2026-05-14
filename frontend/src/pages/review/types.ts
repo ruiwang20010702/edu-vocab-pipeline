@@ -14,6 +14,7 @@ export interface MnemonicData {
   formula: string
   chant: string
   script: string
+  extension_words?: string
   exam_sentence?: string
   exam_sentence_translation?: string
 }

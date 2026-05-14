@@ -30,10 +30,15 @@ export function parseMnemonic(content: string): {
   formula: string
   chant: string
   script: string
+  extension_words: string
   exam_sentence: string
   exam_sentence_translation: string
 } {
-  const empty = { formula: '', chant: '', script: '', exam_sentence: '', exam_sentence_translation: '' }
+  const empty = {
+    formula: '', chant: '', script: '',
+    extension_words: '',
+    exam_sentence: '', exam_sentence_translation: '',
+  }
   if (!content) return empty
   try {
     const data = JSON.parse(content)
@@ -42,6 +47,7 @@ export function parseMnemonic(content: string): {
         formula: data.formula ?? '',
         chant: data.chant ?? '',
         script: data.script ?? '',
+        extension_words: data.extension_words ?? '',
         exam_sentence: data.exam_sentence ?? '',
         exam_sentence_translation: data.exam_sentence_translation ?? '',
       }
@@ -54,6 +60,7 @@ export function parseMnemonic(content: string): {
     formula: formulaMatch?.[1]?.trim() ?? '',
     chant: chantMatch?.[1]?.trim() ?? '',
     script: scriptMatch?.[1]?.trim() ?? '',
+    extension_words: '',
     exam_sentence: '',
     exam_sentence_translation: '',
   }
@@ -65,12 +72,20 @@ export function buildMnemonicJson(
   script: string,
   examSentence?: string,
   examSentenceTranslation?: string,
+  extensionWords?: string,
 ): string {
   if (examSentence !== undefined || examSentenceTranslation !== undefined) {
     return JSON.stringify({
       formula, chant, script,
       exam_sentence: examSentence ?? '',
       exam_sentence_translation: examSentenceTranslation ?? '',
+    })
+  }
+  if (extensionWords !== undefined) {
+    return JSON.stringify({
+      formula, chant,
+      extension_words: extensionWords,
+      script,
     })
   }
   return JSON.stringify({ formula, chant, script })

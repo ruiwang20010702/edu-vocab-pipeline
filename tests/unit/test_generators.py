@@ -228,6 +228,57 @@ class TestExamAppMnemonicGenerator:
             assert "exam_sentence_translation" not in parsed, f"{cls.__name__} 不应有 exam_sentence_translation 字段"
 
 
+class TestRootAffixExtensionWords:
+    """词根词缀新增 extension_words 字段相关测试."""
+
+    def test_extra_content_keys(self):
+        """root_affix 子类必须声明 extension_words 为扩展字段."""
+        assert RootAffixMnemonicGenerator.extra_content_keys == ("extension_words",)
+
+    def test_ai_valid_with_extension_words(self):
+        """AI 返回 extension_words 时应解析并写入 content JSON + 顶层返回字段."""
+        gen = RootAffixMnemonicGenerator()
+        ai_resp = {
+            "valid": True,
+            "formula": "in(不) + vis(看) + ible(能…的，形容词后缀)",
+            "chant": "不能被看见。",
+            "extension_words": "vision (视力); visual (视觉的); visit (去看望)",
+            "script": "来，跟老师读一遍...",
+        }
+        with patch.object(gen, "_call_ai", return_value=ai_resp):
+            result = gen.generate("invisible", meaning="看不见的", pos="adj.")
+        assert result["valid"] is True
+        parsed = json.loads(result["content"])
+        assert parsed["extension_words"] == ai_resp["extension_words"]
+        assert parsed["formula"] == ai_resp["formula"]
+        assert parsed["chant"] == ai_resp["chant"]
+        assert parsed["script"] == ai_resp["script"]
+        assert result["extension_words"] == ai_resp["extension_words"]
+        # 不应混入 exam_app 维度字段
+        assert "exam_sentence" not in parsed
+        assert "exam_sentence_translation" not in parsed
+
+    def test_ai_valid_missing_extension_words_defaults_empty(self):
+        """AI 漏返 extension_words 时（向后兼容旧响应）默认空串，不报错."""
+        gen = RootAffixMnemonicGenerator()
+        ai_resp = {"valid": True, "formula": "f", "chant": "c", "script": "s"}
+        with patch.object(gen, "_call_ai", return_value=ai_resp):
+            result = gen.generate("foo", meaning="bar", pos="adj.")
+        assert result["valid"] is True
+        parsed = json.loads(result["content"])
+        assert parsed["extension_words"] == ""
+
+    def test_other_mnemonic_subclasses_no_extension_words(self):
+        """词中词 / 音义联想 / 考试应用三个维度的 content JSON 不应包含 extension_words."""
+        for cls in (WordInWordMnemonicGenerator, SoundMeaningMnemonicGenerator, ExamAppMnemonicGenerator):
+            gen = cls()
+            ai_resp = {"valid": True, "formula": "f", "chant": "c", "script": "s"}
+            with patch.object(gen, "_call_ai", return_value=ai_resp):
+                result = gen.generate("x", meaning="y", pos="adj.")
+            parsed = json.loads(result["content"])
+            assert "extension_words" not in parsed, f"{cls.__name__} 不应有 extension_words 字段"
+
+
 class TestIsTransientError:
     """F4+F5: _is_transient_error 判断临时性错误不触发熔断。"""
 

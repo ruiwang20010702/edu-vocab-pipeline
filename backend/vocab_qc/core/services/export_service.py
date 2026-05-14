@@ -39,7 +39,9 @@ def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
     try:
         data = json.loads(item.content)
         if isinstance(data, dict):
-            base.update({k: data.get(k, "") for k in ("formula", "chant", "script")})
+            base.update(
+                {k: data.get(k, "") for k in ("formula", "chant", "extension_words", "script")}
+            )
             return base
     except (json.JSONDecodeError, TypeError):
         pass
@@ -48,14 +50,15 @@ def _format_mnemonic_export(item: "ContentItem") -> dict[str, Any]:
 
 
 _MNEMONIC_FIELD_KEYS: tuple[str, ...] = (
-    "formula", "chant", "exam_sentence", "exam_sentence_translation", "script",
+    "formula", "chant", "extension_words",
+    "exam_sentence", "exam_sentence_translation", "script",
 )
 
 
 def _parse_mnemonic_fields(content: str) -> dict[str, str]:
-    """从助记 content 中提取 formula/chant/exam_sentence/exam_sentence_translation/script。
+    """从助记 content 中提取 formula/chant/extension_words/exam_sentence/exam_sentence_translation/script。
 
-    旧数据无 exam_sentence / exam_sentence_translation 字段时返回空串。
+    旧数据无 extension_words / exam_sentence / exam_sentence_translation 字段时返回空串。
     """
     empty = dict.fromkeys(_MNEMONIC_FIELD_KEYS, "")
     if not content:
@@ -72,6 +75,7 @@ def _parse_mnemonic_fields(content: str) -> dict[str, str]:
     return {
         "formula": (formula.group(1).strip() if formula else ""),
         "chant": (chant.group(1).strip() if chant else ""),
+        "extension_words": "",
         "exam_sentence": "",
         "exam_sentence_translation": "",
         "script": (script.group(1).strip() if script else ""),
@@ -370,9 +374,13 @@ class ExportService:
         ws = wb.active
         ws.title = "词表导出"
 
-        # 助记类型与各自要导出的列：通用 3 列，考试应用额外含"例句"为 4 列
+        # 助记类型与各自要导出的列：通用 3 列；词根词缀额外含"同根词"为 4 列；考试应用含"例句"为 5 列
         basic_mn_cols: list[tuple[str, str]] = [
             ("formula", "公式"), ("chant", "口诀"), ("script", "话术"),
+        ]
+        root_affix_mn_cols: list[tuple[str, str]] = [
+            ("formula", "公式"), ("chant", "口诀"),
+            ("extension_words", "同根词"), ("script", "话术"),
         ]
         exam_mn_cols: list[tuple[str, str]] = [
             ("formula", "公式"), ("chant", "口诀"),
@@ -380,7 +388,7 @@ class ExportService:
             ("script", "话术"),
         ]
         mnemonic_types: list[tuple[str, str, list[tuple[str, str]]]] = [
-            ("mnemonic_root_affix", "词根词缀", basic_mn_cols),
+            ("mnemonic_root_affix", "词根词缀", root_affix_mn_cols),
             ("mnemonic_word_in_word", "词中词", basic_mn_cols),
             ("mnemonic_sound_meaning", "谐音联想", basic_mn_cols),
             ("mnemonic_exam_app", "考试应用", exam_mn_cols),
@@ -471,12 +479,20 @@ class ExportService:
 
         # 列宽
         base_widths = [15, 22, 22, 40, 40, 18, 8, 30, 24, 12, 12, 12, 28, 28, 42, 42]
-        # 通用助记列宽 = [公式 22, 口诀 22, 话术 30]；考试应用 = [22, 22, 例句 35, 30]
+        # 通用助记列宽 = [公式 22, 口诀 22, 话术 30]
+        # 词根词缀 = [公式 22, 口诀 22, 同根词 28, 话术 30]
+        # 考试应用 = [公式 22, 口诀 22, 例句 35, 例句释义 30, 话术 30]
         basic_mn_widths: list[int] = [22, 22, 30]
-        exam_mn_widths: list[int] = [22, 22, 35, 30]
+        root_affix_mn_widths: list[int] = [22, 22, 28, 30]
+        exam_mn_widths: list[int] = [22, 22, 35, 30, 30]
         mn_widths: list[int] = []
         for mn_key, _, _ in mnemonic_types:
-            mn_widths += exam_mn_widths if mn_key == "mnemonic_exam_app" else basic_mn_widths
+            if mn_key == "mnemonic_exam_app":
+                mn_widths += exam_mn_widths
+            elif mn_key == "mnemonic_root_affix":
+                mn_widths += root_affix_mn_widths
+            else:
+                mn_widths += basic_mn_widths
         for i, w in enumerate(base_widths + mn_widths, 1):
             ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
 
