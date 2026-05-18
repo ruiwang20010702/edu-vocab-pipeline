@@ -44,6 +44,14 @@ class ContentItem(Base):
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_qc_run_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
+    # G 方案：跨包重生去重的双维识别——记录本条 ContentItem 生成时所用 prompt 的 id + file_hash
+    # reset 时比对当前 active prompt 的 id + hash，全等则视为"已是最新版"跳过
+    # 老数据保持 NULL：视为"未知版本"→ 首次重生不跳过
+    generated_with_prompt_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("prompts.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    generated_with_prompt_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     # 关系（字符串引用避免循环导入）
     word_rel: Mapped["Word"] = relationship("Word", back_populates="content_items")
     meaning_rel: Mapped[Optional["Meaning"]] = relationship("Meaning", back_populates="content_items")
