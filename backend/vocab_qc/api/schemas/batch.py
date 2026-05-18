@@ -61,8 +61,10 @@ class ProduceRequest(BaseModel):
 
     - dimensions=None ⇒ 维持旧行为（只生成 PENDING ContentItem）
     - dimensions=[...] ⇒ 先 reset 指定维度（已通过/失败的都覆盖），再触发生产
-    - force_overwrite_recent=True ⇒ 不跳过近期已重生过的 ContentItem
-      （默认 False：24h 内被其他包重生过的会自动跳过，防跨包重复劳动）
+    - force_overwrite_recent=True ⇒ 不跳过"已用最新 prompt 生成"的 ContentItem
+      （默认 False：generated_with_prompt_id + hash 与当前 active prompt 双维匹配
+       的会自动跳过，防跨包重复劳动。字段名沿用历史命名，语义已升级为按 prompt
+       版本判断而非按时间窗）
     """
 
     dimensions: Optional[list[str]] = None

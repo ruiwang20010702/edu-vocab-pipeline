@@ -548,11 +548,10 @@ def produce_batch(
     dimensions_set: set[str] | None = None
     if body and body.dimensions:
         dimensions_set = set(body.dimensions)
-        # force_overwrite_recent=True 时 hours=None 跳过时间窗去重
-        hours = None if body.force_overwrite_recent else 24
+        # force_overwrite_recent=True 时跳过"已是最新 prompt 版本"的判断，强制覆盖
         reset_stats = reset_dimensions_for_regen(
             db, batch_id, dimensions_set, dry_run=False,
-            skip_recently_regenerated_within_hours=hours,
+            skip_if_current_prompt=not body.force_overwrite_recent,
         )
         logger.info(
             "重生预重置 package_id=%s dimensions=%s force=%s reset=%s",
@@ -591,9 +590,8 @@ def produce_preview(
     if not body.dimensions:
         raise HTTPException(status_code=422, detail="dimensions 必填且非空")
 
-    hours = None if body.force_overwrite_recent else 24
     stats = reset_dimensions_for_regen(
         db, batch_id, set(body.dimensions), dry_run=True,
-        skip_recently_regenerated_within_hours=hours,
+        skip_if_current_prompt=not body.force_overwrite_recent,
     )
     return ProducePreviewResponse(**stats)
