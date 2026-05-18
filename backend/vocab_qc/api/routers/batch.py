@@ -488,14 +488,24 @@ def produce_batch(
 
     Body 可选：
     - 无 body / body.dimensions=None：维持旧行为，只生成 PENDING ContentItem。
+      （admin + reviewer 均可，与历史行为一致）
     - body.dimensions=[...]：先重置指定维度（覆盖 approved/failed），再触发生产。
+      （破坏性操作，handler 内二次校验仅 admin 可用）
     """
     from datetime import datetime, timedelta, timezone
 
     from vocab_qc.core.config import settings
     from vocab_qc.core.services.production_service import reset_dimensions_for_regen
 
-    pkg = db.query(Package).filter_by(id=batch_id).first()
+    # 破坏性维度重生：handler 内细粒度校验，避免影响旧的无 body 调用
+    if body and body.dimensions and _current_user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="按维度重新生产为破坏性操作，仅 admin 可触发",
+        )
+
+    # 行锁防 TOCTOU 双击：并发请求会串行走 status 检查
+    pkg = db.query(Package).filter_by(id=batch_id).with_for_update().first()
     if pkg is None:
         raise HTTPException(status_code=404, detail="批次不存在")
 

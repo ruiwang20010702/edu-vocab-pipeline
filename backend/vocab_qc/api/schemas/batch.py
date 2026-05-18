@@ -70,10 +70,14 @@ class ProduceRequest(BaseModel):
     def _validate_dimensions(cls, v: Optional[list[str]]) -> Optional[list[str]]:
         if v is None:
             return v
+        if len(v) == 0:
+            raise ValueError("dimensions 不能为空列表；如需全量生产请省略此字段或传 null")
         bad = set(v) - REGENERATABLE_DIMENSIONS
         if bad:
             raise ValueError(f"非法维度: {sorted(bad)}；合法值: {sorted(REGENERATABLE_DIMENSIONS)}")
-        return v
+        # 去重保留首次出现顺序
+        seen: set[str] = set()
+        return [d for d in v if not (d in seen or seen.add(d))]
 
 
 class ProducePreviewResponse(BaseModel):

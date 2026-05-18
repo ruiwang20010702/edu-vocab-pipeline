@@ -163,6 +163,9 @@ def reset_dimensions_for_regen(
     清空 content / content_cn、qc_status 回到 pending、删除关联 review_items、
     重置 retry_count 与 last_qc_run_id。dry_run=True 时仅返回统计不提交。
 
+    事务边界：只 flush 不 commit，由调用方在更大的事务单元内决定提交时机。
+    避免 reset 已提交但后续 status 切换异常导致的静默数据损坏。
+
     Returns:
         {"content_items": N, "review_items": M, "distinct_words": K,
          "by_dimension": {dim: count}}
@@ -225,7 +228,7 @@ def reset_dimensions_for_regen(
         },
         synchronize_session=False,
     )
-    session.commit()
+    session.flush()
     return stats
 
 
