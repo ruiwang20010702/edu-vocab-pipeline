@@ -51,12 +51,14 @@ def step_generate(
     session: Session,
     package_id: int,
     word_ids: set[int] | None = None,
+    dimensions: set[str] | None = None,
 ) -> int:
     """Step 1: 为 Package 生成内容（独立事务）。
 
     Args:
         word_ids: 可选，仅处理指定的 word_id 子集（分批模式）。
                   为 None 时处理整个 Package。
+        dimensions: 可选，仅生成指定维度。为 None 时不按维度过滤。
     """
     pkg = session.query(Package).filter_by(id=package_id).first()
     if pkg is None:
@@ -72,12 +74,14 @@ def step_generate(
     if not word_ids:
         return 0
 
-    items = (
+    query = (
         session.query(ContentItem)
         .filter(ContentItem.word_id.in_(word_ids))
         .filter_by(qc_status=QcStatus.PENDING.value)
-        .all()
     )
+    if dimensions:
+        query = query.filter(ContentItem.dimension.in_(dimensions))
+    items = query.all()
     generated = _generate_content(session, items, package_id=package_id)
     session.flush()
     return generated
@@ -88,17 +92,19 @@ def step_qc_layer1(
     package_id: int,
     qc_service: Optional[QcService] = None,
     word_ids: set[int] | None = None,
+    dimensions: set[str] | None = None,
 ) -> dict:
     """Step 2: Layer 1 质检 + 失败项入队审核（批量，独立事务）。
 
     Args:
         word_ids: 可选，仅处理指定的 word_id 子集（分批模式）。
+        dimensions: 可选，仅质检指定维度。
     """
     qc = qc_service or QcService()
     if word_ids is None:
         word_ids = _get_word_ids_for_package(session, package_id)
 
-    result = qc.run_layer1_batch(session, word_ids)
+    result = qc.run_layer1_batch(session, word_ids, dimensions=dimensions)
     if result.get("run_id"):
         qc.enqueue_failed_for_review(session, result["run_id"])
 
@@ -111,17 +117,19 @@ def step_qc_layer2(
     package_id: int,
     qc_service: Optional[QcService] = None,
     word_ids: set[int] | None = None,
+    dimensions: set[str] | None = None,
 ) -> dict:
     """Step 3: Layer 2 AI 质检 + 失败项入队审核（批量，独立事务）。
 
     Args:
         word_ids: 可选，仅处理指定的 word_id 子集（分批模式）。
+        dimensions: 可选，仅质检指定维度。
     """
     qc = qc_service or QcService()
     if word_ids is None:
         word_ids = _get_word_ids_for_package(session, package_id)
 
-    result = qc.run_layer2_batch(session, word_ids, package_id=package_id)
+    result = qc.run_layer2_batch(session, word_ids, dimensions=dimensions, package_id=package_id)
     if result.get("run_id"):
         qc.enqueue_layer2_failed_for_review(session, result["run_id"])
 
@@ -141,6 +149,84 @@ def step_finalize(session: Session, package_id: int) -> None:
     pkg.completed_at = datetime.now(UTC)
     pkg.status = "completed"
     session.flush()
+
+
+def reset_dimensions_for_regen(
+    session: Session,
+    package_id: int,
+    dimensions: set[str],
+    *,
+    dry_run: bool = False,
+) -> dict:
+    """重置词包内指定维度的 ContentItem，准备重新生产。
+
+    清空 content / content_cn、qc_status 回到 pending、删除关联 review_items、
+    重置 retry_count 与 last_qc_run_id。dry_run=True 时仅返回统计不提交。
+
+    Returns:
+        {"content_items": N, "review_items": M, "distinct_words": K,
+         "by_dimension": {dim: count}}
+    """
+    from collections import Counter
+
+    from vocab_qc.core.models.quality_layer import ReviewItem
+
+    empty = {"content_items": 0, "review_items": 0, "distinct_words": 0, "by_dimension": {}}
+    if not dimensions:
+        return empty
+
+    word_ids = _get_word_ids_for_package(session, package_id)
+    if not word_ids:
+        return empty
+
+    rows = (
+        session.query(ContentItem.id, ContentItem.dimension, ContentItem.word_id)
+        .filter(
+            ContentItem.word_id.in_(word_ids),
+            ContentItem.dimension.in_(dimensions),
+        )
+        .all()
+    )
+    if not rows:
+        return empty
+
+    ci_ids = [r[0] for r in rows]
+    by_dimension = dict(Counter(r[1] for r in rows))
+    distinct_words = len({r[2] for r in rows})
+
+    ri_count = (
+        session.query(ReviewItem)
+        .filter(ReviewItem.content_item_id.in_(ci_ids))
+        .count()
+    )
+
+    stats = {
+        "content_items": len(ci_ids),
+        "review_items": ri_count,
+        "distinct_words": distinct_words,
+        "by_dimension": by_dimension,
+    }
+
+    if dry_run:
+        return stats
+
+    # 必须先删 review_items，避免残留 pending review 干扰 finalize
+    session.query(ReviewItem).filter(
+        ReviewItem.content_item_id.in_(ci_ids)
+    ).delete(synchronize_session=False)
+
+    session.query(ContentItem).filter(ContentItem.id.in_(ci_ids)).update(
+        {
+            ContentItem.qc_status: QcStatus.PENDING.value,
+            ContentItem.content: "",
+            ContentItem.content_cn: "",
+            ContentItem.last_qc_run_id: None,
+            ContentItem.retry_count: 0,
+        },
+        synchronize_session=False,
+    )
+    session.commit()
+    return stats
 
 
 def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:

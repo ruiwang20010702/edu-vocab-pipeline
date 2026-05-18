@@ -104,6 +104,14 @@ MNEMONIC_DIMENSIONS = frozenset({
     ContentDimension.MNEMONIC_EXAM_APP.value,
 })
 
+# 可重新生产的维度：由 generators 产出 + 走 QC 流水线。
+# meaning / phonetic 由导入产生，不参与重生。
+REGENERATABLE_DIMENSIONS = MNEMONIC_DIMENSIONS | frozenset({
+    ContentDimension.CHUNK.value,
+    ContentDimension.SENTENCE.value,
+    ContentDimension.SYLLABLE.value,
+})
+
 
 class UserRole(str, enum.Enum):
     """用户角色."""

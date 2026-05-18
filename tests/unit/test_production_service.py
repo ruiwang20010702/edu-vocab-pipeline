@@ -356,3 +356,221 @@ class TestBatchProduceResumeLogic:
         db_session.refresh(normal_fail)
         assert zombie.qc_status == QcStatus.PENDING.value  # 被重置
         assert normal_fail.qc_status == QcStatus.LAYER1_FAILED.value  # 未被重置
+
+
+class TestResetDimensionsForRegen:
+    """reset_dimensions_for_regen helper：按词包 + 维度重置，准备重生产。"""
+
+    def _setup_pkg_with_multi_dim(self, db_session):
+        """1 词 + 4 个不同维度的 ContentItem（含 approved/rejected 各种状态）+ 1 个 review_item。"""
+        from vocab_qc.core.models.quality_layer import ReviewItem
+
+        word = Word(word="apple")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="n.", definition="苹果")
+        db_session.add(meaning)
+        db_session.flush()
+
+        pkg = Package(name="reset_test", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+
+        items = {
+            "chunk": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="chunk",
+                content="an apple a day", content_cn="一日一苹果",
+                qc_status=QcStatus.APPROVED.value, retry_count=2,
+                last_qc_run_id="run-xyz",
+            ),
+            "sentence": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="sentence",
+                content="I eat an apple.", content_cn="我吃一个苹果。",
+                qc_status=QcStatus.APPROVED.value,
+            ),
+            "mnemonic_word_in_word": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_word_in_word",
+                content='{"formula":"apple=app+le"}', qc_status=QcStatus.APPROVED.value,
+            ),
+            "mnemonic_sound_meaning": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_sound_meaning",
+                content='{"formula":"x"}', qc_status=QcStatus.LAYER2_FAILED.value,
+            ),
+        }
+        db_session.add_all(items.values())
+        db_session.flush()
+
+        # 给 chunk 加 1 条 review_item，验证级联删除
+        ri = ReviewItem(
+            content_item_id=items["chunk"].id,
+            word_id=word.id, dimension="chunk",
+            reason="manual_test", status="pending",
+        )
+        db_session.add(ri)
+        db_session.flush()
+
+        return pkg, items, ri
+
+    def test_empty_dimensions_returns_empty_stats(self, db_session):
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, _items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        stats = reset_dimensions_for_regen(db_session, pkg.id, set())
+        assert stats == {"content_items": 0, "review_items": 0, "distinct_words": 0, "by_dimension": {}}
+
+    def test_dry_run_returns_stats_without_modifying(self, db_session):
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        original_chunk_content = items["chunk"].content
+
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"}, dry_run=True,
+        )
+
+        assert stats["content_items"] == 2
+        assert stats["review_items"] == 1  # chunk 关联的 review_item
+        assert stats["distinct_words"] == 1
+        assert stats["by_dimension"] == {"chunk": 1, "mnemonic_sound_meaning": 1}
+
+        # 内容未被改动
+        db_session.refresh(items["chunk"])
+        assert items["chunk"].content == original_chunk_content
+        assert items["chunk"].qc_status == QcStatus.APPROVED.value
+
+    def test_execute_resets_content_status_and_cascades_review_items(self, db_session):
+        from vocab_qc.core.models.quality_layer import ReviewItem
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, ri = self._setup_pkg_with_multi_dim(db_session)
+        ri_id = ri.id
+
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
+        )
+        assert stats["content_items"] == 2
+
+        # chunk 被重置
+        db_session.refresh(items["chunk"])
+        assert items["chunk"].content == ""
+        assert items["chunk"].content_cn == ""
+        assert items["chunk"].qc_status == QcStatus.PENDING.value
+        assert items["chunk"].retry_count == 0
+        assert items["chunk"].last_qc_run_id is None
+
+        # mnemonic_sound_meaning 也被重置
+        db_session.refresh(items["mnemonic_sound_meaning"])
+        assert items["mnemonic_sound_meaning"].qc_status == QcStatus.PENDING.value
+        assert items["mnemonic_sound_meaning"].content == ""
+
+        # 未在维度集合内的不受影响
+        db_session.refresh(items["sentence"])
+        assert items["sentence"].qc_status == QcStatus.APPROVED.value
+        assert items["sentence"].content == "I eat an apple."
+        db_session.refresh(items["mnemonic_word_in_word"])
+        assert items["mnemonic_word_in_word"].qc_status == QcStatus.APPROVED.value
+
+        # review_item 被级联删除
+        assert db_session.query(ReviewItem).filter_by(id=ri_id).first() is None
+
+    def test_nonexistent_package_returns_empty(self, db_session):
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        stats = reset_dimensions_for_regen(db_session, 99999, {"chunk"})
+        assert stats == {"content_items": 0, "review_items": 0, "distinct_words": 0, "by_dimension": {}}
+
+    def test_no_matching_dimension_returns_empty(self, db_session):
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, _items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        # syllable 维度未创建任何 ContentItem
+        stats = reset_dimensions_for_regen(db_session, pkg.id, {"syllable"})
+        assert stats["content_items"] == 0
+
+
+class TestStepFunctionsWithDimensions:
+    """step_generate / step_qc_layer1 的 dimensions 参数过滤测试。"""
+
+    def _setup_two_dim(self, db_session):
+        word = Word(word="bird")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="n.", definition="鸟")
+        db_session.add(meaning)
+        db_session.flush()
+
+        pkg = Package(name="dim_test", status="pending", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+
+        chunk = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="chunk",
+            content="", qc_status=QcStatus.PENDING.value,
+        )
+        sentence = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="sentence",
+            content="", qc_status=QcStatus.PENDING.value,
+        )
+        db_session.add_all([chunk, sentence])
+        db_session.flush()
+        return pkg, word, chunk, sentence
+
+    def test_step_generate_dimensions_filter(self, db_session):
+        """step_generate(dimensions={chunk}) 只生成 chunk，不动 sentence。"""
+        from vocab_qc.core.services.production_service import _GENERATORS
+
+        pkg, _w, chunk, sentence = self._setup_two_dim(db_session)
+
+        with patch.multiple(
+            type(_GENERATORS["chunk"]),
+            generate_async=_fake_generate_async(),
+        ), patch.multiple(
+            type(_GENERATORS["sentence"]),
+            generate_async=_fake_generate_async(),
+        ):
+            generated = step_generate(db_session, pkg.id, dimensions={"chunk"})
+
+        assert generated == 1
+        db_session.refresh(chunk)
+        db_session.refresh(sentence)
+        assert chunk.content != ""
+        assert sentence.content == ""  # 未在 dimensions 内，不动
+
+    def test_step_generate_no_dimensions_processes_all(self, db_session):
+        """step_generate(dimensions=None) 维持原行为，全维度生成。"""
+        from vocab_qc.core.services.production_service import _GENERATORS
+
+        pkg, _w, chunk, sentence = self._setup_two_dim(db_session)
+
+        with patch.multiple(
+            type(_GENERATORS["chunk"]),
+            generate_async=_fake_generate_async(),
+        ), patch.multiple(
+            type(_GENERATORS["sentence"]),
+            generate_async=_fake_generate_async(),
+        ):
+            generated = step_generate(db_session, pkg.id)
+
+        assert generated == 2  # 两个维度都生成
+
+    def test_qc_run_layer1_dimensions_filter(self, db_session):
+        """QcService.run_layer1_batch(dimensions={chunk}) 只跑 chunk。"""
+        from vocab_qc.core.services.qc_service import QcService
+
+        pkg, w, chunk, sentence = self._setup_two_dim(db_session)
+        # 填内容让 L1 能跑
+        chunk.content = "a flying bird"
+        sentence.content = "The bird flies."
+        sentence.content_cn = "鸟在飞。"
+        db_session.flush()
+
+        result = QcService().run_layer1_batch(
+            db_session, {w.id}, dimensions={"chunk"},
+        )
+
+        # 只处理 chunk
+        assert result["total"] == 1
+        db_session.refresh(sentence)
+        assert sentence.qc_status == QcStatus.PENDING.value  # sentence 未变

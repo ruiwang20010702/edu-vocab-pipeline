@@ -140,8 +140,13 @@ class QcService:
         session: Session,
         word_ids: set[int],
         dimension: str | None = None,
+        dimensions: set[str] | None = None,
     ) -> dict:
         """批量 Layer 1 质检，一次查询+处理所有 word_id。
+
+        Args:
+            dimension: 单维度过滤（向后兼容字段）。
+            dimensions: 多维度集合过滤；与 dimension 同时给出时取并集。
 
         Returns:
             {"run_id": str, "total": int, "passed": int, "failed": int}
@@ -150,14 +155,17 @@ class QcService:
             ContentItem.word_id.in_(word_ids),
             ContentItem.qc_status.notin_(QC_TERMINAL_STATUSES),
         )
+        dim_filter = set(dimensions or ())
         if dimension:
-            query = query.filter_by(dimension=dimension)
+            dim_filter.add(dimension)
+        if dim_filter:
+            query = query.filter(ContentItem.dimension.in_(dim_filter))
 
         items = query.all()
         if not items:
             return {"run_id": None, "total": 0, "passed": 0, "failed": 0}
 
-        logger.info("Layer1 批量质检开始 word_ids=%d items=%d dimension=%s", len(word_ids), len(items), dimension)
+        logger.info("Layer1 批量质检开始 word_ids=%d items=%d dimensions=%s", len(word_ids), len(items), dim_filter or None)
 
         item_word_ids = {item.word_id for item in items}
         meaning_ids = {item.meaning_id for item in items if item.meaning_id}
@@ -182,8 +190,13 @@ class QcService:
         word_ids: set[int],
         dimension: str | None = None,
         package_id: int | None = None,
+        dimensions: set[str] | None = None,
     ) -> dict:
         """批量 Layer 2 质检，所有项在同一个 asyncio 事件循环中并发。
+
+        Args:
+            dimension: 单维度过滤（向后兼容字段）。
+            dimensions: 多维度集合过滤；与 dimension 同时给出时取并集。
 
         Returns:
             {"run_id": str, "total": int, "passed": int, "failed": int}
@@ -192,14 +205,17 @@ class QcService:
             ContentItem.word_id.in_(word_ids),
             ContentItem.qc_status == QcStatus.LAYER1_PASSED.value,
         )
+        dim_filter = set(dimensions or ())
         if dimension:
-            query = query.filter_by(dimension=dimension)
+            dim_filter.add(dimension)
+        if dim_filter:
+            query = query.filter(ContentItem.dimension.in_(dim_filter))
 
         items = query.all()
         if not items:
             return {"run_id": None, "total": 0, "passed": 0, "failed": 0}
 
-        logger.info("Layer2 批量质检开始 word_ids=%d items=%d dimension=%s", len(word_ids), len(items), dimension)
+        logger.info("Layer2 批量质检开始 word_ids=%d items=%d dimensions=%s", len(word_ids), len(items), dim_filter or None)
 
         item_word_ids = {item.word_id for item in items}
         meaning_ids = {item.meaning_id for item in items if item.meaning_id}
