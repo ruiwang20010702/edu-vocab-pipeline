@@ -143,6 +143,19 @@ class TestProduceWithDimensions:
         assert resp.status_code == 422
         assert "非法维度" in resp.text
 
+    def test_empty_dimensions_list_returns_422(self, batch_app):
+        """dimensions=[] 应明确 422，避免与 None（全量生产）语义混淆。"""
+        client, sf, _bg = batch_app
+        s = sf()
+        pkg_id, _c, _m = _seed_package_with_completed_content(s)
+        s.close()
+
+        resp = client.post(
+            f"/api/batches/{pkg_id}/produce",
+            json={"dimensions": []},
+        )
+        assert resp.status_code == 422
+
     def test_nonexistent_package_returns_404(self, batch_app):
         client, _sf, _bg = batch_app
         resp = client.post("/api/batches/99999/produce", json={"dimensions": ["chunk"]})
@@ -208,3 +221,52 @@ class TestProducePreview:
             json={"dimensions": ["chunk"]},
         )
         assert resp.status_code == 404
+
+
+class TestReviewerCannotProduceButCanPreview:
+    """reviewer 角色：破坏性 produce 被拒，只读 preview 放行（最小权限）。"""
+
+    @pytest.fixture
+    def reviewer_app(self):
+        engine = make_test_engine()
+        session_factory = sessionmaker(bind=engine)
+        override_get_db = make_db_override(session_factory)
+
+        reviewer = User(id=2, email="r@test.com", name="R", role="reviewer", is_active=True)
+        app.dependency_overrides[get_db] = override_get_db
+        app.dependency_overrides[get_current_user] = lambda: reviewer
+        limiter.enabled = False
+
+        with patch("vocab_qc.api.routers.batch._run_production_bg_async"):
+            client = TestClient(app)
+            yield client, session_factory
+
+        app.dependency_overrides.clear()
+        limiter.enabled = True
+        engine.dispose()
+
+    def test_reviewer_produce_with_dimensions_forbidden(self, reviewer_app):
+        client, sf = reviewer_app
+        s = sf()
+        pkg_id, _c, _m = _seed_package_with_completed_content(s)
+        s.close()
+
+        resp = client.post(
+            f"/api/batches/{pkg_id}/produce",
+            json={"dimensions": ["chunk"]},
+        )
+        # require_role("admin") 对 reviewer 应拒绝（403 或 401）
+        assert resp.status_code in (401, 403)
+
+    def test_reviewer_can_preview(self, reviewer_app):
+        client, sf = reviewer_app
+        s = sf()
+        pkg_id, _c, _m = _seed_package_with_completed_content(s)
+        s.close()
+
+        resp = client.post(
+            f"/api/batches/{pkg_id}/produce/preview",
+            json={"dimensions": ["chunk"]},
+        )
+        # preview 是只读 dry-run，reviewer 应可访问
+        assert resp.status_code == 200

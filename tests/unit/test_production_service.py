@@ -574,3 +574,105 @@ class TestStepFunctionsWithDimensions:
         assert result["total"] == 1
         db_session.refresh(sentence)
         assert sentence.qc_status == QcStatus.PENDING.value  # sentence 未变
+
+    def test_qc_run_layer1_dimension_and_dimensions_union(self, db_session):
+        """QcService.run_layer1_batch 同时传 dimension + dimensions 时取并集。"""
+        from vocab_qc.core.services.qc_service import QcService
+
+        _pkg, w, chunk, sentence = self._setup_two_dim(db_session)
+        chunk.content = "a flying bird"
+        sentence.content = "The bird flies."
+        sentence.content_cn = "鸟在飞。"
+        db_session.flush()
+
+        result = QcService().run_layer1_batch(
+            db_session, {w.id},
+            dimension="chunk",        # 旧参数
+            dimensions={"sentence"},  # 新参数
+        )
+
+        # 并集：chunk + sentence 共 2 条
+        assert result["total"] == 2
+
+
+class TestResetThenRegenerate:
+    """reset → step_generate 端到端链路（验证 reset 后 PENDING 真的会被生成器捡起）。"""
+
+    def test_reset_then_step_generate_picks_up_pending(self, db_session):
+        from vocab_qc.core.services.production_service import (
+            _GENERATORS,
+            reset_dimensions_for_regen,
+            step_generate,
+        )
+
+        # 构造：1 词 + chunk(approved) + sentence(approved)
+        word = Word(word="dog")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="n.", definition="狗")
+        db_session.add(meaning)
+        db_session.flush()
+
+        pkg = Package(name="e2e_test", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+
+        chunk = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="chunk",
+            content="walk a dog", qc_status=QcStatus.APPROVED.value,
+        )
+        sentence = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="sentence",
+            content="I love dogs.", qc_status=QcStatus.APPROVED.value,
+        )
+        db_session.add_all([chunk, sentence])
+        db_session.flush()
+
+        # 1. reset chunk
+        reset_dimensions_for_regen(db_session, pkg.id, {"chunk"})
+        db_session.refresh(chunk)
+        assert chunk.qc_status == QcStatus.PENDING.value
+        assert chunk.content == ""
+
+        # 2. step_generate 只过滤 chunk 维度，应真的被生成器捡起
+        with patch.multiple(
+            type(_GENERATORS["chunk"]),
+            generate_async=_fake_generate_async(),
+        ):
+            count = step_generate(db_session, pkg.id, dimensions={"chunk"})
+
+        assert count == 1
+        db_session.refresh(chunk)
+        db_session.refresh(sentence)
+        assert chunk.content != ""  # 真的被生成
+        assert sentence.content == "I love dogs."  # 未被触碰
+
+    def test_reset_is_idempotent(self, db_session):
+        """对已经 PENDING + content='' 的 ContentItem 再次 reset 应幂等。"""
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        word = Word(word="cat")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="n.", definition="猫")
+        db_session.add(meaning)
+        db_session.flush()
+        pkg = Package(name="idem_test", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+        chunk = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="chunk",
+            content="a cat", qc_status=QcStatus.APPROVED.value,
+        )
+        db_session.add(chunk)
+        db_session.flush()
+
+        stats1 = reset_dimensions_for_regen(db_session, pkg.id, {"chunk"})
+        stats2 = reset_dimensions_for_regen(db_session, pkg.id, {"chunk"})
+
+        assert stats1["content_items"] == stats2["content_items"] == 1
+        db_session.refresh(chunk)
+        assert chunk.qc_status == QcStatus.PENDING.value
+        assert chunk.content == ""
