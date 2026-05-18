@@ -108,7 +108,7 @@ class TestProduceWithDimensions:
         pkg_id, chunk_id, mn_id = _seed_package_with_completed_content(s)
         s.close()
 
-        # force_overwrite_recent=True 以禁用时间窗（seed 数据 updated_at 在窗内）
+        # force_overwrite_recent=True 以禁用 G 方案 prompt 版本判断（seed 时 generated_with_prompt_id=NULL 实际不会被跳，但显式 force 让意图明确）
         resp = client.post(
             f"/api/batches/{pkg_id}/produce",
             json={
@@ -175,7 +175,7 @@ class TestProducePreview:
         pkg_id, chunk_id, _mn = _seed_package_with_completed_content(s)
         s.close()
 
-        # force_overwrite_recent=True：禁用时间窗，让 would_reset 等于 content_items
+        # force_overwrite_recent=True：禁用 G 方案 prompt 版本判断，让 would_reset 等于 content_items
         resp = client.post(
             f"/api/batches/{pkg_id}/produce/preview",
             json={
@@ -200,10 +200,11 @@ class TestProducePreview:
         assert s.query(ReviewItem).filter_by(content_item_id=chunk_id).count() == 1
         s.close()
 
-    def test_preview_default_skips_recently_regenerated(self, batch_app):
-        """默认请求（无 force_overwrite_recent）→ 24h 内的 ContentItem 被跳过。
+    def test_preview_default_does_not_skip_null_prompt_id(self, batch_app):
+        """G 方案：默认请求时，generated_with_prompt_id=NULL 的老数据视为未知版本 → 不跳过。
 
-        seed 时 ContentItem 刚 insert，updated_at 是 now，在窗内 → 应全部 skip。
+        seed 时 ContentItem 不带 prompt_id（模拟历史数据或未升级 prompt 前）→
+        应全部参与重生，would_reset=2，skipped_recently=0。
         """
         client, sf, _bg = batch_app
         s = sf()
@@ -217,9 +218,9 @@ class TestProducePreview:
         assert resp.status_code == 200
         data = resp.json()
         assert data["content_items"] == 2
-        # 新建项 updated_at 在 24h 内 → 全跳过
-        assert data["skipped_recently"] == 2
-        assert data["would_reset"] == 0
+        # G 方案：NULL prompt_id → 视为未知版本 → 不跳过
+        assert data["skipped_recently"] == 0
+        assert data["would_reset"] == 2
 
     def test_preview_empty_dimensions_422(self, batch_app):
         client, sf, _bg = batch_app

@@ -21,7 +21,7 @@ interface Props {
 interface PreviewStats {
   content_items: number     // 总匹配数（含跳过）
   would_reset: number       // 真正会动的数量
-  skipped_recently: number  // 因 24h 时间窗被跳过
+  skipped_recently: number  // 因已用最新 prompt 版本生成被跳过（字段名沿用兼容）
   review_items: number
   distinct_words: number
   by_dimension: Record<string, number>
@@ -238,7 +238,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
                 </div>
                 {preview.skipped_recently > 0 && (
                   <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
-                    其中 <strong>{preview.skipped_recently}</strong> 条 24h 内已被其他包重生过 → 自动跳过
+                    其中 <strong>{preview.skipped_recently}</strong> 条已用最新 prompt 生成 → 自动跳过
                   </div>
                 )}
                 <div className="pt-1">
@@ -263,7 +263,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
                 className="mt-0.5"
               />
               <div className="text-xs text-slate-700">
-                <span className="font-bold">强制覆盖近期已重生的</span>
+                <span className="font-bold">强制覆盖已用最新 prompt 版本的</span>
                 <span className="text-slate-500 ml-1">
                   （不推荐：会让其他包的最新内容被再次清空 + 重新审核）
                 </span>

@@ -428,10 +428,10 @@ class TestResetDimensionsForRegen:
         pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
         original_chunk_content = items["chunk"].content
 
-        # 用 hours=None 关闭时间窗去重，确保 would_reset 等于总匹配数
+        # skip_if_current_prompt=False 关闭 G 方案版本判断，确保 would_reset 等于总匹配数
         stats = reset_dimensions_for_regen(
             db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"}, dry_run=True,
-            skip_recently_regenerated_within_hours=None,
+            skip_if_current_prompt=False,
         )
 
         assert stats["content_items"] == 2
@@ -453,10 +453,10 @@ class TestResetDimensionsForRegen:
         pkg, items, ri = self._setup_pkg_with_multi_dim(db_session)
         ri_id = ri.id
 
-        # hours=None：测原始 reset 行为，不被时间窗干扰
+        # skip_if_current_prompt=False：测原始 reset 行为，不被 G 方案版本判断干扰
         stats = reset_dimensions_for_regen(
             db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
-            skip_recently_regenerated_within_hours=None,
+            skip_if_current_prompt=False,
         )
         assert stats["content_items"] == 2
         assert stats["would_reset"] == 2
@@ -501,83 +501,90 @@ class TestResetDimensionsForRegen:
         stats = reset_dimensions_for_regen(db_session, pkg.id, {"syllable"})
         assert stats["content_items"] == 0
 
-    def test_skip_recently_regenerated_within_hours(self, db_session):
-        """24h 内已更新的 ContentItem 应被自动跳过（跨包去重核心机制）。"""
-        from datetime import UTC, datetime, timedelta
+    def _seed_active_prompt(self, db_session, dimension: str, file_hash: str | None = "h1") -> int:
+        """创建一个 generation 类型的 active Prompt，返回 id。"""
+        from vocab_qc.core.models.prompt import Prompt
 
+        p = Prompt(
+            name=f"test-{dimension}", category="generation", dimension=dimension,
+            model="test-model", content="dummy", is_active=True, source="manual",
+            file_hash=file_hash,
+        )
+        db_session.add(p)
+        db_session.flush()
+        return p.id
+
+    def test_skip_if_current_prompt_matches(self, db_session):
+        """generated_with_prompt_id + hash 双维匹配 active prompt → 跳过（G 核心）。"""
         from vocab_qc.core.services.production_service import reset_dimensions_for_regen
 
         pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
-
-        # 模拟「sound_meaning 1 小时前刚被其他包重生过」
-        items["mnemonic_sound_meaning"].updated_at = datetime.now(UTC) - timedelta(hours=1)
-        # chunk 是 25 小时前的老内容（不会被跳过）
-        items["chunk"].updated_at = datetime.now(UTC) - timedelta(hours=25)
+        chunk_prompt_id = self._seed_active_prompt(db_session, "chunk", file_hash="h_chunk")
+        # chunk 已用最新 prompt 生成（id + hash 都对上）
+        items["chunk"].generated_with_prompt_id = chunk_prompt_id
+        items["chunk"].generated_with_prompt_hash = "h_chunk"
         db_session.flush()
 
         stats = reset_dimensions_for_regen(
-            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
-            dry_run=True,  # 默认 hours=24
+            db_session, pkg.id, {"chunk"}, dry_run=True,
         )
 
-        assert stats["content_items"] == 2          # 总匹配
-        assert stats["skipped_recently"] == 1       # sound_meaning 在窗内被跳
-        assert stats["would_reset"] == 1            # 只 chunk 真会动
+        assert stats["content_items"] == 1
+        assert stats["skipped_recently"] == 1     # 已是最新版被跳
+        assert stats["would_reset"] == 0
 
-    def test_force_overwrite_recent_bypasses_skip(self, db_session):
-        """skip_recently_regenerated_within_hours=None → 强制覆盖近期内容。"""
-        from datetime import UTC, datetime, timedelta
-
+    def test_not_skip_if_hash_differs(self, db_session):
+        """同 prompt_id 但 file_hash 不同 → 视为 prompt 文本改了 → 不跳过（B 方案关键）。"""
         from vocab_qc.core.services.production_service import reset_dimensions_for_regen
 
         pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
-        items["mnemonic_sound_meaning"].updated_at = datetime.now(UTC) - timedelta(minutes=5)
-        items["chunk"].updated_at = datetime.now(UTC) - timedelta(minutes=10)
+        chunk_prompt_id = self._seed_active_prompt(db_session, "chunk", file_hash="h_new")
+        # ContentItem 记录的是老 hash，prompt 内容已改
+        items["chunk"].generated_with_prompt_id = chunk_prompt_id  # id 相同
+        items["chunk"].generated_with_prompt_hash = "h_old"        # 但 hash 不同
         db_session.flush()
 
         stats = reset_dimensions_for_regen(
-            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
-            dry_run=True,
-            skip_recently_regenerated_within_hours=None,
+            db_session, pkg.id, {"chunk"}, dry_run=True,
         )
 
-        assert stats["content_items"] == 2
+        assert stats["content_items"] == 1
         assert stats["skipped_recently"] == 0
-        assert stats["would_reset"] == 2
+        assert stats["would_reset"] == 1    # hash 不同 → 必须重生
 
-    def test_execute_with_time_window_only_resets_eligible(self, db_session):
-        """实际 execute 时：只重置 eligible ContentItem，跳过的不动且关联 review 不删。"""
-        from datetime import UTC, datetime, timedelta
-
-        from vocab_qc.core.models.quality_layer import ReviewItem
+    def test_not_skip_if_null_prompt_id(self, db_session):
+        """generated_with_prompt_id=NULL（老数据）→ 视为未知版本 → 不跳过。"""
         from vocab_qc.core.services.production_service import reset_dimensions_for_regen
 
-        pkg, items, ri = self._setup_pkg_with_multi_dim(db_session)
-        ri_id = ri.id
-        # chunk 在窗内（应跳过 + 关联 review_item 不删）
-        items["chunk"].updated_at = datetime.now(UTC) - timedelta(minutes=30)
-        # sound_meaning 在窗外（应重置）
-        items["mnemonic_sound_meaning"].updated_at = datetime.now(UTC) - timedelta(hours=48)
-        original_chunk_content = items["chunk"].content
+        pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        self._seed_active_prompt(db_session, "chunk", file_hash="h_chunk")
+        # chunk 是历史数据，prompt_id 为 NULL
+        items["chunk"].generated_with_prompt_id = None
+        items["chunk"].generated_with_prompt_hash = None
         db_session.flush()
 
         stats = reset_dimensions_for_regen(
-            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
+            db_session, pkg.id, {"chunk"}, dry_run=True,
         )
         assert stats["would_reset"] == 1
-        assert stats["skipped_recently"] == 1
+        assert stats["skipped_recently"] == 0
 
-        # chunk 未被触碰
-        db_session.refresh(items["chunk"])
-        assert items["chunk"].content == original_chunk_content
-        assert items["chunk"].qc_status == QcStatus.APPROVED.value
-        # 关联 review_item 也未删（chunk 被跳过）
-        assert db_session.query(ReviewItem).filter_by(id=ri_id).first() is not None
+    def test_skip_if_current_prompt_false_overrides_all(self, db_session):
+        """skip_if_current_prompt=False → 即使匹配也强制重生。"""
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
 
-        # sound_meaning 被重置
-        db_session.refresh(items["mnemonic_sound_meaning"])
-        assert items["mnemonic_sound_meaning"].qc_status == QcStatus.PENDING.value
-        assert items["mnemonic_sound_meaning"].content == ""
+        pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        chunk_prompt_id = self._seed_active_prompt(db_session, "chunk", file_hash="h_chunk")
+        items["chunk"].generated_with_prompt_id = chunk_prompt_id
+        items["chunk"].generated_with_prompt_hash = "h_chunk"
+        db_session.flush()
+
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk"}, dry_run=True,
+            skip_if_current_prompt=False,
+        )
+        assert stats["would_reset"] == 1
+        assert stats["skipped_recently"] == 0
 
 
 class TestStepFunctionsWithDimensions:
@@ -734,10 +741,10 @@ class TestResetThenRegenerate:
         db_session.add_all([chunk, sentence])
         db_session.flush()
 
-        # 1. reset chunk（hours=None 显式跳过时间窗保护，确保 reset 命中）
+        # 1. reset chunk（skip_if_current_prompt=False 显式禁用版本判断，确保 reset 命中）
         reset_dimensions_for_regen(
             db_session, pkg.id, {"chunk"},
-            skip_recently_regenerated_within_hours=None,
+            skip_if_current_prompt=False,
         )
         db_session.refresh(chunk)
         assert chunk.qc_status == QcStatus.PENDING.value
@@ -777,14 +784,14 @@ class TestResetThenRegenerate:
         db_session.add(chunk)
         db_session.flush()
 
-        # 两次都用 hours=None：测纯幂等性（不被时间窗影响）
+        # 两次都禁用版本判断：测纯幂等性（不被 G 方案影响）
         stats1 = reset_dimensions_for_regen(
             db_session, pkg.id, {"chunk"},
-            skip_recently_regenerated_within_hours=None,
+            skip_if_current_prompt=False,
         )
         stats2 = reset_dimensions_for_regen(
             db_session, pkg.id, {"chunk"},
-            skip_recently_regenerated_within_hours=None,
+            skip_if_current_prompt=False,
         )
 
         assert stats1["content_items"] == stats2["content_items"] == 1
