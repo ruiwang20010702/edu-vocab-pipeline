@@ -46,6 +46,9 @@ export default function PackagePanel() {
     }
   }, [showToast])
 
+  // 稳定 onClose 引用，避免 PackageRegenModal 内部 keydown listener 每帧重挂载
+  const closeModal = useCallback(() => setActiveBatch(null), [])
+
   // 首次展开时懒加载
   useEffect(() => {
     if (expanded && batches === null) void fetchBatches()
@@ -153,7 +156,7 @@ export default function PackagePanel() {
         {activeBatch && (
           <PackageRegenModal
             batch={activeBatch}
-            onClose={() => setActiveBatch(null)}
+            onClose={closeModal}
             onSuccess={fetchBatches}
           />
         )}
