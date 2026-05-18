@@ -514,6 +514,8 @@ def produce_batch(
         raise HTTPException(status_code=409, detail="批次仍在导入中，请稍候后重试")
 
     # P3: processing 超时保护——卡住超过阈值时强制重置为 failed
+    # 注意：这里只 flush 不 commit，避免提前释放 with_for_update 行锁；
+    #      最终统一由本函数末尾的 db.commit() 提交，保证锁持有到事务结束。
     if pkg.status == "processing":
         if pkg.updated_at and (
             datetime.now(timezone.utc)
@@ -522,7 +524,7 @@ def produce_batch(
         ):
             logger.warning("Package %d processing 超时，强制重置为 failed", batch_id)
             pkg.status = "failed"
-            db.commit()
+            db.flush()
         else:
             raise HTTPException(status_code=409, detail="该批次正在生产中")
 
