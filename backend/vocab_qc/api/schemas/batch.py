@@ -61,9 +61,12 @@ class ProduceRequest(BaseModel):
 
     - dimensions=None ⇒ 维持旧行为（只生成 PENDING ContentItem）
     - dimensions=[...] ⇒ 先 reset 指定维度（已通过/失败的都覆盖），再触发生产
+    - force_overwrite_recent=True ⇒ 不跳过近期已重生过的 ContentItem
+      （默认 False：24h 内被其他包重生过的会自动跳过，防跨包重复劳动）
     """
 
     dimensions: Optional[list[str]] = None
+    force_overwrite_recent: bool = False
 
     @field_validator("dimensions")
     @classmethod
@@ -81,9 +84,15 @@ class ProduceRequest(BaseModel):
 
 
 class ProducePreviewResponse(BaseModel):
-    """dry-run 预览受影响项数量，供前端二次确认 UI 使用。"""
+    """dry-run 预览受影响项数量，供前端二次确认 UI 使用。
 
-    content_items: int
-    review_items: int
+    跨包去重：would_reset 是实际会动的数量；skipped_recently 是因
+    24h 时间窗被自动跳过的数量（已被其他包重生过的共享 ContentItem）。
+    """
+
+    content_items: int          # 总匹配数（含跳过）
+    would_reset: int            # 真正会动的数量
+    skipped_recently: int       # 因时间窗被跳过
+    review_items: int           # 真正要删的 review_items 数
     distinct_words: int
     by_dimension: dict[str, int]

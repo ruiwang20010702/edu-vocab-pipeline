@@ -548,10 +548,15 @@ def produce_batch(
     dimensions_set: set[str] | None = None
     if body and body.dimensions:
         dimensions_set = set(body.dimensions)
-        reset_stats = reset_dimensions_for_regen(db, batch_id, dimensions_set, dry_run=False)
+        # force_overwrite_recent=True 时 hours=None 跳过时间窗去重
+        hours = None if body.force_overwrite_recent else 24
+        reset_stats = reset_dimensions_for_regen(
+            db, batch_id, dimensions_set, dry_run=False,
+            skip_recently_regenerated_within_hours=hours,
+        )
         logger.info(
-            "重生预重置 package_id=%s dimensions=%s reset=%s",
-            batch_id, sorted(dimensions_set), reset_stats,
+            "重生预重置 package_id=%s dimensions=%s force=%s reset=%s",
+            batch_id, sorted(dimensions_set), body.force_overwrite_recent, reset_stats,
         )
 
     pkg.status = "processing"
@@ -586,5 +591,9 @@ def produce_preview(
     if not body.dimensions:
         raise HTTPException(status_code=422, detail="dimensions 必填且非空")
 
-    stats = reset_dimensions_for_regen(db, batch_id, set(body.dimensions), dry_run=True)
+    hours = None if body.force_overwrite_recent else 24
+    stats = reset_dimensions_for_regen(
+        db, batch_id, set(body.dimensions), dry_run=True,
+        skip_recently_regenerated_within_hours=hours,
+    )
     return ProducePreviewResponse(**stats)

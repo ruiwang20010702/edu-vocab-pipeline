@@ -157,24 +157,37 @@ def reset_dimensions_for_regen(
     dimensions: set[str],
     *,
     dry_run: bool = False,
+    skip_recently_regenerated_within_hours: int | None = 24,
 ) -> dict:
     """重置词包内指定维度的 ContentItem，准备重新生产。
 
     清空 content / content_cn、qc_status 回到 pending、删除关联 review_items、
     重置 retry_count 与 last_qc_run_id。dry_run=True 时仅返回统计不提交。
 
+    跨包去重：ContentItem 按 (word_id, meaning_id) 唯一，多个 Package 共享。
+    skip_recently_regenerated_within_hours 默认 24 → updated_at 在此时间窗内
+    的 ContentItem 视为"另一个包刚重生过"，自动跳过避免重复劳动；
+    传 None → 强制覆盖所有匹配项（force overwrite，用户显式选定）。
+
     事务边界：只 flush 不 commit，由调用方在更大的事务单元内决定提交时机。
-    避免 reset 已提交但后续 status 切换异常导致的静默数据损坏。
 
     Returns:
-        {"content_items": N, "review_items": M, "distinct_words": K,
+        {"content_items": N,        # 总匹配数（含跳过）
+         "would_reset": R,          # 真正会动的数量（不含跳过）
+         "skipped_recently": S,     # 因时间窗被跳过的数量
+         "review_items": M,         # 真正要删的 review_items 数（仅 would_reset 关联）
+         "distinct_words": K,       # 涉及的不同 word 数（含跳过）
          "by_dimension": {dim: count}}
     """
     from collections import Counter
+    from datetime import UTC, datetime, timedelta
 
     from vocab_qc.core.models.quality_layer import ReviewItem
 
-    empty = {"content_items": 0, "review_items": 0, "distinct_words": 0, "by_dimension": {}}
+    empty = {
+        "content_items": 0, "would_reset": 0, "skipped_recently": 0,
+        "review_items": 0, "distinct_words": 0, "by_dimension": {},
+    }
     if not dimensions:
         return empty
 
@@ -182,43 +195,66 @@ def reset_dimensions_for_regen(
     if not word_ids:
         return empty
 
-    rows = (
-        session.query(ContentItem.id, ContentItem.dimension, ContentItem.word_id)
+    # 全量匹配（含将被时间窗跳过的）
+    all_rows = (
+        session.query(
+            ContentItem.id, ContentItem.dimension,
+            ContentItem.word_id, ContentItem.updated_at,
+        )
         .filter(
             ContentItem.word_id.in_(word_ids),
             ContentItem.dimension.in_(dimensions),
         )
         .all()
     )
-    if not rows:
+    if not all_rows:
         return empty
 
-    ci_ids = [r[0] for r in rows]
-    by_dimension = dict(Counter(r[1] for r in rows))
-    distinct_words = len({r[2] for r in rows})
+    # 按时间窗切分
+    cutoff = None
+    if skip_recently_regenerated_within_hours is not None:
+        cutoff = datetime.now(UTC) - timedelta(hours=skip_recently_regenerated_within_hours)
 
+    def _is_recent(row_updated_at) -> bool:
+        if cutoff is None or row_updated_at is None:
+            return False
+        # 兼容 naive datetime（SQLite 不强制时区）
+        ts = row_updated_at if row_updated_at.tzinfo else row_updated_at.replace(tzinfo=UTC)
+        return ts >= cutoff
+
+    eligible_rows = [r for r in all_rows if not _is_recent(r[3])]
+    eligible_ids = [r[0] for r in eligible_rows]
+    skipped_recently = len(all_rows) - len(eligible_rows)
+
+    by_dimension = dict(Counter(r[1] for r in all_rows))
+    distinct_words = len({r[2] for r in all_rows})
+
+    # review_items 只统计真正会动的（eligible）—— 跳过的 ContentItem 关联 review 不删
     ri_count = (
         session.query(ReviewItem)
-        .filter(ReviewItem.content_item_id.in_(ci_ids))
+        .filter(ReviewItem.content_item_id.in_(eligible_ids))
         .count()
+        if eligible_ids else 0
     )
 
     stats = {
-        "content_items": len(ci_ids),
+        "content_items": len(all_rows),
+        "would_reset": len(eligible_ids),
+        "skipped_recently": skipped_recently,
         "review_items": ri_count,
         "distinct_words": distinct_words,
         "by_dimension": by_dimension,
     }
 
-    if dry_run:
+    if dry_run or not eligible_ids:
         return stats
 
     # 必须先删 review_items，避免残留 pending review 干扰 finalize
     session.query(ReviewItem).filter(
-        ReviewItem.content_item_id.in_(ci_ids)
+        ReviewItem.content_item_id.in_(eligible_ids)
     ).delete(synchronize_session=False)
 
-    session.query(ContentItem).filter(ContentItem.id.in_(ci_ids)).update(
+    session.query(ContentItem).filter(ContentItem.id.in_(eligible_ids)).update(
         {
             ContentItem.qc_status: QcStatus.PENDING.value,
             ContentItem.content: "",
