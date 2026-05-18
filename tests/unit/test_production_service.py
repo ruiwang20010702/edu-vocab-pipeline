@@ -576,13 +576,24 @@ class TestStepFunctionsWithDimensions:
         assert sentence.qc_status == QcStatus.PENDING.value  # sentence 未变
 
     def test_qc_run_layer1_dimension_and_dimensions_union(self, db_session):
-        """QcService.run_layer1_batch 同时传 dimension + dimensions 时取并集。"""
+        """QcService.run_layer1_batch 同时传 dimension + dimensions 时取并集。
+
+        必须证明：并集只覆盖指定维度，不扩散到第三维度（避免 dim_filter
+        被忽略后的全维度扫描 bug 漏过 total==2 这种假阳性断言）。
+        """
         from vocab_qc.core.services.qc_service import QcService
 
         _pkg, w, chunk, sentence = self._setup_two_dim(db_session)
         chunk.content = "a flying bird"
         sentence.content = "The bird flies."
         sentence.content_cn = "鸟在飞。"
+        # 再加第三维度做隔离断言：不在并集内的应保持 PENDING 不被触碰
+        meaning = db_session.query(Meaning).filter_by(word_id=w.id).first()
+        mnemonic = ContentItem(
+            word_id=w.id, meaning_id=meaning.id, dimension="mnemonic_root_affix",
+            content='{"formula":"x"}', qc_status=QcStatus.PENDING.value,
+        )
+        db_session.add(mnemonic)
         db_session.flush()
 
         result = QcService().run_layer1_batch(
@@ -593,6 +604,9 @@ class TestStepFunctionsWithDimensions:
 
         # 并集：chunk + sentence 共 2 条
         assert result["total"] == 2
+        # 第三维度未被并集捕获：保持 PENDING
+        db_session.refresh(mnemonic)
+        assert mnemonic.qc_status == QcStatus.PENDING.value
 
 
 class TestResetThenRegenerate:

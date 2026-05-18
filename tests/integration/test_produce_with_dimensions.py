@@ -246,6 +246,12 @@ class TestReviewerCannotProduceButCanPreview:
         engine.dispose()
 
     def test_reviewer_produce_with_dimensions_forbidden(self, reviewer_app):
+        """reviewer 触发带 dimensions 的破坏性 produce → handler 内 admin 二次校验 403。
+
+        路由 require_role('admin', 'reviewer') 让 reviewer 通过，
+        随后 handler 第一行 if body.dimensions and role != 'admin' 拦截。
+        精确断言 403（不放宽到 401），若未来路由被误改为 admin-only 此测试仍稳。
+        """
         client, sf = reviewer_app
         s = sf()
         pkg_id, _c, _m = _seed_package_with_completed_content(s)
@@ -255,8 +261,23 @@ class TestReviewerCannotProduceButCanPreview:
             f"/api/batches/{pkg_id}/produce",
             json={"dimensions": ["chunk"]},
         )
-        # require_role("admin") 对 reviewer 应拒绝（403 或 401）
-        assert resp.status_code in (401, 403)
+        assert resp.status_code == 403
+        assert "admin" in resp.text
+
+    def test_reviewer_produce_without_dimensions_succeeds(self, reviewer_app):
+        """正向对照：reviewer 不传 dimensions（旧调用路径）应 200，保证向后兼容。
+
+        与 test_reviewer_produce_with_dimensions_forbidden 配对，若 handler 内
+        admin 校验被误反转为 == 'admin'，本测试会失败（reviewer 会被无端拒绝）。
+        """
+        client, sf = reviewer_app
+        s = sf()
+        pkg_id, _c, _m = _seed_package_with_completed_content(s)
+        s.close()
+
+        resp = client.post(f"/api/batches/{pkg_id}/produce")  # 无 body
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "processing"
 
     def test_reviewer_can_preview(self, reviewer_app):
         client, sf = reviewer_app
