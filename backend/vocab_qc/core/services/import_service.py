@@ -52,14 +52,19 @@ _PUNCT_HALF_TO_FULL = str.maketrans({
 
 
 def _normalize_pos(pos: str) -> str:
-    """规范化词性标签：去重复点 + 已知裸标签补点。
+    """规范化词性标签：去重复点 + 已知裸标签补点 + 复合标签按逗号拆分逐段归一。
 
     例: 'n' → 'n.'  /  'N' → 'n.'  /  'adj.' → 'adj.'  /  'adj..' → 'adj.'
-    未识别的复合标签（如 'n., vi.'）保持原样仅去尾部点和小写。
+    复合: 'n, vi' → 'n., vi.'  /  'N,VI' → 'n., vi.'  /  'n., vi.' → 'n., vi.'
+    未识别的标签：保持原样仅小写 + 压缩多余尾点。
     """
     p = pos.strip()
     if not p:
         return ""
+    # 复合词性（含逗号）逐段递归归一化后用 ', ' 重接，保证 'n, vi' 与已有 'n., vi.' 去重命中
+    if "," in p:
+        parts = [_normalize_pos(seg) for seg in p.split(",")]
+        return ", ".join(part for part in parts if part)
     # 去尾部连续的点，统一小写
     bare = p.rstrip(".").strip().lower()
     if bare in _POS_BARE_TAGS:

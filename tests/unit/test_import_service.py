@@ -191,6 +191,10 @@ class TestNormalizePos:
         ("phr", "phr."),
         ("modal v.", "modal v."),
         ("n., vi.", "n., vi."),
+        # 复合词性无点输入也要归一到带点形式，否则与 DB 已有的 'n., vi.' 不会去重
+        ("n, vi", "n., vi."),
+        ("N,VI", "n., vi."),
+        ("vi, vt", "vi., vt."),
         (" v ", "v."),
         ("", ""),
     ])
