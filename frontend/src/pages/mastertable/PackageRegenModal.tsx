@@ -63,7 +63,11 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
         { dimensions: [...selected] },
         { signal: ctrl.signal },
       )
-        .then(stats => setPreview(stats))
+        .then(stats => {
+          // race guard：旧请求 fulfilled 时若用户已切维度，本次响应已 stale
+          if (ctrl.signal.aborted) return
+          setPreview(stats)
+        })
         .catch(err => {
           if (ctrl.signal.aborted) return
           setPreview(null)
@@ -93,6 +97,15 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
   useEffect(() => () => {
     if (armTimerRef.current) window.clearTimeout(armTimerRef.current)
   }, [])
+
+  // ESC 关闭（提交中不响应）
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !submitting) onClose()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [submitting, onClose])
 
   const toggle = (dim: RegenerableDim) => {
     setSelected(prev => {
@@ -130,15 +143,23 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
   }
 
   const isBlocked = batch.status === 'processing'
-  const canSubmit = !isBlocked && selected.size > 0 && !submitting && preview !== null
+  // preview 失败时允许提交（后端会兜底校验），避免瞬时网络错误永久 block 用户
+  const canSubmit = !isBlocked && selected.size > 0 && !submitting
+    && (preview !== null || previewError !== null)
 
   const isAllMnemonic = useMemo(() => {
     return ALL_MNEMONIC_DIMS.every(d => selected.has(d)) && selected.size === ALL_MNEMONIC_DIMS.length
   }, [selected])
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={() => { if (!submitting) onClose() }}
+    >
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="regen-modal-title"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -152,7 +173,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
               <RefreshCw size={20} />
             </div>
             <div>
-              <h3 className="font-bold text-xl text-slate-900">重新生产 · {batch.name}</h3>
+              <h3 id="regen-modal-title" className="font-bold text-xl text-slate-900">重新生产 · {batch.name}</h3>
               <p className="text-xs text-slate-500">共 {batch.total_words} 词 · 状态 {batch.status}</p>
             </div>
           </div>
@@ -195,7 +216,10 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
                 正在计算受影响项...
               </div>
             ) : previewError ? (
-              <p className="text-sm text-rose-600">{previewError}</p>
+              <div className="space-y-1">
+                <p className="text-sm text-rose-600">预览失败：{previewError}</p>
+                <p className="text-xs text-slate-500">仍可提交，后端会对维度做完整校验</p>
+              </div>
             ) : selected.size === 0 ? (
               <p className="text-sm text-slate-400">请至少选择一个维度</p>
             ) : preview ? (

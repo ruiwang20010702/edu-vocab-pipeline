@@ -6,11 +6,17 @@ import { useToast } from '../../components/Toast'
 import type { BatchInfo } from '../../types'
 import PackageRegenModal from './PackageRegenModal'
 
-const STATUS_MAP: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
-  completed: { label: '已完成', color: 'emerald', icon: CheckCircle2 },
-  processing: { label: '生产中', color: 'blue', icon: Loader2 },
-  pending: { label: '待处理', color: 'slate', icon: Clock },
-  failed: { label: '失败', color: 'rose', icon: AlertCircle },
+// Tailwind v4 JIT 只扫字面量类名，禁止用字符串拼接构造 bg-${x}-50
+const STATUS_MAP: Record<string, {
+  label: string
+  badgeCls: string
+  iconCls: string
+  icon: typeof CheckCircle2
+}> = {
+  completed: { label: '已完成', badgeCls: 'bg-emerald-50 text-emerald-700', iconCls: '', icon: CheckCircle2 },
+  processing: { label: '生产中', badgeCls: 'bg-blue-50 text-blue-700', iconCls: 'animate-spin', icon: Loader2 },
+  pending: { label: '待处理', badgeCls: 'bg-slate-50 text-slate-700', iconCls: '', icon: Clock },
+  failed: { label: '失败', badgeCls: 'bg-rose-50 text-rose-700', iconCls: '', icon: AlertCircle },
 }
 
 function formatDate(dateStr: string) {
@@ -51,6 +57,8 @@ export default function PackagePanel() {
     <section className="bg-white rounded-[24px] border border-slate-200 overflow-hidden">
       <button
         onClick={() => setExpanded(v => !v)}
+        aria-expanded={expanded}
+        aria-controls="package-panel-body"
         className="w-full flex items-center justify-between px-5 py-3 hover:bg-slate-50 transition-colors"
       >
         <div className="flex items-center gap-3">
@@ -72,6 +80,7 @@ export default function PackagePanel() {
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
+            id="package-panel-body"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -112,8 +121,8 @@ export default function PackagePanel() {
                             <span className="flex items-center gap-1">
                               <Calendar size={10} />{formatDate(b.created_at)}
                             </span>
-                            <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded bg-${st.color}-50 text-${st.color}-700 font-medium`}>
-                              <Icon size={10} />{st.label}
+                            <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${st.badgeCls}`}>
+                              <Icon size={10} className={st.iconCls} />{st.label}
                             </span>
                           </div>
                         </div>
