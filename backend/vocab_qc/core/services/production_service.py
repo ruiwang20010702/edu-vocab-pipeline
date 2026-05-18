@@ -629,6 +629,11 @@ def _generate_content(session: Session, items: list[ContentItem], *, package_id:
         if result.get("valid") is False:
             item.content = ""
             item.qc_status = QcStatus.REJECTED.value
+            # G 方案：rejected 也是"用当前 prompt 做的决策"，记录版本指纹避免下次重生重复判定
+            cfg = ai_configs.get(item.dimension)
+            if cfg is not None:
+                item.generated_with_prompt_id = cfg.prompt_id
+                item.generated_with_prompt_hash = cfg.prompt_hash
             count += 1
             continue
 
@@ -812,6 +817,11 @@ def _generate_content_queued(
         if parsed.get("valid") is False:
             item.content = ""
             item.qc_status = QcStatus.REJECTED.value
+            # G 方案：rejected 也是"用当前 prompt 做的决策"，记录版本指纹避免下次重生重复判定
+            cfg = ai_configs.get(item.dimension)
+            if cfg is not None:
+                item.generated_with_prompt_id = cfg.prompt_id
+                item.generated_with_prompt_hash = cfg.prompt_hash
             count += 1
             continue
 

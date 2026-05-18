@@ -473,6 +473,9 @@ class ReviewService:
         if gen_result.get("valid") is False:
             content_item.content = ""
             content_item.qc_status = QcStatus.REJECTED.value
+            # G 方案：rejected 也是"用当前 prompt 做的决策"，记录版本指纹避免下次重生重复判定
+            content_item.generated_with_prompt_id = ai_config.prompt_id
+            content_item.generated_with_prompt_hash = ai_config.prompt_hash
             review.status = ReviewStatus.RESOLVED.value
             review.resolution = ReviewResolution.REGENERATE.value
             review.reviewer = reviewer
@@ -621,6 +624,9 @@ class ReviewService:
         if result.get("valid") is False:
             content_item.content = ""
             content_item.qc_status = QcStatus.REJECTED.value
+            # G 方案：rejected 也是"用当前 prompt 做的决策"，记录版本指纹避免下次重生重复判定
+            content_item.generated_with_prompt_id = ai_config.prompt_id
+            content_item.generated_with_prompt_hash = ai_config.prompt_hash
             return
 
         content_item.content = result.get("content", "")

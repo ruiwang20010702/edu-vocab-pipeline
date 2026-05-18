@@ -729,6 +729,40 @@ class TestStepFunctionsWithDimensions:
         db_session.refresh(sentence)
         assert sentence.qc_status == QcStatus.PENDING.value  # sentence 未变
 
+    def test_step_generate_rejected_path_also_writes_prompt_id(self, db_session):
+        """R6: AI 判 valid=false (rejected) 路径也填 prompt_id+hash，避免下次重生重复 token 浪费。
+
+        rejected 是"用当前 prompt 做的 valid 判定"，与成功生成同等地位的版本指纹。
+        prompt 不变 → 跳过；prompt hash 变 → 重做（也许新 prompt 让 AI 判 valid=true）。
+        """
+        from vocab_qc.core.models.prompt import Prompt
+        from vocab_qc.core.services.production_service import _GENERATORS
+
+        pkg, w, chunk, _sentence = self._setup_two_dim(db_session)
+        p = Prompt(
+            name="chunk-gen", category="generation", dimension="chunk",
+            model="test", content="dummy", is_active=True, source="file",
+            file_hash="h_chunk_v1",
+        )
+        db_session.add(p)
+        db_session.flush()
+        prompt_id = p.id
+
+        # mock generator 返回 valid=False
+        async def _fake_rejected(self, *, word, meaning=None, pos=None, _preloaded_config=None):
+            return {"valid": False}
+
+        with patch.multiple(type(_GENERATORS["chunk"]), generate_async=_fake_rejected):
+            count = step_generate(db_session, pkg.id, dimensions={"chunk"})
+
+        assert count == 1
+        db_session.refresh(chunk)
+        assert chunk.qc_status == QcStatus.REJECTED.value
+        assert chunk.content == ""
+        # R6 关键断言：rejected 路径也填了版本指纹
+        assert chunk.generated_with_prompt_id == prompt_id
+        assert chunk.generated_with_prompt_hash == "h_chunk_v1"
+
     def test_step_generate_writes_prompt_version_fingerprint(self, db_session):
         """R4 Prove-It：step_generate 成功后 ContentItem 真的被填上 prompt_id + hash。
 
