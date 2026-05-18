@@ -3,7 +3,7 @@
 G 方案：取代 24h 时间窗，按 prompt 版本判断"是否需要重新生产"。
 nullable + 保留 NULL 老数据策略：首次重生会重做所有历史数据。
 
-Revision ID: 022_add_content_generated_with_prompt_ref
+Revision ID: 022_add_gen_prompt_ref
 Revises: 021_add_ai_task_queue
 Create Date: 2026-05-18
 """
@@ -13,7 +13,7 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "022_add_content_generated_with_prompt_ref"
+revision: str = "022_add_gen_prompt_ref"
 down_revision: Union[str, None] = "021_add_ai_task_queue"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
