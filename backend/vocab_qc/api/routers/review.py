@@ -406,6 +406,9 @@ async def _batch_regenerate_bg(
                         if gen_result.get("valid") is False:
                             ci.content = ""
                             ci.qc_status = QcStatus.REJECTED.value
+                            # G 方案：rejected 也填 prompt 版本指纹（与 _regen_writeback_and_qc 行为一致）
+                            ci.generated_with_prompt_id = ai_config.prompt_id
+                            ci.generated_with_prompt_hash = ai_config.prompt_hash
                             review = ctx["review"]
                             review.status = ReviewStatus.RESOLVED.value
                             review.resolution = ReviewResolution.REGENERATE.value

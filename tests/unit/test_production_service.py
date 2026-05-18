@@ -569,6 +569,48 @@ class TestResetDimensionsForRegen:
         assert stats["would_reset"] == 1
         assert stats["skipped_recently"] == 0
 
+    def test_skip_if_current_prompt_matches_rejected_item(self, db_session):
+        """R6 Prove-It：rejected 项在 prompt_id+hash 双维匹配时也被 reset 跳过。
+
+        这是 R6 核心价值——防止 prompt 未变时反复 AI 判定 rejected 浪费 token。
+        """
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        chunk_prompt_id = self._seed_active_prompt(db_session, "chunk", file_hash="h_chunk_v1")
+
+        # 模拟 R6 补强后的状态：rejected + 已填指纹
+        items["chunk"].qc_status = QcStatus.REJECTED.value
+        items["chunk"].content = ""
+        items["chunk"].generated_with_prompt_id = chunk_prompt_id
+        items["chunk"].generated_with_prompt_hash = "h_chunk_v1"
+        db_session.flush()
+
+        stats = reset_dimensions_for_regen(db_session, pkg.id, {"chunk"}, dry_run=True)
+        assert stats["skipped_recently"] == 1   # rejected 被跳过（与 approved 同等待遇）
+        assert stats["would_reset"] == 0
+
+    def test_rejected_item_reset_when_prompt_hash_changes(self, db_session):
+        """镜像测试：rejected 项在 prompt hash 变化时被重做（不跳过）。
+
+        prompt 升级后 hash 变 → 也许新 prompt 让 AI 判定从 valid=false 转为 true。
+        """
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        # active prompt 已升级到 v2
+        chunk_prompt_id = self._seed_active_prompt(db_session, "chunk", file_hash="h_chunk_v2")
+        # ContentItem 是用 v1 hash 标的 rejected
+        items["chunk"].qc_status = QcStatus.REJECTED.value
+        items["chunk"].content = ""
+        items["chunk"].generated_with_prompt_id = chunk_prompt_id
+        items["chunk"].generated_with_prompt_hash = "h_chunk_v1"  # 老 hash
+        db_session.flush()
+
+        stats = reset_dimensions_for_regen(db_session, pkg.id, {"chunk"}, dry_run=True)
+        assert stats["skipped_recently"] == 0
+        assert stats["would_reset"] == 1   # hash 不同 → 必须重做
+
     def test_skip_if_current_prompt_false_overrides_all(self, db_session):
         """skip_if_current_prompt=False → 即使匹配也强制重生。"""
         from vocab_qc.core.services.production_service import reset_dimensions_for_regen

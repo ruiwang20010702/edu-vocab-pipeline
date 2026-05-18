@@ -244,6 +244,13 @@ class ReviewService:
 
         content_item.content = ""
         content_item.qc_status = QcStatus.REJECTED.value
+        # G 方案：人工标记不适用也是"在当前 prompt 版本下做的决策"，记录指纹
+        # 让下次 reset 跳过；prompt 升级后才会被重做（也许新 prompt 让它变 valid）
+        from vocab_qc.core.services.prompt_service import get_active_prompt
+        active = get_active_prompt(session, "generation", content_item.dimension)
+        if active:
+            content_item.generated_with_prompt_id = active.id
+            content_item.generated_with_prompt_hash = active.file_hash
 
         log_action(
             session,
