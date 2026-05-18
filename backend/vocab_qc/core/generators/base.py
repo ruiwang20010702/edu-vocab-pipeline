@@ -526,12 +526,19 @@ def estimate_cost(model: str, usage: AiUsageInfo) -> float | None:
 
 @dataclass(frozen=True)
 class AiConfig:
-    """AI 调用配置，支持 per-dimension 覆盖."""
+    """AI 调用配置，支持 per-dimension 覆盖.
+
+    prompt_id / prompt_hash：G 方案跨包去重所需的"内容生成版本指纹"。
+    DB 命中时填 Prompt.id 与 Prompt.file_hash；文件/硬编码 fallback 路径保持 None
+    （NULL 视为"未知版本"，reset 时不跳过）。
+    """
 
     system_prompt: str
     model: str
     api_key: str
     base_url: str
+    prompt_id: Optional[int] = None
+    prompt_hash: Optional[str] = None
 
 
 class ContentGenerator:
@@ -544,11 +551,14 @@ class ContentGenerator:
         """获取完整 AI 配置：Prompt 内容 + 模型/密钥/地址。
 
         密钥和地址始终从环境变量读取（安全），仅 Prompt 文本和模型名称可从 DB 覆盖。
+        G 方案：DB 命中 Prompt 时一并记录 id + file_hash 作为生成版本指纹。
         """
         system_prompt = ""
         model = settings.ai_model
         api_key = settings.ai_api_key
         base_url = settings.ai_api_base_url
+        prompt_id: Optional[int] = None
+        prompt_hash: Optional[str] = None
 
         # 从 DB 获取 Prompt 文本和模型名称（不读取密钥）
         if session:
@@ -561,6 +571,8 @@ class ContentGenerator:
                         system_prompt = prompt.content
                     if prompt.model:
                         model = prompt.model
+                    prompt_id = prompt.id
+                    prompt_hash = prompt.file_hash
             except Exception:
                 logging.getLogger(__name__).warning("从数据库获取 Prompt 配置失败", exc_info=True)
 
@@ -578,6 +590,8 @@ class ContentGenerator:
             model=model,
             api_key=api_key,
             base_url=base_url,
+            prompt_id=prompt_id,
+            prompt_hash=prompt_hash,
         )
 
     def _fallback_prompt(self) -> str:

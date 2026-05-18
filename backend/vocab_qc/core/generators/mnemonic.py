@@ -103,6 +103,8 @@ class RootAffixMnemonicGenerator(_MnemonicBase):
             model=config.model,
             api_key=config.api_key,
             base_url=config.base_url,
+            prompt_id=config.prompt_id,
+            prompt_hash=config.prompt_hash,
         )
 
 
