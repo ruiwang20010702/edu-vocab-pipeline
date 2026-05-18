@@ -599,10 +599,12 @@ class ReviewService:
             word=word.word, meaning=meaning_text, pos=pos, session=session,
         )
 
+        # 一次性获取 ai_config 供 usage log + G 方案 prompt 版本指纹复用（避免 locals() 魔法 + 重复 DB 查询）
+        ai_config = generator.get_ai_config(session)
+
         # 提取并记录 AI 用量（由 _do_request 附着 __usage__）
         usage = result.pop("__usage__", None)
         if usage and usage.total_tokens > 0:
-            ai_config = generator.get_ai_config(session)
             session.add(AiUsageLog(
                 phase="generation",
                 dimension=content_item.dimension,
@@ -624,10 +626,9 @@ class ReviewService:
         content_item.content = result.get("content", "")
         if result.get("content_cn"):
             content_item.content_cn = result["content_cn"]
-        # G 方案：记录本条生成时所用 prompt 的版本指纹（复用 usage 分支的 ai_config 否则现取）
-        cfg = locals().get("ai_config") or generator.get_ai_config(session)
-        content_item.generated_with_prompt_id = cfg.prompt_id
-        content_item.generated_with_prompt_hash = cfg.prompt_hash
+        # G 方案：记录本条生成时所用 prompt 的版本指纹
+        content_item.generated_with_prompt_id = ai_config.prompt_id
+        content_item.generated_with_prompt_hash = ai_config.prompt_hash
 
     def manual_edit(
         self,

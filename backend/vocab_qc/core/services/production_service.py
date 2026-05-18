@@ -222,14 +222,30 @@ def reset_dimensions_for_regen(
             )
             .all()
         ):
+            # DB 唯一约束理论保证每 dim 最多 1 个 active，但并发写入或人工失误可能违反
+            # → 取首个 + warning，避免静默拿到不可预测的"最后值"
+            if p[0] in active_prompts:
+                logger.warning(
+                    "dimension %s 存在多个 active prompt，已保留 id=%s 忽略 id=%s",
+                    p[0], active_prompts[p[0]][0], p[1],
+                )
+                continue
             active_prompts[p[0]] = (p[1], p[2])
 
     def _is_current(dim: str, gen_id: int | None, gen_hash: str | None) -> bool:
-        """双维匹配：仅当 prompt_id 与 file_hash 均与当前 active 一致时才视为"已是最新版"。"""
+        """双维匹配：仅当 prompt_id 与 file_hash 均与当前 active 一致时才视为"已是最新版"。
+
+        若 active prompt 的 file_hash 为 NULL（罕见：手工建的 prompt 没存 hash），
+        无法做 hash 比对 → 保守视为不可信版本 → 不跳过，强制重生。
+        否则 None==None 的 Python 行为会让"老数据 hash NULL + active hash NULL"
+        被误判为"已是最新版"。
+        """
         if not skip_if_current_prompt or gen_id is None:
             return False
         cur = active_prompts.get(dim)
         if cur is None:
+            return False
+        if cur[1] is None:
             return False
         return cur[0] == gen_id and cur[1] == gen_hash
 
