@@ -19,6 +19,7 @@ interface MasterMeaning {
   mnemonics?: ContentItem[]
 }
 import WordDetailModal from './mastertable/WordDetailModal'
+import PackagePanel from './mastertable/PackagePanel'
 import { ALL_MNEMONIC_DIMS, MNEMONIC_TYPE_LABELS } from './review/constants'
 import { parseMnemonic } from './review/utils'
 
@@ -119,6 +120,9 @@ export default function MasterTablePage() {
 
   return (
     <div className="space-y-4">
+      {/* 词包总览（默认折叠，展开后可选词包重新生产指定维度） */}
+      <PackagePanel />
+
       {/* 工具栏 */}
       <div className="flex items-center justify-between gap-3">
         <div className="relative flex-1 max-w-xs">

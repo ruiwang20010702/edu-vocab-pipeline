@@ -44,3 +44,10 @@ export const MNEMONIC_TYPE_LABELS: Record<string, string> = {
   mnemonic_sound_meaning: '音义联想',
   mnemonic_exam_app: '考试应用',
 }
+
+// 可重新生产的维度（与后端 REGENERATABLE_DIMENSIONS 保持同步）。
+// meaning / phonetic 由导入产生，不参与重生。
+export const BASIC_REGENERATABLE_DIMS = ['chunk', 'sentence', 'syllable'] as const
+export const REGENERATABLE_DIMS = [...BASIC_REGENERATABLE_DIMS, ...ALL_MNEMONIC_DIMS] as const
+
+export type RegenerableDim = typeof REGENERATABLE_DIMS[number]
