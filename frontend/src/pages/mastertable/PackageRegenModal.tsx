@@ -19,7 +19,9 @@ interface Props {
 }
 
 interface PreviewStats {
-  content_items: number
+  content_items: number     // 总匹配数（含跳过）
+  would_reset: number       // 真正会动的数量
+  skipped_recently: number  // 因 24h 时间窗被跳过
   review_items: number
   distinct_words: number
   by_dimension: Record<string, number>
@@ -38,6 +40,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [confirmArmed, setConfirmArmed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [forceOverwriteRecent, setForceOverwriteRecent] = useState(false)
   const armTimerRef = useRef<number | null>(null)
 
   // 维度选择变化时，重置确认态 + 300ms 防抖触发 dry-run preview
@@ -60,7 +63,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
     const timer = window.setTimeout(() => {
       api.post<PreviewStats>(
         `/batches/${batch.id}/produce/preview`,
-        { dimensions: [...selected] },
+        { dimensions: [...selected], force_overwrite_recent: forceOverwriteRecent },
         { signal: ctrl.signal },
       )
         .then(stats => {
@@ -82,7 +85,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
       ctrl.abort()
       window.clearTimeout(timer)
     }
-  }, [selected, batch.id])
+  }, [selected, batch.id, forceOverwriteRecent])
 
   // 确认按钮 5 秒回退
   const armConfirm = () => {
@@ -127,8 +130,11 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
     }
     setSubmitting(true)
     try {
-      await api.post(`/batches/${batch.id}/produce`, { dimensions: [...selected] })
-      showToast('success', `已进入生产队列：${preview?.content_items ?? 0} 条 ContentItem`)
+      await api.post(`/batches/${batch.id}/produce`, {
+        dimensions: [...selected],
+        force_overwrite_recent: forceOverwriteRecent,
+      })
+      showToast('success', `已进入生产队列：${preview?.would_reset ?? 0} 条 ContentItem`)
       onSuccess()
       onClose()
     } catch (e) {
@@ -144,8 +150,9 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
 
   const isBlocked = batch.status === 'processing'
   // preview 失败时允许提交（后端会兜底校验），避免瞬时网络错误永久 block 用户
+  // would_reset=0 时禁用提交（避免触发 reset 但实际啥也不动的空 commit）
   const canSubmit = !isBlocked && selected.size > 0 && !submitting
-    && (preview !== null || previewError !== null)
+    && (previewError !== null || (preview !== null && preview.would_reset > 0))
 
   const isAllMnemonic = useMemo(() => {
     return ALL_MNEMONIC_DIMS.every(d => selected.has(d)) && selected.size === ALL_MNEMONIC_DIMS.length
@@ -225,9 +232,17 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
             ) : preview ? (
               <div className="space-y-1.5 text-sm text-slate-700">
                 <div>
-                  将重置 <strong className="text-rose-700">{preview.distinct_words}</strong> 词 ×{' '}
-                  <strong className="text-rose-700">{Object.keys(preview.by_dimension).length}</strong> 维度 ={' '}
-                  <strong className="text-rose-700">{preview.content_items}</strong> 条 ContentItem
+                  匹配 <strong>{preview.distinct_words}</strong> 词 ×{' '}
+                  <strong>{Object.keys(preview.by_dimension).length}</strong> 维度 ={' '}
+                  <strong>{preview.content_items}</strong> 条 ContentItem
+                </div>
+                {preview.skipped_recently > 0 && (
+                  <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                    其中 <strong>{preview.skipped_recently}</strong> 条 24h 内已被其他包重生过 → 自动跳过
+                  </div>
+                )}
+                <div className="pt-1">
+                  实际会重生：<strong className="text-rose-700 text-base">{preview.would_reset}</strong> 条
                 </div>
                 {preview.review_items > 0 && (
                   <div className="text-xs text-slate-500">
@@ -237,6 +252,24 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
               </div>
             ) : null}
           </div>
+
+          {/* 强制覆盖开关：仅在有跳过项时显示 */}
+          {preview && preview.skipped_recently > 0 && (
+            <label className="flex items-start gap-2 px-3 py-2 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={forceOverwriteRecent}
+                onChange={e => setForceOverwriteRecent(e.target.checked)}
+                className="mt-0.5"
+              />
+              <div className="text-xs text-slate-700">
+                <span className="font-bold">强制覆盖近期已重生的</span>
+                <span className="text-slate-500 ml-1">
+                  （不推荐：会让其他包的最新内容被再次清空 + 重新审核）
+                </span>
+              </div>
+            </label>
+          )}
 
           {/* 覆盖警告 */}
           <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 flex items-start gap-3">
@@ -277,7 +310,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
             {submitting ? (
               <><Loader2 size={16} className="animate-spin" /> 提交中</>
             ) : confirmArmed ? (
-              <>确认 — 将覆盖 {preview?.content_items ?? 0} 条</>
+              <>确认 — 将重生 {preview?.would_reset ?? 0} 条</>
             ) : (
               <><RefreshCw size={16} /> 重新生产...</>
             )}
