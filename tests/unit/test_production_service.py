@@ -417,7 +417,10 @@ class TestResetDimensionsForRegen:
 
         pkg, _items, _ri = self._setup_pkg_with_multi_dim(db_session)
         stats = reset_dimensions_for_regen(db_session, pkg.id, set())
-        assert stats == {"content_items": 0, "review_items": 0, "distinct_words": 0, "by_dimension": {}}
+        assert stats == {
+            "content_items": 0, "would_reset": 0, "skipped_recently": 0,
+            "review_items": 0, "distinct_words": 0, "by_dimension": {},
+        }
 
     def test_dry_run_returns_stats_without_modifying(self, db_session):
         from vocab_qc.core.services.production_service import reset_dimensions_for_regen
@@ -425,11 +428,15 @@ class TestResetDimensionsForRegen:
         pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
         original_chunk_content = items["chunk"].content
 
+        # 用 hours=None 关闭时间窗去重，确保 would_reset 等于总匹配数
         stats = reset_dimensions_for_regen(
             db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"}, dry_run=True,
+            skip_recently_regenerated_within_hours=None,
         )
 
         assert stats["content_items"] == 2
+        assert stats["would_reset"] == 2
+        assert stats["skipped_recently"] == 0
         assert stats["review_items"] == 1  # chunk 关联的 review_item
         assert stats["distinct_words"] == 1
         assert stats["by_dimension"] == {"chunk": 1, "mnemonic_sound_meaning": 1}
@@ -446,10 +453,13 @@ class TestResetDimensionsForRegen:
         pkg, items, ri = self._setup_pkg_with_multi_dim(db_session)
         ri_id = ri.id
 
+        # hours=None：测原始 reset 行为，不被时间窗干扰
         stats = reset_dimensions_for_regen(
             db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
+            skip_recently_regenerated_within_hours=None,
         )
         assert stats["content_items"] == 2
+        assert stats["would_reset"] == 2
 
         # chunk 被重置
         db_session.refresh(items["chunk"])
@@ -478,7 +488,10 @@ class TestResetDimensionsForRegen:
         from vocab_qc.core.services.production_service import reset_dimensions_for_regen
 
         stats = reset_dimensions_for_regen(db_session, 99999, {"chunk"})
-        assert stats == {"content_items": 0, "review_items": 0, "distinct_words": 0, "by_dimension": {}}
+        assert stats == {
+            "content_items": 0, "would_reset": 0, "skipped_recently": 0,
+            "review_items": 0, "distinct_words": 0, "by_dimension": {},
+        }
 
     def test_no_matching_dimension_returns_empty(self, db_session):
         from vocab_qc.core.services.production_service import reset_dimensions_for_regen
@@ -487,6 +500,84 @@ class TestResetDimensionsForRegen:
         # syllable 维度未创建任何 ContentItem
         stats = reset_dimensions_for_regen(db_session, pkg.id, {"syllable"})
         assert stats["content_items"] == 0
+
+    def test_skip_recently_regenerated_within_hours(self, db_session):
+        """24h 内已更新的 ContentItem 应被自动跳过（跨包去重核心机制）。"""
+        from datetime import UTC, datetime, timedelta
+
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
+
+        # 模拟「sound_meaning 1 小时前刚被其他包重生过」
+        items["mnemonic_sound_meaning"].updated_at = datetime.now(UTC) - timedelta(hours=1)
+        # chunk 是 25 小时前的老内容（不会被跳过）
+        items["chunk"].updated_at = datetime.now(UTC) - timedelta(hours=25)
+        db_session.flush()
+
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
+            dry_run=True,  # 默认 hours=24
+        )
+
+        assert stats["content_items"] == 2          # 总匹配
+        assert stats["skipped_recently"] == 1       # sound_meaning 在窗内被跳
+        assert stats["would_reset"] == 1            # 只 chunk 真会动
+
+    def test_force_overwrite_recent_bypasses_skip(self, db_session):
+        """skip_recently_regenerated_within_hours=None → 强制覆盖近期内容。"""
+        from datetime import UTC, datetime, timedelta
+
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        items["mnemonic_sound_meaning"].updated_at = datetime.now(UTC) - timedelta(minutes=5)
+        items["chunk"].updated_at = datetime.now(UTC) - timedelta(minutes=10)
+        db_session.flush()
+
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
+            dry_run=True,
+            skip_recently_regenerated_within_hours=None,
+        )
+
+        assert stats["content_items"] == 2
+        assert stats["skipped_recently"] == 0
+        assert stats["would_reset"] == 2
+
+    def test_execute_with_time_window_only_resets_eligible(self, db_session):
+        """实际 execute 时：只重置 eligible ContentItem，跳过的不动且关联 review 不删。"""
+        from datetime import UTC, datetime, timedelta
+
+        from vocab_qc.core.models.quality_layer import ReviewItem
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, ri = self._setup_pkg_with_multi_dim(db_session)
+        ri_id = ri.id
+        # chunk 在窗内（应跳过 + 关联 review_item 不删）
+        items["chunk"].updated_at = datetime.now(UTC) - timedelta(minutes=30)
+        # sound_meaning 在窗外（应重置）
+        items["mnemonic_sound_meaning"].updated_at = datetime.now(UTC) - timedelta(hours=48)
+        original_chunk_content = items["chunk"].content
+        db_session.flush()
+
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
+        )
+        assert stats["would_reset"] == 1
+        assert stats["skipped_recently"] == 1
+
+        # chunk 未被触碰
+        db_session.refresh(items["chunk"])
+        assert items["chunk"].content == original_chunk_content
+        assert items["chunk"].qc_status == QcStatus.APPROVED.value
+        # 关联 review_item 也未删（chunk 被跳过）
+        assert db_session.query(ReviewItem).filter_by(id=ri_id).first() is not None
+
+        # sound_meaning 被重置
+        db_session.refresh(items["mnemonic_sound_meaning"])
+        assert items["mnemonic_sound_meaning"].qc_status == QcStatus.PENDING.value
+        assert items["mnemonic_sound_meaning"].content == ""
 
 
 class TestStepFunctionsWithDimensions:
@@ -643,8 +734,11 @@ class TestResetThenRegenerate:
         db_session.add_all([chunk, sentence])
         db_session.flush()
 
-        # 1. reset chunk
-        reset_dimensions_for_regen(db_session, pkg.id, {"chunk"})
+        # 1. reset chunk（hours=None 显式跳过时间窗保护，确保 reset 命中）
+        reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk"},
+            skip_recently_regenerated_within_hours=None,
+        )
         db_session.refresh(chunk)
         assert chunk.qc_status == QcStatus.PENDING.value
         assert chunk.content == ""
@@ -683,10 +777,18 @@ class TestResetThenRegenerate:
         db_session.add(chunk)
         db_session.flush()
 
-        stats1 = reset_dimensions_for_regen(db_session, pkg.id, {"chunk"})
-        stats2 = reset_dimensions_for_regen(db_session, pkg.id, {"chunk"})
+        # 两次都用 hours=None：测纯幂等性（不被时间窗影响）
+        stats1 = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk"},
+            skip_recently_regenerated_within_hours=None,
+        )
+        stats2 = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk"},
+            skip_recently_regenerated_within_hours=None,
+        )
 
         assert stats1["content_items"] == stats2["content_items"] == 1
+        assert stats1["would_reset"] == stats2["would_reset"] == 1
         db_session.refresh(chunk)
         assert chunk.qc_status == QcStatus.PENDING.value
         assert chunk.content == ""

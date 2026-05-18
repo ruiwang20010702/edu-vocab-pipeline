@@ -108,9 +108,13 @@ class TestProduceWithDimensions:
         pkg_id, chunk_id, mn_id = _seed_package_with_completed_content(s)
         s.close()
 
+        # force_overwrite_recent=True 以禁用时间窗（seed 数据 updated_at 在窗内）
         resp = client.post(
             f"/api/batches/{pkg_id}/produce",
-            json={"dimensions": ["chunk", "mnemonic_sound_meaning"]},
+            json={
+                "dimensions": ["chunk", "mnemonic_sound_meaning"],
+                "force_overwrite_recent": True,
+            },
         )
         assert resp.status_code == 200, resp.text
         bg_mock.assert_called_once()
@@ -171,13 +175,19 @@ class TestProducePreview:
         pkg_id, chunk_id, _mn = _seed_package_with_completed_content(s)
         s.close()
 
+        # force_overwrite_recent=True：禁用时间窗，让 would_reset 等于 content_items
         resp = client.post(
             f"/api/batches/{pkg_id}/produce/preview",
-            json={"dimensions": ["chunk", "mnemonic_sound_meaning"]},
+            json={
+                "dimensions": ["chunk", "mnemonic_sound_meaning"],
+                "force_overwrite_recent": True,
+            },
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["content_items"] == 2
+        assert data["would_reset"] == 2
+        assert data["skipped_recently"] == 0
         assert data["review_items"] == 1
         assert data["distinct_words"] == 1
         assert data["by_dimension"] == {"chunk": 1, "mnemonic_sound_meaning": 1}
@@ -189,6 +199,27 @@ class TestProducePreview:
         assert chunk.content == "an apple a day"
         assert s.query(ReviewItem).filter_by(content_item_id=chunk_id).count() == 1
         s.close()
+
+    def test_preview_default_skips_recently_regenerated(self, batch_app):
+        """默认请求（无 force_overwrite_recent）→ 24h 内的 ContentItem 被跳过。
+
+        seed 时 ContentItem 刚 insert，updated_at 是 now，在窗内 → 应全部 skip。
+        """
+        client, sf, _bg = batch_app
+        s = sf()
+        pkg_id, _c, _m = _seed_package_with_completed_content(s)
+        s.close()
+
+        resp = client.post(
+            f"/api/batches/{pkg_id}/produce/preview",
+            json={"dimensions": ["chunk", "mnemonic_sound_meaning"]},  # 不传 force
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["content_items"] == 2
+        # 新建项 updated_at 在 24h 内 → 全跳过
+        assert data["skipped_recently"] == 2
+        assert data["would_reset"] == 0
 
     def test_preview_empty_dimensions_422(self, batch_app):
         client, sf, _bg = batch_app
