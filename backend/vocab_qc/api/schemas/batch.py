@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from vocab_qc.core.models.enums import REGENERATABLE_DIMENSIONS
 
 
 class BatchResponse(BaseModel):
@@ -52,3 +54,32 @@ class BatchStatsResponse(BaseModel):
 class ProduceResponse(BaseModel):
     batch_id: int
     status: str
+
+
+class ProduceRequest(BaseModel):
+    """生产/重新生产请求体。
+
+    - dimensions=None ⇒ 维持旧行为（只生成 PENDING ContentItem）
+    - dimensions=[...] ⇒ 先 reset 指定维度（已通过/失败的都覆盖），再触发生产
+    """
+
+    dimensions: Optional[list[str]] = None
+
+    @field_validator("dimensions")
+    @classmethod
+    def _validate_dimensions(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is None:
+            return v
+        bad = set(v) - REGENERATABLE_DIMENSIONS
+        if bad:
+            raise ValueError(f"非法维度: {sorted(bad)}；合法值: {sorted(REGENERATABLE_DIMENSIONS)}")
+        return v
+
+
+class ProducePreviewResponse(BaseModel):
+    """dry-run 预览受影响项数量，供前端二次确认 UI 使用。"""
+
+    content_items: int
+    review_items: int
+    distinct_words: int
+    by_dimension: dict[str, int]

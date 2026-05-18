@@ -16,6 +16,8 @@ from vocab_qc.api.schemas.batch import (
     BatchStatsResponse,
     BatchWordItem,
     BatchWordResponse,
+    ProducePreviewResponse,
+    ProduceRequest,
     ProduceResponse,
 )
 from vocab_qc.api.schemas.batch_info import BatchInfoResponse
@@ -331,11 +333,14 @@ def _build_smart_batches(
     return batches
 
 
-def _run_production_bg(batch_id: int) -> None:
+def _run_production_bg(batch_id: int, dimensions: set[str] | None = None) -> None:
     """后台执行生产流水线，按词分批处理避免超时。
 
     每批词独立走完 generate→L1→L2→commit，单批在 1200s 超时内可完成。
     单批失败不影响其他批次，天然支持断点恢复。
+
+    Args:
+        dimensions: 可选，仅处理指定维度（None ⇒ 全维度，向后兼容）。
     """
     from vocab_qc.core.circuit_breaker import CircuitBreaker
     from vocab_qc.core.config import settings
@@ -391,7 +396,7 @@ def _run_production_bg(batch_id: int) -> None:
         for step_name, step_fn in steps:
             session = SyncSessionLocal()
             try:
-                step_fn(session, batch_id, word_ids=word_batch)
+                step_fn(session, batch_id, word_ids=word_batch, dimensions=dimensions)
                 session.commit()
             except Exception:
                 session.rollback()
@@ -463,10 +468,10 @@ def _run_production_bg(batch_id: int) -> None:
         session.close()
 
 
-async def _run_production_bg_async(batch_id: int) -> None:
+async def _run_production_bg_async(batch_id: int, dimensions: set[str] | None = None) -> None:
     """将同步生产任务包装到线程池执行，避免阻塞事件循环。"""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(_production_executor, _run_production_bg, batch_id)
+    await loop.run_in_executor(_production_executor, _run_production_bg, batch_id, dimensions)
 
 
 @router.post("/{batch_id}/produce", response_model=ProduceResponse)
@@ -475,13 +480,20 @@ def produce_batch(
     request: Request,
     batch_id: int,
     background_tasks: BackgroundTasks,
+    body: ProduceRequest | None = None,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin", "reviewer")),
 ):
-    """触发生产流水线（后台执行）: 生成内容→Layer1 质检→失败项入队审核。"""
+    """触发生产流水线（后台执行）: 生成内容→Layer1 质检→失败项入队审核。
+
+    Body 可选：
+    - 无 body / body.dimensions=None：维持旧行为，只生成 PENDING ContentItem。
+    - body.dimensions=[...]：先重置指定维度（覆盖 approved/failed），再触发生产。
+    """
     from datetime import datetime, timedelta, timezone
 
     from vocab_qc.core.config import settings
+    from vocab_qc.core.services.production_service import reset_dimensions_for_regen
 
     pkg = db.query(Package).filter_by(id=batch_id).first()
     if pkg is None:
@@ -520,9 +532,47 @@ def produce_batch(
                 synchronize_session=False,
             )
 
+    # 显式维度子集 → 在切 processing 前清空旧内容（已 approved 也覆盖）
+    dimensions_set: set[str] | None = None
+    if body and body.dimensions:
+        dimensions_set = set(body.dimensions)
+        reset_stats = reset_dimensions_for_regen(db, batch_id, dimensions_set, dry_run=False)
+        logger.info(
+            "重生预重置 package_id=%s dimensions=%s reset=%s",
+            batch_id, sorted(dimensions_set), reset_stats,
+        )
+
     pkg.status = "processing"
     pkg.processed_words = 0  # 重置进度，_run_production_bg 会用绝对值重新计算
     db.commit()
-    logger.info("触发生产 package_id=%s user=%s", batch_id, _current_user.email)
-    background_tasks.add_task(_run_production_bg_async, batch_id)
+    logger.info(
+        "触发生产 package_id=%s user=%s dimensions=%s",
+        batch_id, _current_user.email, sorted(dimensions_set) if dimensions_set else None,
+    )
+    background_tasks.add_task(_run_production_bg_async, batch_id, dimensions_set)
     return ProduceResponse(batch_id=batch_id, status="processing")
+
+
+@router.post("/{batch_id}/produce/preview", response_model=ProducePreviewResponse)
+@limiter.limit("20/minute")
+def produce_preview(
+    request: Request,
+    batch_id: int,
+    body: ProduceRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin", "reviewer")),
+):
+    """dry-run 预览：给定维度集合，返回将受影响的 ContentItem / review_items / words 数量。
+
+    用于前端"维度复选框 → 实时显示将影响 X 条"二次确认 UI，不改任何数据。
+    """
+    from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+    pkg = db.query(Package).filter_by(id=batch_id).first()
+    if pkg is None:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    if not body.dimensions:
+        raise HTTPException(status_code=422, detail="dimensions 必填且非空")
+
+    stats = reset_dimensions_for_regen(db, batch_id, set(body.dimensions), dry_run=True)
+    return ProducePreviewResponse(**stats)
