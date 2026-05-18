@@ -586,6 +586,62 @@ class TestResetDimensionsForRegen:
         assert stats["would_reset"] == 1
         assert stats["skipped_recently"] == 0
 
+    def test_active_prompt_hash_null_does_not_match(self, db_session):
+        """R2：active prompt 的 file_hash 为 NULL 时，不能与 ContentItem 的 NULL hash 误匹配。
+
+        Python `None == None` 是 True，若不保护就会出现"双 NULL 误判为已是最新版"。
+        """
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, _ri = self._setup_pkg_with_multi_dim(db_session)
+        # active prompt 没存 file_hash（手工建的 prompt）
+        chunk_prompt_id = self._seed_active_prompt(db_session, "chunk", file_hash=None)
+        items["chunk"].generated_with_prompt_id = chunk_prompt_id
+        items["chunk"].generated_with_prompt_hash = None
+        db_session.flush()
+
+        stats = reset_dimensions_for_regen(db_session, pkg.id, {"chunk"}, dry_run=True)
+        assert stats["would_reset"] == 1  # 不应该跳
+        assert stats["skipped_recently"] == 0
+
+    def test_execute_skipped_item_review_not_deleted(self, db_session):
+        """R5（C 方案有 G 方案缺）：execute 时被跳过的 ContentItem，关联 review_item 不应被删除。
+
+        被跳过 = 数据未被改动 → 关联的人工审核记录必须保持原样。
+        """
+        from vocab_qc.core.models.quality_layer import ReviewItem
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items, ri = self._setup_pkg_with_multi_dim(db_session)
+        ri_id = ri.id
+        # chunk 已用最新 prompt 生成 → 应被跳过 + review_item 保留
+        chunk_prompt_id = self._seed_active_prompt(db_session, "chunk", file_hash="h_chunk")
+        items["chunk"].generated_with_prompt_id = chunk_prompt_id
+        items["chunk"].generated_with_prompt_hash = "h_chunk"
+        # mnemonic_sound_meaning 未匹配 → 应被 reset（验证混合行为）
+        items["mnemonic_sound_meaning"].generated_with_prompt_id = None
+        db_session.flush()
+        original_chunk_content = items["chunk"].content
+
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk", "mnemonic_sound_meaning"},
+        )
+        assert stats["skipped_recently"] == 1  # chunk 被跳
+        assert stats["would_reset"] == 1       # mnemonic 真重生
+
+        # 跳过的 chunk 内容未动
+        db_session.refresh(items["chunk"])
+        assert items["chunk"].content == original_chunk_content
+        assert items["chunk"].qc_status == QcStatus.APPROVED.value
+
+        # 跳过的 chunk 关联 review_item 必须保留
+        assert db_session.query(ReviewItem).filter_by(id=ri_id).first() is not None
+
+        # 真重生的 mnemonic 被清空
+        db_session.refresh(items["mnemonic_sound_meaning"])
+        assert items["mnemonic_sound_meaning"].content == ""
+        assert items["mnemonic_sound_meaning"].qc_status == QcStatus.PENDING.value
+
 
 class TestStepFunctionsWithDimensions:
     """step_generate / step_qc_layer1 的 dimensions 参数过滤测试。"""
@@ -672,6 +728,37 @@ class TestStepFunctionsWithDimensions:
         assert result["total"] == 1
         db_session.refresh(sentence)
         assert sentence.qc_status == QcStatus.PENDING.value  # sentence 未变
+
+    def test_step_generate_writes_prompt_version_fingerprint(self, db_session):
+        """R4 Prove-It：step_generate 成功后 ContentItem 真的被填上 prompt_id + hash。
+
+        若有人误删 G3 写入点的两行 cfg.prompt_id 赋值，本测试必失败。
+        """
+        from vocab_qc.core.models.prompt import Prompt
+        from vocab_qc.core.services.production_service import _GENERATORS
+
+        pkg, w, chunk, _sentence = self._setup_two_dim(db_session)
+        # 先建一个该 dim 的 active prompt（让 generator.get_ai_config 能拿到 id+hash）
+        p = Prompt(
+            name="chunk-gen", category="generation", dimension="chunk",
+            model="test", content="dummy", is_active=True, source="file",
+            file_hash="h_chunk_v1",
+        )
+        db_session.add(p)
+        db_session.flush()
+        prompt_id = p.id
+
+        with patch.multiple(
+            type(_GENERATORS["chunk"]),
+            generate_async=_fake_generate_async(),
+        ):
+            count = step_generate(db_session, pkg.id, dimensions={"chunk"})
+
+        assert count == 1
+        db_session.refresh(chunk)
+        # 关键 Prove-It 断言：写入点真正落了 prompt 版本指纹
+        assert chunk.generated_with_prompt_id == prompt_id
+        assert chunk.generated_with_prompt_hash == "h_chunk_v1"
 
     def test_qc_run_layer1_dimension_and_dimensions_union(self, db_session):
         """QcService.run_layer1_batch 同时传 dimension + dimensions 时取并集。
