@@ -489,6 +489,9 @@ class ReviewService:
         content_item.content = gen_result.get("content", "")
         if gen_result.get("content_cn"):
             content_item.content_cn = gen_result["content_cn"]
+        # G 方案：记录本条生成时所用 prompt 的版本指纹
+        content_item.generated_with_prompt_id = ai_config.prompt_id
+        content_item.generated_with_prompt_hash = ai_config.prompt_hash
 
         # 重置质检状态 + 运行质检
         content_item.qc_status = QcStatus.PENDING.value
@@ -621,6 +624,10 @@ class ReviewService:
         content_item.content = result.get("content", "")
         if result.get("content_cn"):
             content_item.content_cn = result["content_cn"]
+        # G 方案：记录本条生成时所用 prompt 的版本指纹（复用 usage 分支的 ai_config 否则现取）
+        cfg = locals().get("ai_config") or generator.get_ai_config(session)
+        content_item.generated_with_prompt_id = cfg.prompt_id
+        content_item.generated_with_prompt_hash = cfg.prompt_hash
 
     def manual_edit(
         self,

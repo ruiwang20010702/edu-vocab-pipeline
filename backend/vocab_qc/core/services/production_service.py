@@ -157,31 +157,31 @@ def reset_dimensions_for_regen(
     dimensions: set[str],
     *,
     dry_run: bool = False,
-    skip_recently_regenerated_within_hours: int | None = 24,
+    skip_if_current_prompt: bool = True,
 ) -> dict:
     """重置词包内指定维度的 ContentItem，准备重新生产。
 
     清空 content / content_cn、qc_status 回到 pending、删除关联 review_items、
     重置 retry_count 与 last_qc_run_id。dry_run=True 时仅返回统计不提交。
 
-    跨包去重：ContentItem 按 (word_id, meaning_id) 唯一，多个 Package 共享。
-    skip_recently_regenerated_within_hours 默认 24 → updated_at 在此时间窗内
-    的 ContentItem 视为"另一个包刚重生过"，自动跳过避免重复劳动；
-    传 None → 强制覆盖所有匹配项（force overwrite，用户显式选定）。
+    跨包去重（G 方案）：ContentItem 按 (word_id, meaning_id) 唯一，多个 Package 共享。
+    skip_if_current_prompt=True（默认）→ ContentItem 已用当前 active prompt 生成
+    （prompt_id 与 file_hash 双维都匹配）→ 视为"已是最新版"自动跳过；
+    NULL 视为"未知版本"不跳过；传 False → 强制覆盖所有匹配项。
 
     事务边界：只 flush 不 commit，由调用方在更大的事务单元内决定提交时机。
 
     Returns:
         {"content_items": N,        # 总匹配数（含跳过）
          "would_reset": R,          # 真正会动的数量（不含跳过）
-         "skipped_recently": S,     # 因时间窗被跳过的数量
+         "skipped_recently": S,     # 因已是最新 prompt 版本被跳过的数量（字段名保留兼容旧 API）
          "review_items": M,         # 真正要删的 review_items 数（仅 would_reset 关联）
          "distinct_words": K,       # 涉及的不同 word 数（含跳过）
          "by_dimension": {dim: count}}
     """
     from collections import Counter
-    from datetime import UTC, datetime, timedelta
 
+    from vocab_qc.core.models.prompt import Prompt
     from vocab_qc.core.models.quality_layer import ReviewItem
 
     empty = {
@@ -195,11 +195,11 @@ def reset_dimensions_for_regen(
     if not word_ids:
         return empty
 
-    # 全量匹配（含将被时间窗跳过的）
+    # 全量匹配（含将被 prompt 版本判断跳过的）—— 多 select 两列 generated_with_prompt_id / hash
     all_rows = (
         session.query(
-            ContentItem.id, ContentItem.dimension,
-            ContentItem.word_id, ContentItem.updated_at,
+            ContentItem.id, ContentItem.dimension, ContentItem.word_id,
+            ContentItem.generated_with_prompt_id, ContentItem.generated_with_prompt_hash,
         )
         .filter(
             ContentItem.word_id.in_(word_ids),
@@ -210,19 +210,30 @@ def reset_dimensions_for_regen(
     if not all_rows:
         return empty
 
-    # 按时间窗切分
-    cutoff = None
-    if skip_recently_regenerated_within_hours is not None:
-        cutoff = datetime.now(UTC) - timedelta(hours=skip_recently_regenerated_within_hours)
+    # 一次查所有相关 dim 的当前 active prompt (id + file_hash)
+    active_prompts: dict[str, tuple[int, str | None]] = {}
+    if skip_if_current_prompt:
+        for p in (
+            session.query(Prompt.dimension, Prompt.id, Prompt.file_hash)
+            .filter(
+                Prompt.category == "generation",
+                Prompt.dimension.in_(dimensions),
+                Prompt.is_active.is_(True),
+            )
+            .all()
+        ):
+            active_prompts[p[0]] = (p[1], p[2])
 
-    def _is_recent(row_updated_at) -> bool:
-        if cutoff is None or row_updated_at is None:
+    def _is_current(dim: str, gen_id: int | None, gen_hash: str | None) -> bool:
+        """双维匹配：仅当 prompt_id 与 file_hash 均与当前 active 一致时才视为"已是最新版"。"""
+        if not skip_if_current_prompt or gen_id is None:
             return False
-        # 兼容 naive datetime（SQLite 不强制时区）
-        ts = row_updated_at if row_updated_at.tzinfo else row_updated_at.replace(tzinfo=UTC)
-        return ts >= cutoff
+        cur = active_prompts.get(dim)
+        if cur is None:
+            return False
+        return cur[0] == gen_id and cur[1] == gen_hash
 
-    eligible_rows = [r for r in all_rows if not _is_recent(r[3])]
+    eligible_rows = [r for r in all_rows if not _is_current(r[1], r[3], r[4])]
     eligible_ids = [r[0] for r in eligible_rows]
     skipped_recently = len(all_rows) - len(eligible_rows)
 
@@ -616,6 +627,11 @@ def _generate_content(session: Session, items: list[ContentItem], *, package_id:
         item.content = content
         if result.get("content_cn"):
             item.content_cn = result["content_cn"]
+        # G 方案：记录本条生成时所用 prompt 的版本指纹（仅成功路径）
+        cfg = ai_configs.get(item.dimension)
+        if cfg is not None:
+            item.generated_with_prompt_id = cfg.prompt_id
+            item.generated_with_prompt_hash = cfg.prompt_hash
         count += 1
 
     # 持久化 AI 错误日志 + 用量日志
@@ -793,6 +809,11 @@ def _generate_content_queued(
         item.content = content
         if parsed.get("content_cn"):
             item.content_cn = parsed["content_cn"]
+        # G 方案：记录本条生成时所用 prompt 的版本指纹（仅成功路径）
+        cfg = ai_configs.get(item.dimension)
+        if cfg is not None:
+            item.generated_with_prompt_id = cfg.prompt_id
+            item.generated_with_prompt_hash = cfg.prompt_hash
 
         # 用量日志
         if usage and usage.total_tokens > 0:
