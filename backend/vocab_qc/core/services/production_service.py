@@ -93,18 +93,21 @@ def step_qc_layer1(
     qc_service: Optional[QcService] = None,
     word_ids: set[int] | None = None,
     dimensions: set[str] | None = None,
+    only_pending: bool = False,
 ) -> dict:
     """Step 2: Layer 1 质检 + 失败项入队审核（批量，独立事务）。
 
     Args:
         word_ids: 可选，仅处理指定的 word_id 子集（分批模式）。
         dimensions: 可选，仅质检指定维度。
+        only_pending: True 时仅质检本次新生成的 pending 项（按维度重生路径用），
+            不重检该批词里历史遗留的失败项。透传给 run_layer1_batch。
     """
     qc = qc_service or QcService()
     if word_ids is None:
         word_ids = _get_word_ids_for_package(session, package_id)
 
-    result = qc.run_layer1_batch(session, word_ids, dimensions=dimensions)
+    result = qc.run_layer1_batch(session, word_ids, dimensions=dimensions, only_pending=only_pending)
     if result.get("run_id"):
         qc.enqueue_failed_for_review(session, result["run_id"])
 

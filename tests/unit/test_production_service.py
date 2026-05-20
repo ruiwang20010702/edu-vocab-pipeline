@@ -305,6 +305,121 @@ class TestStepFunctionsWithWordIds:
         assert c2.qc_status == QcStatus.PENDING.value  # w2 未被处理
 
 
+class TestRunLayer1BatchOnlyPending:
+    """run_layer1_batch only_pending：重生路径只质检本次新生成的 pending 项，
+    不重检该批词里历史遗留的 layer1_failed/layer2_failed。"""
+
+    def _seed_pending_and_historical_failed(self, db_session):
+        """1 词 2 维度：chunk=PENDING（本次新生成），sentence=LAYER1_FAILED（历史遗留）。"""
+        word = Word(word="everywhere")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="adv.", definition="到处")
+        db_session.add(meaning)
+        db_session.flush()
+        pending = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="chunk",
+            content="here and there", qc_status=QcStatus.PENDING.value,
+        )
+        hist_failed = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="sentence",
+            content="I go everywhere.", qc_status=QcStatus.LAYER1_FAILED.value,
+            last_qc_run_id="OLD_RUN",
+        )
+        db_session.add_all([pending, hist_failed])
+        db_session.flush()
+        return word, pending, hist_failed
+
+    def test_only_pending_true_skips_historical_failed(self, db_session):
+        """only_pending=True：Layer1 仅捞 pending 项，历史 layer1_failed 不被重检。"""
+        from vocab_qc.core.services.qc_service import QcService
+
+        word, pending, hist_failed = self._seed_pending_and_historical_failed(db_session)
+        qc = QcService()
+        captured = {}
+
+        def fake_run(session, items, words, meanings, extra_kwargs):
+            captured["ids"] = {i.id for i in items}
+            return "NEW_RUN"
+
+        with patch.object(qc.layer1_runner, "run", side_effect=fake_run):
+            qc.run_layer1_batch(db_session, {word.id}, only_pending=True)
+
+        assert captured["ids"] == {pending.id}
+        assert hist_failed.id not in captured["ids"]
+        # 不变量：历史失败项状态与 run_id 未被本次质检触碰
+        db_session.refresh(hist_failed)
+        assert hist_failed.qc_status == QcStatus.LAYER1_FAILED.value
+        assert hist_failed.last_qc_run_id == "OLD_RUN"
+
+    def test_only_pending_includes_current_gen_failed(self, db_session):
+        """only_pending=True：本次生成失败（LAYER1_FAILED 且 last_qc_run_id 为 NULL）
+        必须被纳入质检，否则会静默卡住、不入审核队列、阻塞词包 finalize。"""
+        from vocab_qc.core.services.qc_service import QcService
+
+        word = Word(word="absorb")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="v.", definition="吸收")
+        db_session.add(meaning)
+        db_session.flush()
+        # 本次生成失败：AI 返空 → LAYER1_FAILED 但从未质检（last_qc_run_id 为 None）
+        cur_gen_failed = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="chunk",
+            content="", qc_status=QcStatus.LAYER1_FAILED.value, last_qc_run_id=None,
+        )
+        # 历史质检失败：LAYER1_FAILED 且有 run_id（Layer1Runner.run 写入过）
+        hist_failed = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="sentence",
+            content="stale", qc_status=QcStatus.LAYER1_FAILED.value, last_qc_run_id="OLD_RUN",
+        )
+        db_session.add_all([cur_gen_failed, hist_failed])
+        db_session.flush()
+
+        qc = QcService()
+        captured = {}
+
+        def fake_run(session, items, words, meanings, extra_kwargs):
+            captured["ids"] = {i.id for i in items}
+            return "NEW_RUN"
+
+        with patch.object(qc.layer1_runner, "run", side_effect=fake_run):
+            qc.run_layer1_batch(db_session, {word.id}, only_pending=True)
+
+        assert cur_gen_failed.id in captured["ids"]   # 本次生成失败：必须被纳入
+        assert hist_failed.id not in captured["ids"]  # 历史质检失败：仍被排除
+
+    def test_only_pending_false_rechecks_non_terminal(self, db_session):
+        """默认 only_pending=False：维持原行为，非终态项（含 layer1_failed）都被质检。"""
+        from vocab_qc.core.services.qc_service import QcService
+
+        word, pending, hist_failed = self._seed_pending_and_historical_failed(db_session)
+        qc = QcService()
+        captured = {}
+
+        def fake_run(session, items, words, meanings, extra_kwargs):
+            captured["ids"] = {i.id for i in items}
+            return "NEW_RUN"
+
+        with patch.object(qc.layer1_runner, "run", side_effect=fake_run):
+            qc.run_layer1_batch(db_session, {word.id}, only_pending=False)
+
+        assert captured["ids"] == {pending.id, hist_failed.id}
+
+    def test_step_qc_layer1_forwards_only_pending(self, db_session):
+        """step_qc_layer1 将 only_pending 透传给 run_layer1_batch。"""
+        from unittest.mock import MagicMock
+
+        qc = MagicMock()
+        qc.run_layer1_batch.return_value = {"run_id": None, "total": 0, "passed": 0, "failed": 0}
+        step_qc_layer1(
+            db_session, 1, qc_service=qc, word_ids={123},
+            dimensions={"chunk"}, only_pending=True,
+        )
+        _, kwargs = qc.run_layer1_batch.call_args
+        assert kwargs["only_pending"] is True
+
+
 class TestBatchProduceResumeLogic:
     """断点恢复逻辑测试。"""
 

@@ -371,6 +371,12 @@ def _run_production_bg(batch_id: int, dimensions: set[str] | None = None) -> Non
         ("qc_layer2", step_qc_layer2),
     ]
 
+    # 重生模式（按维度子集，dimensions 非空）：生成阶段已被 G 方案去重，只新建少量
+    # 项。质检也只检本次新生成的项（pending + 本次生成失败的 layer1_failed），不重检
+    # 该批词里历史遗留的失败项，避免浪费大量 L2 AI 调用。常规全量生产（dimensions=
+    # None）维持原行为，保留断点恢复时重检非终态项的能力。
+    is_regen_mode = dimensions is not None
+
     any_failed = False
     consecutive_failures = 0  # 连续失败批次计数
     max_consecutive_failures = 3  # 连续失败超过此数则终止整个生产
@@ -396,7 +402,10 @@ def _run_production_bg(batch_id: int, dimensions: set[str] | None = None) -> Non
         for step_name, step_fn in steps:
             session = SyncSessionLocal()
             try:
-                step_fn(session, batch_id, word_ids=word_batch, dimensions=dimensions)
+                step_kwargs: dict = {"word_ids": word_batch, "dimensions": dimensions}
+                if step_name == "qc_layer1":
+                    step_kwargs["only_pending"] = is_regen_mode
+                step_fn(session, batch_id, **step_kwargs)
                 session.commit()
             except Exception:
                 session.rollback()

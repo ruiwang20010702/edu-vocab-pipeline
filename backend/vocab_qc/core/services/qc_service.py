@@ -3,6 +3,7 @@
 import logging
 from typing import Optional
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.logging_config import log_elapsed
@@ -141,19 +142,41 @@ class QcService:
         word_ids: set[int],
         dimension: str | None = None,
         dimensions: set[str] | None = None,
+        only_pending: bool = False,
     ) -> dict:
         """批量 Layer 1 质检，一次查询+处理所有 word_id。
 
         Args:
             dimension: 单维度过滤（向后兼容字段）。
             dimensions: 多维度集合过滤；与 dimension 同时给出时取并集。
+            only_pending: True 时仅质检"本次新生成"的项（按维度重生路径用）：
+                - qc_status=PENDING：生成成功、待质检；
+                - qc_status=LAYER1_FAILED 且 last_qc_run_id 为 NULL：本次生成失败
+                  （AI 返空/超时/解析失败）标记的项，尚未质检——必须纳入，否则既不
+                  质检也不入审核队列，内容会静默卡在 LAYER1_FAILED，词包无法 finalize。
+                重生时生成阶段已被 G 方案去重，只新建少量项；若质检仍按"所有非终态"
+                捞取，会把该批词历史遗留的 layer1_failed/layer2_failed 一并重检，浪费
+                大量 AI 调用（L2）。历史质检失败项 last_qc_run_id 非空（Layer1Runner.run
+                每次都写 run_id），故被排除。默认 False 维持原行为（质检所有非终态项，
+                保留断点恢复重检能力）。
 
         Returns:
             {"run_id": str, "total": int, "passed": int, "failed": int}
         """
+        status_filter = (
+            or_(
+                ContentItem.qc_status == QcStatus.PENDING.value,
+                and_(
+                    ContentItem.qc_status == QcStatus.LAYER1_FAILED.value,
+                    ContentItem.last_qc_run_id.is_(None),
+                ),
+            )
+            if only_pending
+            else ContentItem.qc_status.notin_(QC_TERMINAL_STATUSES)
+        )
         query = session.query(ContentItem).filter(
             ContentItem.word_id.in_(word_ids),
-            ContentItem.qc_status.notin_(QC_TERMINAL_STATUSES),
+            status_filter,
         )
         dim_filter = set(dimensions or ())
         if dimension:
