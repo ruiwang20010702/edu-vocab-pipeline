@@ -340,6 +340,56 @@ def reset_dimensions_for_regen(
     return stats
 
 
+def find_packages_missing_extra_field(
+    session: Session, dimensions: list[str] | None = None,
+) -> list[dict]:
+    """扫描所有词包，统计每个包"content 非空但缺该维度主 extra 键"的项数。
+
+    用于"一键补全缺失字段"的预览与编排。dimensions 默认取所有声明了
+    extra_content_keys 的助记维度（词根词缀 / 考试应用）。
+    返回按缺失数降序的 [{package_id, name, status, missing}]，仅含 missing>0 的包。
+    """
+    import json
+    from collections import defaultdict
+
+    dims = dimensions or [
+        d for d, g in _GENERATORS.items() if getattr(g, "extra_content_keys", ())
+    ]
+    pw: dict[int, list[int]] = defaultdict(list)
+    for wid, pid in session.query(PackageWord.word_id, PackageWord.package_id).all():
+        pw[wid].append(pid)
+    pkgs = {p.id: p for p in session.query(Package).all()}
+
+    per_pkg: dict[int, int] = defaultdict(int)
+    for dim in dims:
+        gen = _GENERATORS.get(dim)
+        keys = getattr(gen, "extra_content_keys", ()) if gen is not None else ()
+        if not keys:
+            continue
+        key = keys[0]
+        rows = session.query(ContentItem.word_id, ContentItem.content).filter(
+            ContentItem.dimension == dim, ContentItem.content != ""
+        ).all()
+        for wid, raw in rows:
+            raw = raw or ""
+            try:
+                d = json.loads(raw) if raw.strip().startswith("{") else None
+            except Exception:
+                d = None
+            if not isinstance(d, dict) or key in d:
+                continue
+            for pid in pw.get(wid, []):
+                per_pkg[pid] += 1
+
+    result = [
+        {"package_id": pid, "name": pkgs[pid].name, "status": pkgs[pid].status, "missing": cnt}
+        for pid, cnt in per_pkg.items()
+        if pid in pkgs
+    ]
+    result.sort(key=lambda x: -x["missing"])
+    return result
+
+
 def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
     """将通过全部质检的 ContentItem 自动提升为 approved。
 

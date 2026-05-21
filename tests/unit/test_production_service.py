@@ -1292,3 +1292,98 @@ class TestResetOnlyMissingExtraField:
         assert items["ra_ok"].content == ra_ok_content  # 已正确项不动
         assert items["ra_ok"].qc_status == QcStatus.APPROVED.value
         assert items["ra_false"].qc_status == QcStatus.REJECTED.value  # false 词不动
+
+
+class TestFindPackagesMissingExtraField:
+    """find_packages_missing_extra_field：一键补全的扫描逻辑。"""
+
+    def test_counts_missing_excludes_correct_and_false(self, db_session):
+        from vocab_qc.core.services.production_service import find_packages_missing_extra_field
+
+        word = Word(word="invisible")
+        db_session.add(word)
+        db_session.flush()
+        m1 = Meaning(word_id=word.id, pos="adj.", definition="看不见的")
+        m2 = Meaning(word_id=word.id, pos="adj.", definition="无形的")
+        db_session.add_all([m1, m2])
+        db_session.flush()
+        pkg = Package(name="fp_scan_a", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+        db_session.add_all([
+            # m1 root_affix 缺键 → 计入
+            ContentItem(word_id=word.id, meaning_id=m1.id, dimension="mnemonic_root_affix",
+                        content='{"formula": "f", "chant": "c", "script": "s"}',
+                        qc_status=QcStatus.LAYER2_FAILED.value),
+            # m1 exam_app 已含键 → 不计入
+            ContentItem(word_id=word.id, meaning_id=m1.id, dimension="mnemonic_exam_app",
+                        content='{"formula": "f", "exam_sentence": "He runs."}',
+                        qc_status=QcStatus.APPROVED.value),
+            # m2 root_affix false（空）→ 不计入
+            ContentItem(word_id=word.id, meaning_id=m2.id, dimension="mnemonic_root_affix",
+                        content="", qc_status=QcStatus.REJECTED.value),
+            # m2 exam_app 缺键 → 计入
+            ContentItem(word_id=word.id, meaning_id=m2.id, dimension="mnemonic_exam_app",
+                        content='{"formula": "f", "chant": "c", "script": "s"}',
+                        qc_status=QcStatus.LAYER1_FAILED.value),
+        ])
+        db_session.flush()
+
+        result = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix", "mnemonic_exam_app"])
+        row = next((r for r in result if r["package_id"] == pkg.id), None)
+        assert row is not None
+        assert row["missing"] == 2  # 仅 2 个缺键项；已正确 + false 各排除
+
+    def test_shared_word_counts_in_both_packages(self, db_session):
+        """同词同义项的共享缺键项，应在它所属的每个词包各计一次。"""
+        from vocab_qc.core.services.production_service import find_packages_missing_extra_field
+
+        word = Word(word="apparent")
+        db_session.add(word)
+        db_session.flush()
+        m = Meaning(word_id=word.id, pos="adj.", definition="显然的")
+        db_session.add(m)
+        db_session.flush()
+        pkg_a = Package(name="fp_share_a", status="completed", total_words=1)
+        pkg_b = Package(name="fp_share_b", status="completed", total_words=1)
+        db_session.add_all([pkg_a, pkg_b])
+        db_session.flush()
+        db_session.add_all([
+            PackageWord(package_id=pkg_a.id, word_id=word.id),
+            PackageWord(package_id=pkg_b.id, word_id=word.id),
+        ])
+        db_session.add(ContentItem(
+            word_id=word.id, meaning_id=m.id, dimension="mnemonic_root_affix",
+            content='{"formula": "f", "chant": "c", "script": "s"}',
+            qc_status=QcStatus.LAYER2_FAILED.value,
+        ))
+        db_session.flush()
+
+        result = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix"])
+        by_id = {r["package_id"]: r["missing"] for r in result}
+        assert by_id.get(pkg_a.id) == 1
+        assert by_id.get(pkg_b.id) == 1
+
+    def test_package_with_no_missing_excluded(self, db_session):
+        from vocab_qc.core.services.production_service import find_packages_missing_extra_field
+
+        word = Word(word="vision")
+        db_session.add(word)
+        db_session.flush()
+        m = Meaning(word_id=word.id, pos="n.", definition="视力")
+        db_session.add(m)
+        db_session.flush()
+        pkg = Package(name="fp_clean", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+        db_session.add(ContentItem(
+            word_id=word.id, meaning_id=m.id, dimension="mnemonic_root_affix",
+            content='{"formula": "f", "chant": "c", "script": "s", "extension_words": "visual (视觉的)"}',
+            qc_status=QcStatus.APPROVED.value,
+        ))
+        db_session.flush()
+
+        result = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix"])
+        assert all(r["package_id"] != pkg.id for r in result)

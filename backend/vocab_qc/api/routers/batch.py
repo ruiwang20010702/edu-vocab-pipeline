@@ -483,6 +483,63 @@ async def _run_production_bg_async(batch_id: int, dimensions: set[str] | None = 
     await loop.run_in_executor(_production_executor, _run_production_bg, batch_id, dimensions)
 
 
+# 声明了 extra_content_keys 的助记维度（缺字段回填仅针对它们）
+EXTRA_FIELD_DIMS = ["mnemonic_root_affix", "mnemonic_exam_app"]
+
+
+def _backfill_all_missing_bg(dimensions: list[str]) -> None:
+    """顺序遍历所有缺字段词包，逐包 reset(only_missing)+生产。
+
+    跨包共享 ContentItem：前包补好后，后包 would_reset=0 自动跳过（天然去重）。
+    顺序执行避免同时压垮 gateway；幂等，重复触发只补还缺的。
+    """
+    from vocab_qc.core.db import SyncSessionLocal
+    from vocab_qc.core.services.production_service import (
+        find_packages_missing_extra_field,
+        reset_dimensions_for_regen,
+    )
+
+    dims_set = set(dimensions)
+    scan = SyncSessionLocal()
+    try:
+        pids = [a["package_id"] for a in find_packages_missing_extra_field(scan, dimensions)]
+    finally:
+        scan.close()
+
+    done = 0
+    for pid in pids:
+        s = SyncSessionLocal()
+        try:
+            pkg = s.query(Package).filter_by(id=pid).with_for_update().first()
+            if pkg is None or pkg.status == "processing":
+                continue
+            stats = reset_dimensions_for_regen(s, pid, dims_set, only_missing_extra_field=True)
+            if stats["would_reset"] == 0:
+                s.commit()  # 已被前包补全（跨包去重）
+                continue
+            pkg.status = "processing"
+            pkg.processed_words = 0
+            s.commit()
+        except Exception:
+            s.rollback()
+            logger.exception("一键补全 reset 失败 package_id=%s", pid)
+            continue
+        finally:
+            s.close()
+        try:
+            _run_production_bg(pid, dims_set)
+            done += 1
+        except Exception:
+            logger.exception("一键补全 生产失败 package_id=%s", pid)
+    logger.info("一键补全缺失字段完成：触发生产 %d / 扫描 %d 个词包", done, len(pids))
+
+
+async def _backfill_all_missing_bg_async(dimensions: list[str]) -> None:
+    """线程池包装，避免阻塞事件循环。"""
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(_production_executor, _backfill_all_missing_bg, dimensions)
+
+
 @router.post("/{batch_id}/produce", response_model=ProduceResponse)
 @limiter.limit("5/minute")
 def produce_batch(
@@ -606,3 +663,43 @@ def produce_preview(
         only_missing_extra_field=body.only_missing_extra_field,
     )
     return ProducePreviewResponse(**stats)
+
+
+@router.get("/backfill-missing-fields/preview")
+@limiter.limit("20/minute")
+def backfill_missing_fields_preview(
+    request: Request,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """预览：返回缺 extension_words / exam_sentence 的词包及条数（供确认弹窗）。只读。"""
+    from vocab_qc.core.services.production_service import find_packages_missing_extra_field
+
+    pkgs = find_packages_missing_extra_field(db, EXTRA_FIELD_DIMS)
+    return {"packages": pkgs, "total_missing": sum(p["missing"] for p in pkgs)}
+
+
+@router.post("/backfill-missing-fields")
+@limiter.limit("3/minute")
+def backfill_missing_fields(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
+):
+    """一键补全：对所有缺 extension_words / exam_sentence 的词包后台 reset(only_missing)+重生。
+
+    服务端编排、顺序执行、跨包去重、幂等（重复触发只补还缺的），浏览器关闭不影响。
+    """
+    from vocab_qc.core.services.production_service import find_packages_missing_extra_field
+
+    pkgs = find_packages_missing_extra_field(db, EXTRA_FIELD_DIMS)
+    total = sum(p["missing"] for p in pkgs)
+    if not pkgs:
+        return {"scheduled": False, "packages": 0, "total_missing": 0}
+    background_tasks.add_task(_backfill_all_missing_bg_async, EXTRA_FIELD_DIMS)
+    logger.info(
+        "一键补全缺失字段触发 user=%s packages=%d total=%d",
+        _current_user.email, len(pkgs), total,
+    )
+    return {"scheduled": True, "packages": len(pkgs), "total_missing": total}

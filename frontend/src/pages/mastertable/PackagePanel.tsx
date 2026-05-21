@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Package as PackageIcon, ChevronDown, ChevronRight, Loader2, RefreshCw, Hash, Calendar, CheckCircle2, Clock, AlertCircle, FileText } from 'lucide-react'
+import { Package as PackageIcon, ChevronDown, ChevronRight, Loader2, RefreshCw, Hash, Calendar, CheckCircle2, Clock, AlertCircle, FileText, Wand2, X, AlertTriangle } from 'lucide-react'
 import { api, ApiError } from '../../lib/api'
 import { useToast } from '../../components/Toast'
 import type { BatchInfo } from '../../types'
@@ -27,6 +27,11 @@ function formatDate(dateStr: string) {
   })
 }
 
+interface BackfillPreview {
+  packages: { package_id: number; name: string; status: string; missing: number }[]
+  total_missing: number
+}
+
 export default function PackagePanel() {
   const { showToast } = useToast()
   const [expanded, setExpanded] = useState(false)
@@ -48,6 +53,47 @@ export default function PackagePanel() {
 
   // 稳定 onClose 引用，避免 PackageRegenModal 内部 keydown listener 每帧重挂载
   const closeModal = useCallback(() => setActiveBatch(null), [])
+
+  // 一键补全缺失字段
+  const [backfillOpen, setBackfillOpen] = useState(false)
+  const [backfillPreview, setBackfillPreview] = useState<BackfillPreview | null>(null)
+  const [backfillLoading, setBackfillLoading] = useState(false)
+  const [backfillSubmitting, setBackfillSubmitting] = useState(false)
+
+  const openBackfill = async () => {
+    setBackfillOpen(true)
+    setBackfillLoading(true)
+    setBackfillPreview(null)
+    try {
+      const data = await api.get<BackfillPreview>('/batches/backfill-missing-fields/preview')
+      setBackfillPreview(data)
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '预览失败')
+      setBackfillOpen(false)
+    } finally {
+      setBackfillLoading(false)
+    }
+  }
+
+  const confirmBackfill = async () => {
+    setBackfillSubmitting(true)
+    try {
+      const r = await api.post<{ scheduled: boolean; packages: number; total_missing: number }>(
+        '/batches/backfill-missing-fields', {},
+      )
+      if (r.scheduled) {
+        showToast('success', `已开始后台补全 ${r.packages} 个词包（约 ${r.total_missing} 条），可在列表看各包状态`)
+      } else {
+        showToast('warning', '没有需要补全的缺失字段项')
+      }
+      setBackfillOpen(false)
+      void fetchBatches()
+    } catch (e) {
+      showToast('error', e instanceof ApiError ? e.detail : '触发失败')
+    } finally {
+      setBackfillSubmitting(false)
+    }
+  }
 
   // 首次展开时懒加载
   useEffect(() => {
@@ -91,6 +137,21 @@ export default function PackagePanel() {
             className="border-t border-slate-100 overflow-hidden"
           >
             <div className="p-5">
+              {/* 一键补全缺失字段（全局） */}
+              <div className="mb-4 flex items-center justify-between gap-3 p-3 rounded-2xl bg-blue-50/50 border border-blue-100">
+                <div className="text-xs text-slate-600 min-w-0">
+                  <span className="font-bold text-blue-800">一键补全缺失字段</span>
+                  <span className="ml-1 text-slate-500">扫描所有词包，重生缺 extension_words / exam_sentence 的项（跳过 false 词，跨包去重）</span>
+                </div>
+                <button
+                  onClick={openBackfill}
+                  disabled={backfillLoading || backfillSubmitting}
+                  className="shrink-0 px-3 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  <Wand2 size={12} />
+                  一键补全
+                </button>
+              </div>
               {loading && batches === null ? (
                 <div className="flex items-center justify-center py-10 text-slate-400 gap-2">
                   <Loader2 size={18} className="animate-spin" />
@@ -159,6 +220,88 @@ export default function PackagePanel() {
             onClose={closeModal}
             onSuccess={fetchBatches}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {backfillOpen && (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={() => { if (!backfillSubmitting) setBackfillOpen(false) }}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white w-full max-w-md rounded-[28px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-blue-50/50">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 bg-blue-600 text-white rounded-xl flex items-center justify-center">
+                    <Wand2 size={18} />
+                  </div>
+                  <h3 className="font-bold text-base text-slate-900">一键补全缺失字段</h3>
+                </div>
+                <button
+                  onClick={() => setBackfillOpen(false)}
+                  disabled={backfillSubmitting}
+                  className="p-2 hover:bg-slate-100 rounded-full disabled:opacity-50"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {backfillLoading ? (
+                  <div className="flex items-center gap-2 text-slate-500 text-sm py-4">
+                    <Loader2 size={16} className="animate-spin" /> 正在扫描缺失项...
+                  </div>
+                ) : !backfillPreview || backfillPreview.total_missing === 0 ? (
+                  <p className="text-sm text-slate-500 py-2">没有需要补全的缺失字段项 🎉</p>
+                ) : (
+                  <>
+                    <div className="text-sm text-slate-700">
+                      将对 <strong className="text-blue-700">{backfillPreview.packages.length}</strong> 个词包、共
+                      <strong className="text-rose-700"> {backfillPreview.total_missing} </strong>
+                      条缺字段项后台重生（跨包共享会自动去重，实际更少）：
+                    </div>
+                    <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-100 divide-y divide-slate-50">
+                      {backfillPreview.packages.map(p => (
+                        <div key={p.package_id} className="flex items-center justify-between px-3 py-2 text-xs">
+                          <span className="text-slate-700 truncate">{p.name}</span>
+                          <span className="text-slate-500 shrink-0 ml-2">{p.missing} 条</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                      <span>仅重生缺字段项，不动 false 词与已正确项。后台顺序处理，各包状态会依次变化。</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="p-5 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
+                <button
+                  onClick={() => setBackfillOpen(false)}
+                  disabled={backfillSubmitting}
+                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={confirmBackfill}
+                  disabled={backfillSubmitting || backfillLoading || !backfillPreview || backfillPreview.total_missing === 0}
+                  className="px-5 py-2 text-sm font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-2 disabled:bg-slate-200 disabled:text-slate-400"
+                >
+                  {backfillSubmitting ? <><Loader2 size={16} className="animate-spin" /> 触发中</> : <>开始补全</>}
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </section>
