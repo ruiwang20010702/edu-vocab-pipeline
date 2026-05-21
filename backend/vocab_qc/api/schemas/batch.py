@@ -65,10 +65,14 @@ class ProduceRequest(BaseModel):
       （默认 False：generated_with_prompt_id + hash 与当前 active prompt 双维匹配
        的会自动跳过，防跨包重复劳动。字段名沿用历史命名，语义已升级为按 prompt
        版本判断而非按时间窗）
+    - only_missing_extra_field=True ⇒ 仅重生"content 非空但缺该维度主 extra 键"的项
+      （如 extension_words / exam_sentence），忽略 prompt 指纹去重；用于回填代码修复后
+      残留的缺字段旧数据，不重判 valid:false 词、不动已正确项
     """
 
     dimensions: Optional[list[str]] = None
     force_overwrite_recent: bool = False
+    only_missing_extra_field: bool = False
 
     @field_validator("dimensions")
     @classmethod

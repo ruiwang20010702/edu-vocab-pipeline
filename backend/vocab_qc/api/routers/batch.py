@@ -561,6 +561,7 @@ def produce_batch(
         reset_stats = reset_dimensions_for_regen(
             db, batch_id, dimensions_set, dry_run=False,
             skip_if_current_prompt=not body.force_overwrite_recent,
+            only_missing_extra_field=body.only_missing_extra_field,
         )
         logger.info(
             "重生预重置 package_id=%s dimensions=%s force=%s reset=%s",
@@ -602,5 +603,6 @@ def produce_preview(
     stats = reset_dimensions_for_regen(
         db, batch_id, set(body.dimensions), dry_run=True,
         skip_if_current_prompt=not body.force_overwrite_recent,
+        only_missing_extra_field=body.only_missing_extra_field,
     )
     return ProducePreviewResponse(**stats)

@@ -17,9 +17,9 @@ from vocab_qc.core.generators.mnemonic import (
 )
 from vocab_qc.core.generators.sentence import SentenceGenerator
 from vocab_qc.core.generators.syllable import SyllableGenerator
+from vocab_qc.core.models.ai_task_queue import AiTaskStatus
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.data_layer import Meaning, Word
-from vocab_qc.core.models.ai_task_queue import AiTaskStatus
 from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS, QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import AiErrorLog, AiUsageLog, classify_ai_error
@@ -173,6 +173,7 @@ def reset_dimensions_for_regen(
     *,
     dry_run: bool = False,
     skip_if_current_prompt: bool = True,
+    only_missing_extra_field: bool = False,
 ) -> dict:
     """重置词包内指定维度的 ContentItem，准备重新生产。
 
@@ -183,6 +184,9 @@ def reset_dimensions_for_regen(
     skip_if_current_prompt=True（默认）→ ContentItem 已用当前 active prompt 生成
     （prompt_id 与 file_hash 双维都匹配）→ 视为"已是最新版"自动跳过；
     NULL 视为"未知版本"不跳过；传 False → 强制覆盖所有匹配项。
+    only_missing_extra_field=True → 仅命中"content 非空但缺该维度主 extra 键"
+    （extra_content_keys[0]，如 extension_words / exam_sentence）的项；忽略 prompt 指纹去重。
+    用于回填代码修复后残留的缺字段旧数据，不重判 false 词、不动已正确项。
 
     事务边界：只 flush 不 commit，由调用方在更大的事务单元内决定提交时机。
 
@@ -194,6 +198,7 @@ def reset_dimensions_for_regen(
          "distinct_words": K,       # 涉及的不同 word 数（含跳过）
          "by_dimension": {dim: count}}
     """
+    import json
     from collections import Counter
 
     from vocab_qc.core.models.prompt import Prompt
@@ -210,12 +215,16 @@ def reset_dimensions_for_regen(
     if not word_ids:
         return empty
 
-    # 全量匹配（含将被 prompt 版本判断跳过的）—— 多 select 两列 generated_with_prompt_id / hash
+    # 全量匹配（含将被 prompt 版本判断跳过的）—— select 指纹两列；
+    # only_missing_extra_field 时额外 select content 以判断是否缺 extra 键（r[5]）
+    cols = [
+        ContentItem.id, ContentItem.dimension, ContentItem.word_id,
+        ContentItem.generated_with_prompt_id, ContentItem.generated_with_prompt_hash,
+    ]
+    if only_missing_extra_field:
+        cols.append(ContentItem.content)
     all_rows = (
-        session.query(
-            ContentItem.id, ContentItem.dimension, ContentItem.word_id,
-            ContentItem.generated_with_prompt_id, ContentItem.generated_with_prompt_hash,
-        )
+        session.query(*cols)
         .filter(
             ContentItem.word_id.in_(word_ids),
             ContentItem.dimension.in_(dimensions),
@@ -227,7 +236,7 @@ def reset_dimensions_for_regen(
 
     # 一次查所有相关 dim 的当前 active prompt (id + file_hash)
     active_prompts: dict[str, tuple[int, str | None]] = {}
-    if skip_if_current_prompt:
+    if skip_if_current_prompt and not only_missing_extra_field:
         for p in (
             session.query(Prompt.dimension, Prompt.id, Prompt.file_hash)
             .filter(
@@ -264,7 +273,28 @@ def reset_dimensions_for_regen(
             return False
         return cur[0] == gen_id and cur[1] == gen_hash
 
-    eligible_rows = [r for r in all_rows if not _is_current(r[1], r[3], r[4])]
+    def _missing_extra_key(dim: str, content: str | None) -> bool:
+        """content 非空 + 可解析 JSON dict + 缺该维度主 extra 键（extra_content_keys[0]）。
+
+        无 extra 键的维度 / false 词(content="") / 已含键的项 → 均返回 False（不命中）。
+        """
+        gen = _GENERATORS.get(dim)
+        keys = getattr(gen, "extra_content_keys", ()) if gen is not None else ()
+        if not keys or not content:
+            return False
+        try:
+            d = json.loads(content) if content.strip().startswith("{") else None
+        except Exception:
+            d = None
+        if not isinstance(d, dict):
+            return False
+        return keys[0] not in d
+
+    if only_missing_extra_field:
+        # 缺字段命中即 eligible，忽略 prompt 指纹去重（指纹相同正是问题根源）
+        eligible_rows = [r for r in all_rows if _missing_extra_key(r[1], r[5])]
+    else:
+        eligible_rows = [r for r in all_rows if not _is_current(r[1], r[3], r[4])]
     eligible_ids = [r[0] for r in eligible_rows]
     skipped_recently = len(all_rows) - len(eligible_rows)
 
@@ -353,8 +383,8 @@ def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
         logger.info("自动批准 auto_approved=%d (l2_passed=%d no_l2=%d)", count, r1.rowcount, r2.rowcount)
 
         # 清理已 approved 内容对应的 pending review_items（防止数据不一致）
+        from vocab_qc.core.models.enums import ReviewResolution, ReviewStatus
         from vocab_qc.core.models.quality_layer import ReviewItem
-        from vocab_qc.core.models.enums import ReviewStatus, ReviewResolution
         approved_ci_ids = [
             row[0] for row in
             session.query(ContentItem.id)
@@ -460,7 +490,8 @@ def run_production(
 
     _elapsed = _time.monotonic() - _t0
     logger.info(
-        "生产完成 package_id=%s 耗时=%.1fs generated=%d l1_passed=%d l1_failed=%d l2_passed=%d l2_failed=%d auto_approved=%d",
+        "生产完成 package_id=%s 耗时=%.1fs generated=%d l1_passed=%d l1_failed=%d "
+        "l2_passed=%d l2_failed=%d auto_approved=%d",
         package_id, _elapsed, generated,
         qc_result["passed"], qc_result["failed"],
         l2_result["passed"], l2_result["failed"],
@@ -693,7 +724,6 @@ def _generate_content_queued(
     import uuid
 
     from vocab_qc.core.generators.base import (
-        AiUsageInfo,
         _strip_markdown_fences,
         estimate_cost,
         extract_usage,

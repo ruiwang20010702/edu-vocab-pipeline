@@ -9,7 +9,6 @@ from vocab_qc.core.services.production_service import (
     run_production,
     step_generate,
     step_qc_layer1,
-    step_qc_layer2,
 )
 
 
@@ -1138,3 +1137,158 @@ class TestProcessMnemonicResult:
 
         raw = {"content": "a cat", "content_cn": "一只猫"}
         assert _process_mnemonic_result("chunk", raw) is raw
+
+
+class TestResetOnlyMissingExtraField:
+    """reset_dimensions_for_regen(only_missing_extra_field=True)：精准回填缺 extra 键的旧脏数据。
+
+    覆盖：命中缺键项、跳过已含键/false 项、非助记维度不命中、绕过 prompt 指纹去重、execute 写路径。
+    """
+
+    def _setup(self, db_session):
+        word = Word(word="invisible")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="adj.", definition="看不见的")
+        db_session.add(meaning)
+        db_session.flush()
+        pkg = Package(name="missing_extra_test", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+
+        items = {
+            # root_affix 缺 extension_words（旧 3 键脏数据）→ 应命中
+            "ra_missing": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_root_affix",
+                content='{"formula": "f", "chant": "c", "script": "s"}',
+                qc_status=QcStatus.LAYER2_FAILED.value,
+            ),
+            # root_affix 已含 extension_words（已正确）→ 不命中
+            "ra_ok": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_root_affix",
+                content='{"formula": "f", "chant": "c", "script": "s", "extension_words": "vision (视力)"}',
+                qc_status=QcStatus.APPROVED.value,
+            ),
+            # root_affix valid:false（content 空）→ 不命中（不重判 false）
+            "ra_false": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_root_affix",
+                content="", qc_status=QcStatus.REJECTED.value,
+            ),
+            # exam_app 缺 exam_sentence → 应命中
+            "exam_missing": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_exam_app",
+                content='{"formula": "f", "chant": "c", "script": "s"}',
+                qc_status=QcStatus.LAYER1_FAILED.value,
+            ),
+            # exam_app 已含 exam_sentence → 不命中
+            "exam_ok": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_exam_app",
+                content=(
+                    '{"formula": "f", "chant": "c", "script": "s",'
+                    ' "exam_sentence": "He runs.", "exam_sentence_translation": "他跑。"}'
+                ),
+                qc_status=QcStatus.APPROVED.value,
+            ),
+            # 非助记维度（无 extra 键）→ 永不命中
+            "chunk": ContentItem(
+                word_id=word.id, meaning_id=meaning.id, dimension="chunk",
+                content="an invisible thing", qc_status=QcStatus.APPROVED.value,
+            ),
+        }
+        db_session.add_all(items.values())
+        db_session.flush()
+        return pkg, items
+
+    def test_root_affix_only_hits_missing_extension_words(self, db_session):
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items = self._setup(db_session)
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"mnemonic_root_affix"},
+            dry_run=True, only_missing_extra_field=True,
+        )
+        # 3 个 root_affix 项中：仅缺键的 1 个命中；已含键 + false 各被排除
+        assert stats["content_items"] == 3
+        assert stats["would_reset"] == 1
+
+    def test_exam_app_only_hits_missing_exam_sentence(self, db_session):
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items = self._setup(db_session)
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"mnemonic_exam_app"},
+            dry_run=True, only_missing_extra_field=True,
+        )
+        assert stats["content_items"] == 2
+        assert stats["would_reset"] == 1
+
+    def test_non_mnemonic_dimension_matches_nothing(self, db_session):
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items = self._setup(db_session)
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"chunk"},
+            dry_run=True, only_missing_extra_field=True,
+        )
+        assert stats["would_reset"] == 0
+
+    def test_bypasses_prompt_fingerprint_dedup(self, db_session):
+        """缺键项即使指纹 == 当前 active prompt，only_missing_extra_field 仍命中（绕过去重）。"""
+        from vocab_qc.core.models.prompt import Prompt
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        word = Word(word="apparent")
+        db_session.add(word)
+        db_session.flush()
+        pkg = Package(name="fp_bypass_test", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+        prompt = Prompt(
+            name="词根词缀生成", category="generation", dimension="mnemonic_root_affix",
+            model="gemini", content="x", source="file", file_hash="abc123", is_active=True,
+        )
+        db_session.add(prompt)
+        db_session.flush()
+        item = ContentItem(
+            word_id=word.id, dimension="mnemonic_root_affix",
+            content='{"formula": "f", "chant": "c", "script": "s"}',  # 缺 extension_words
+            qc_status=QcStatus.LAYER2_FAILED.value,
+            generated_with_prompt_id=prompt.id, generated_with_prompt_hash="abc123",
+        )
+        db_session.add(item)
+        db_session.flush()
+
+        # 默认去重：指纹双匹配 → 被跳过
+        skipped = reset_dimensions_for_regen(
+            db_session, pkg.id, {"mnemonic_root_affix"},
+            dry_run=True, skip_if_current_prompt=True,
+        )
+        assert skipped["would_reset"] == 0
+        # only_missing_extra_field：绕过指纹去重 → 命中
+        hit = reset_dimensions_for_regen(
+            db_session, pkg.id, {"mnemonic_root_affix"},
+            dry_run=True, only_missing_extra_field=True,
+        )
+        assert hit["would_reset"] == 1
+
+    def test_execute_resets_only_missing_keeps_correct(self, db_session):
+        """execute 路径：缺键项被重置为 pending/空，已含键项原样保留。"""
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        pkg, items = self._setup(db_session)
+        ra_ok_content = items["ra_ok"].content
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"mnemonic_root_affix", "mnemonic_exam_app"},
+            dry_run=False, only_missing_extra_field=True,
+        )
+        assert stats["would_reset"] == 2  # ra_missing + exam_missing
+        db_session.refresh(items["ra_missing"])
+        db_session.refresh(items["ra_ok"])
+        db_session.refresh(items["ra_false"])
+        assert items["ra_missing"].content == ""
+        assert items["ra_missing"].qc_status == QcStatus.PENDING.value
+        assert items["ra_ok"].content == ra_ok_content  # 已正确项不动
+        assert items["ra_ok"].qc_status == QcStatus.APPROVED.value
+        assert items["ra_false"].qc_status == QcStatus.REJECTED.value  # false 词不动

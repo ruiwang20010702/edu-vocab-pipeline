@@ -41,6 +41,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
   const [confirmArmed, setConfirmArmed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [forceOverwriteRecent, setForceOverwriteRecent] = useState(false)
+  const [onlyMissingExtraField, setOnlyMissingExtraField] = useState(false)
   const armTimerRef = useRef<number | null>(null)
 
   // 维度选择变化时，重置确认态 + 300ms 防抖触发 dry-run preview
@@ -63,7 +64,11 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
     const timer = window.setTimeout(() => {
       api.post<PreviewStats>(
         `/batches/${batch.id}/produce/preview`,
-        { dimensions: [...selected], force_overwrite_recent: forceOverwriteRecent },
+        {
+          dimensions: [...selected],
+          force_overwrite_recent: forceOverwriteRecent,
+          only_missing_extra_field: onlyMissingExtraField,
+        },
         { signal: ctrl.signal },
       )
         .then(stats => {
@@ -85,7 +90,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
       ctrl.abort()
       window.clearTimeout(timer)
     }
-  }, [selected, batch.id, forceOverwriteRecent])
+  }, [selected, batch.id, forceOverwriteRecent, onlyMissingExtraField])
 
   // 确认按钮 5 秒回退
   const armConfirm = () => {
@@ -133,6 +138,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
       await api.post(`/batches/${batch.id}/produce`, {
         dimensions: [...selected],
         force_overwrite_recent: forceOverwriteRecent,
+        only_missing_extra_field: onlyMissingExtraField,
       })
       showToast('success', `已进入生产队列：${preview?.would_reset ?? 0} 条 ContentItem`)
       onSuccess()
@@ -215,6 +221,22 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
           <DimGroup title="基础" dims={BASIC_REGENERATABLE_DIMS} selected={selected} onToggle={toggle} />
           <DimGroup title="助记" dims={ALL_MNEMONIC_DIMS} selected={selected} onToggle={toggle} />
 
+          {/* 仅补缺字段项 模式（修复代码 bug 后回填 extension_words / exam_sentence） */}
+          <label className="flex items-start gap-2 px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50/50 cursor-pointer hover:bg-blue-50">
+            <input
+              type="checkbox"
+              checked={onlyMissingExtraField}
+              onChange={e => setOnlyMissingExtraField(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="text-xs text-slate-700">
+              <span className="font-bold text-blue-800">仅补缺字段的项</span>
+              <span className="text-slate-500 ml-1">
+                （只重生 content 缺 extension_words / exam_sentence 的旧项；跳过已正确项与判为不适用的词，不重判 false、忽略 prompt 版本去重）
+              </span>
+            </div>
+          </label>
+
           {/* 预览数字 */}
           <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
             {previewLoading ? (
@@ -238,7 +260,8 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
                 </div>
                 {preview.skipped_recently > 0 && (
                   <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
-                    其中 <strong>{preview.skipped_recently}</strong> 条已用最新 prompt 生成 → 自动跳过
+                    其中 <strong>{preview.skipped_recently}</strong> 条
+                    {onlyMissingExtraField ? ' 已含字段 / 不适用 → 跳过' : ' 已用最新 prompt 生成 → 自动跳过'}
                   </div>
                 )}
                 <div className="pt-1">
@@ -254,7 +277,7 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
           </div>
 
           {/* 强制覆盖开关：仅在有跳过项时显示 */}
-          {preview && preview.skipped_recently > 0 && (
+          {preview && preview.skipped_recently > 0 && !onlyMissingExtraField && (
             <label className="flex items-start gap-2 px-3 py-2 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50">
               <input
                 type="checkbox"
@@ -275,7 +298,11 @@ export default function PackageRegenModal({ batch, onClose, onSuccess }: Props) 
           <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 flex items-start gap-3">
             <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
             <div className="text-xs text-amber-900 leading-relaxed">
-              <strong>已审核通过的内容也会被覆盖。</strong>所选维度的所有 ContentItem 将清空内容并重新走生成 → 质检流水线。请确认 prompt 已升级到目标版本。
+              {onlyMissingExtraField ? (
+                <><strong>仅重置缺字段的项。</strong>已正确项与判为不适用（false）的词不受影响；命中项将清空内容并重新走生成 → 质检流水线。</>
+              ) : (
+                <><strong>已审核通过的内容也会被覆盖。</strong>所选维度的所有 ContentItem 将清空内容并重新走生成 → 质检流水线。请确认 prompt 已升级到目标版本。</>
+              )}
             </div>
           </div>
 
