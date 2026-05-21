@@ -1330,8 +1330,9 @@ class TestFindPackagesMissingExtraField:
         ])
         db_session.flush()
 
-        result = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix", "mnemonic_exam_app"])
-        row = next((r for r in result if r["package_id"] == pkg.id), None)
+        data = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix", "mnemonic_exam_app"])
+        assert data["unique_missing"] == 2  # 2 个 distinct 缺键项（去重）
+        row = next((r for r in data["packages"] if r["package_id"] == pkg.id), None)
         assert row is not None
         assert row["missing"] == 2  # 仅 2 个缺键项；已正确 + false 各排除
 
@@ -1360,8 +1361,9 @@ class TestFindPackagesMissingExtraField:
         ))
         db_session.flush()
 
-        result = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix"])
-        by_id = {r["package_id"]: r["missing"] for r in result}
+        data = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix"])
+        assert data["unique_missing"] == 1  # 跨包共享项去重后只 1 条
+        by_id = {r["package_id"]: r["missing"] for r in data["packages"]}
         assert by_id.get(pkg_a.id) == 1
         assert by_id.get(pkg_b.id) == 1
 
@@ -1386,4 +1388,4 @@ class TestFindPackagesMissingExtraField:
         db_session.flush()
 
         result = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix"])
-        assert all(r["package_id"] != pkg.id for r in result)
+        assert all(r["package_id"] != pkg.id for r in result["packages"])

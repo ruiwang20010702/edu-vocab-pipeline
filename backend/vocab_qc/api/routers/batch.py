@@ -502,7 +502,7 @@ def _backfill_all_missing_bg(dimensions: list[str]) -> None:
     dims_set = set(dimensions)
     scan = SyncSessionLocal()
     try:
-        pids = [a["package_id"] for a in find_packages_missing_extra_field(scan, dimensions)]
+        pids = [a["package_id"] for a in find_packages_missing_extra_field(scan, dimensions)["packages"]]
     finally:
         scan.close()
 
@@ -675,8 +675,13 @@ def backfill_missing_fields_preview(
     """预览：返回缺 extension_words / exam_sentence 的词包及条数（供确认弹窗）。只读。"""
     from vocab_qc.core.services.production_service import find_packages_missing_extra_field
 
-    pkgs = find_packages_missing_extra_field(db, EXTRA_FIELD_DIMS)
-    return {"packages": pkgs, "total_missing": sum(p["missing"] for p in pkgs)}
+    data = find_packages_missing_extra_field(db, EXTRA_FIELD_DIMS)
+    pkgs = data["packages"]
+    return {
+        "packages": pkgs,
+        "total_missing": sum(p["missing"] for p in pkgs),
+        "unique_missing": data["unique_missing"],
+    }
 
 
 @router.post("/backfill-missing-fields")
@@ -693,13 +698,15 @@ def backfill_missing_fields(
     """
     from vocab_qc.core.services.production_service import find_packages_missing_extra_field
 
-    pkgs = find_packages_missing_extra_field(db, EXTRA_FIELD_DIMS)
+    data = find_packages_missing_extra_field(db, EXTRA_FIELD_DIMS)
+    pkgs = data["packages"]
+    unique = data["unique_missing"]
     total = sum(p["missing"] for p in pkgs)
     if not pkgs:
-        return {"scheduled": False, "packages": 0, "total_missing": 0}
+        return {"scheduled": False, "packages": 0, "total_missing": 0, "unique_missing": 0}
     background_tasks.add_task(_backfill_all_missing_bg_async, EXTRA_FIELD_DIMS)
     logger.info(
-        "一键补全缺失字段触发 user=%s packages=%d total=%d",
-        _current_user.email, len(pkgs), total,
+        "一键补全缺失字段触发 user=%s packages=%d unique=%d total=%d",
+        _current_user.email, len(pkgs), unique, total,
     )
-    return {"scheduled": True, "packages": len(pkgs), "total_missing": total}
+    return {"scheduled": True, "packages": len(pkgs), "total_missing": total, "unique_missing": unique}

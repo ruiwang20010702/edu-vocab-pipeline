@@ -29,7 +29,8 @@ function formatDate(dateStr: string) {
 
 interface BackfillPreview {
   packages: { package_id: number; name: string; status: string; missing: number }[]
-  total_missing: number
+  total_missing: number   // 按包累加（含跨包重复）
+  unique_missing: number  // 去重后真实缺失项数
 }
 
 export default function PackagePanel() {
@@ -78,11 +79,11 @@ export default function PackagePanel() {
   const confirmBackfill = async () => {
     setBackfillSubmitting(true)
     try {
-      const r = await api.post<{ scheduled: boolean; packages: number; total_missing: number }>(
+      const r = await api.post<{ scheduled: boolean; packages: number; total_missing: number; unique_missing: number }>(
         '/batches/backfill-missing-fields', {},
       )
       if (r.scheduled) {
-        showToast('success', `已开始后台补全 ${r.packages} 个词包（约 ${r.total_missing} 条），可在列表看各包状态`)
+        showToast('success', `已开始后台补全 ${r.packages} 个词包（去重后约 ${r.unique_missing} 条），可在列表看各包状态`)
       } else {
         showToast('warning', '没有需要补全的缺失字段项')
       }
@@ -259,14 +260,14 @@ export default function PackagePanel() {
                   <div className="flex items-center gap-2 text-slate-500 text-sm py-4">
                     <Loader2 size={16} className="animate-spin" /> 正在扫描缺失项...
                   </div>
-                ) : !backfillPreview || backfillPreview.total_missing === 0 ? (
+                ) : !backfillPreview || backfillPreview.unique_missing === 0 ? (
                   <p className="text-sm text-slate-500 py-2">没有需要补全的缺失字段项 🎉</p>
                 ) : (
                   <>
                     <div className="text-sm text-slate-700">
-                      将对 <strong className="text-blue-700">{backfillPreview.packages.length}</strong> 个词包、共
-                      <strong className="text-rose-700"> {backfillPreview.total_missing} </strong>
-                      条缺字段项后台重生（跨包共享会自动去重，实际更少）：
+                      将对 <strong className="text-blue-700">{backfillPreview.packages.length}</strong> 个词包补全，
+                      去重后实际约 <strong className="text-rose-700">{backfillPreview.unique_missing}</strong> 条
+                      <span className="text-xs text-slate-400">（下列按包明细含跨包重复，合计 {backfillPreview.total_missing} 条）</span>：
                     </div>
                     <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-100 divide-y divide-slate-50">
                       {backfillPreview.packages.map(p => (
@@ -294,7 +295,7 @@ export default function PackagePanel() {
                 </button>
                 <button
                   onClick={confirmBackfill}
-                  disabled={backfillSubmitting || backfillLoading || !backfillPreview || backfillPreview.total_missing === 0}
+                  disabled={backfillSubmitting || backfillLoading || !backfillPreview || backfillPreview.unique_missing === 0}
                   className="px-5 py-2 text-sm font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-2 disabled:bg-slate-200 disabled:text-slate-400"
                 >
                   {backfillSubmitting ? <><Loader2 size={16} className="animate-spin" /> 触发中</> : <>开始补全</>}

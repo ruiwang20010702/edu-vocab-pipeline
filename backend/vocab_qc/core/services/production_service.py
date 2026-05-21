@@ -347,7 +347,9 @@ def find_packages_missing_extra_field(
 
     用于"一键补全缺失字段"的预览与编排。dimensions 默认取所有声明了
     extra_content_keys 的助记维度（词根词缀 / 考试应用）。
-    返回按缺失数降序的 [{package_id, name, status, missing}]，仅含 missing>0 的包。
+    返回 {"packages": [{package_id, name, status, missing} 按缺失降序、仅 missing>0],
+          "unique_missing": 去重后真实缺失 ContentItem 数}。
+    注意：跨包共享 ContentItem 会在每个所属包各计一次，故 sum(missing) ≥ unique_missing。
     """
     import json
     from collections import defaultdict
@@ -361,6 +363,7 @@ def find_packages_missing_extra_field(
     pkgs = {p.id: p for p in session.query(Package).all()}
 
     per_pkg: dict[int, int] = defaultdict(int)
+    unique_missing = 0  # 去重后真实缺失项数（每个 ContentItem 行只数一次）
     for dim in dims:
         gen = _GENERATORS.get(dim)
         keys = getattr(gen, "extra_content_keys", ()) if gen is not None else ()
@@ -378,16 +381,17 @@ def find_packages_missing_extra_field(
                 d = None
             if not isinstance(d, dict) or key in d:
                 continue
+            unique_missing += 1
             for pid in pw.get(wid, []):
                 per_pkg[pid] += 1
 
-    result = [
+    packages = [
         {"package_id": pid, "name": pkgs[pid].name, "status": pkgs[pid].status, "missing": cnt}
         for pid, cnt in per_pkg.items()
         if pid in pkgs
     ]
-    result.sort(key=lambda x: -x["missing"])
-    return result
+    packages.sort(key=lambda x: -x["missing"])
+    return {"packages": packages, "unique_missing": unique_missing}
 
 
 def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
