@@ -241,27 +241,42 @@ function CollapsibleIssues({ issues, label }: { issues: WordDetail['issues']; la
 /** 单条助记编辑器 */
 function MnemonicItemEditor({ mn, onSaved, editable = true }: { mn: ContentItem; onSaved: () => void; editable?: boolean }) {
   const parsed = parseMnemonic(mn.content)
+  const isExamApp = mn.dimension === 'mnemonic_exam_app'
+  const isRootAffix = mn.dimension === 'mnemonic_root_affix'
   const [editing, setEditing] = useState(false)
   const [formula, setFormula] = useState(parsed.formula)
   const [chant, setChant] = useState(parsed.chant)
   const [script, setScript] = useState(parsed.script)
+  const [examSentence, setExamSentence] = useState(parsed.exam_sentence)
+  const [examSentenceTranslation, setExamSentenceTranslation] = useState(parsed.exam_sentence_translation)
+  const [extensionWords, setExtensionWords] = useState(parsed.extension_words)
   const { saving, result, save } = useContentEdit(mn.id, onSaved)
 
   // 用 prop 变化重置本地编辑态：mn.content 被父刷新后同步解析回本地输入
   useEffect(() => {
     const p = parseMnemonic(mn.content)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     setFormula(p.formula); setChant(p.chant); setScript(p.script)
+    setExamSentence(p.exam_sentence); setExamSentenceTranslation(p.exam_sentence_translation)
+    setExtensionWords(p.extension_words)
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [mn.content])
 
   const cancel = () => {
     const p = parseMnemonic(mn.content)
     setFormula(p.formula); setChant(p.chant); setScript(p.script)
+    setExamSentence(p.exam_sentence); setExamSentenceTranslation(p.exam_sentence_translation)
+    setExtensionWords(p.extension_words)
     setEditing(false)
   }
 
   const doSave = (force?: boolean) => {
-    const content = buildMnemonicJson(formula, chant, script)
+    const content = buildMnemonicJson(
+      formula, chant, script,
+      isExamApp ? examSentence : undefined,
+      isExamApp ? examSentenceTranslation : undefined,
+      isRootAffix ? extensionWords : undefined,
+    )
     save({ content, force_approve: force }, cancel)
   }
 
@@ -287,6 +302,45 @@ function MnemonicItemEditor({ mn, onSaved, editable = true }: { mn: ContentItem;
             className="w-full text-sm bg-white border border-yellow-300 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-yellow-400 resize-none"
           />
         </div>
+        {isRootAffix && (
+          <div>
+            <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">同根词（2-3 个，分号分隔）</p>
+            <textarea
+              value={extensionWords}
+              onChange={e => setExtensionWords(e.target.value)}
+              disabled={saving}
+              rows={2}
+              placeholder="vision (视力); visual (视觉的); visit (去看望)"
+              className="w-full text-sm bg-white border border-yellow-300 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-yellow-400 resize-none placeholder:text-slate-400"
+            />
+          </div>
+        )}
+        {isExamApp && (
+          <>
+            <div>
+              <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">实战例句（英文，8-15 词）</p>
+              <textarea
+                value={examSentence}
+                onChange={e => setExamSentence(e.target.value)}
+                disabled={saving}
+                rows={2}
+                placeholder="纯英文，需含目标词"
+                className="w-full text-sm bg-white border border-yellow-300 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-yellow-400 resize-none placeholder:text-slate-400"
+              />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">例句释义（中文）</p>
+              <textarea
+                value={examSentenceTranslation}
+                onChange={e => setExamSentenceTranslation(e.target.value)}
+                disabled={saving}
+                rows={2}
+                placeholder="必含中文，人名/地名可保留英文"
+                className="w-full text-sm bg-white border border-yellow-300 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-yellow-400 resize-none placeholder:text-slate-400"
+              />
+            </div>
+          </>
+        )}
         <div>
           <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">老师话术</p>
           <textarea
@@ -325,6 +379,30 @@ function MnemonicItemEditor({ mn, onSaved, editable = true }: { mn: ContentItem;
           <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">助记口诀</p>
           <p className="text-sm text-yellow-700">{parsed.chant}</p>
         </div>
+      )}
+      {isRootAffix && (
+        <div>
+          <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">同根词</p>
+          {parsed.extension_words
+            ? <p className="text-sm text-yellow-700">{parsed.extension_words}</p>
+            : <p className="text-sm text-slate-400 italic">（未提取同根词）</p>}
+        </div>
+      )}
+      {isExamApp && (
+        <>
+          <div>
+            <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">实战例句</p>
+            {parsed.exam_sentence
+              ? <p className="text-sm text-yellow-700">{parsed.exam_sentence}</p>
+              : <p className="text-sm text-slate-400 italic">（未提取独立例句）</p>}
+          </div>
+          <div>
+            <p className="text-[10px] font-bold text-yellow-600/60 uppercase mb-0.5">例句释义</p>
+            {parsed.exam_sentence_translation
+              ? <p className="text-sm text-yellow-700">{parsed.exam_sentence_translation}</p>
+              : <p className="text-sm text-slate-400 italic">（未提取例句释义）</p>}
+          </div>
+        </>
       )}
       {parsed.script && (
         <div className="pt-2 border-t border-yellow-200/60">

@@ -556,6 +556,16 @@ export function MnemonicReviewSection({
                     <span className="text-slate-700">{parsed.chant}</span>
                   </div>
                 )}
+                {dim === 'mnemonic_root_affix' && (
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 px-1.5 py-0.5 bg-lime-50 text-lime-600 rounded font-bold text-[10px]">同根词</span>
+                    {parsed.extension_words ? (
+                      <span className="text-slate-700">{parsed.extension_words}</span>
+                    ) : (
+                      <span className="text-slate-400 italic">（未提取同根词）</span>
+                    )}
+                  </div>
+                )}
                 {dim === 'mnemonic_exam_app' && (
                   <>
                     <div className="flex items-start gap-2">
