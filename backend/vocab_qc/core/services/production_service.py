@@ -37,6 +37,18 @@ _GENERATORS = {
 }
 
 
+def _process_mnemonic_result(dimension: str, parsed: dict) -> dict:
+    """助记维度 AI 原始结果转统一格式，保留维度专属扩展字段。
+
+    必须用 _GENERATORS[dimension] 对应子类的 _process_result，不能用 _MnemonicBase：
+    基类 extra_content_keys 为空，会静默丢弃 extension_words / exam_sentence 等扩展字段。
+    非助记维度原样返回。
+    """
+    if dimension in MNEMONIC_DIMENSIONS:
+        return _GENERATORS[dimension]._process_result(parsed)
+    return parsed
+
+
 def _get_word_ids_for_package(session: Session, package_id: int) -> set[int]:
     """获取 Package 关联的所有 word_id。"""
     return {
@@ -812,10 +824,8 @@ def _generate_content_queued(
             count += 1
             continue
 
-        # 助记维度：AI 返回 {valid, formula, chant, script}，需要转换为统一格式
-        if item.dimension in MNEMONIC_DIMENSIONS:
-            from vocab_qc.core.generators.mnemonic import _MnemonicBase
-            parsed = _MnemonicBase._process_result(parsed)
+        # 助记维度：AI 返回 {valid, formula, chant, script(+维度扩展字段)}，转换为统一格式
+        parsed = _process_mnemonic_result(item.dimension, parsed)
 
         if parsed.get("valid") is False:
             item.content = ""

@@ -1077,3 +1077,64 @@ class TestResetThenRegenerate:
         db_session.refresh(chunk)
         assert chunk.qc_status == QcStatus.PENDING.value
         assert chunk.content == ""
+
+
+class TestProcessMnemonicResult:
+    """队列写回路径助记结果处理：必须保留维度专属扩展字段（回归守卫）。
+
+    Bug 背景：队列路径曾用 _MnemonicBase._process_result（基类 extra_content_keys 为空），
+    导致 extension_words / exam_sentence 在持久化时被静默丢弃——生产库 0/897 root_affix、
+    0/3015 exam_app 含该字段。修复改为按维度走对应子类。
+    """
+
+    def test_root_affix_preserves_extension_words(self):
+        """词根词缀：AI 返回 extension_words 时，处理后 content 必须含该字段（修复证明）."""
+        import json
+
+        from vocab_qc.core.services.production_service import _process_mnemonic_result
+
+        raw = {
+            "valid": True, "formula": "in(不) + vis(看) + ible(形容词后缀)",
+            "chant": "不能被看见。", "script": "话术...",
+            "extension_words": "vision (视力); visual (视觉的); visit (去看望)",
+        }
+        result = _process_mnemonic_result("mnemonic_root_affix", raw)
+        content = json.loads(result["content"])
+        assert "extension_words" in content
+        assert content["extension_words"] == "vision (视力); visual (视觉的); visit (去看望)"
+
+    def test_exam_app_preserves_exam_sentence(self):
+        """考试应用：AI 返回 exam_sentence/translation 时，处理后 content 必须含该字段（修复证明）."""
+        import json
+
+        from vocab_qc.core.services.production_service import _process_mnemonic_result
+
+        raw = {
+            "valid": True, "formula": "公式", "chant": "口诀", "script": "话术...",
+            "exam_sentence": "His words are consistent with his actions every single day.",
+            "exam_sentence_translation": "他的言行每天都保持一致。",
+        }
+        result = _process_mnemonic_result("mnemonic_exam_app", raw)
+        content = json.loads(result["content"])
+        assert content["exam_sentence"] == "His words are consistent with his actions every single day."
+        assert content["exam_sentence_translation"] == "他的言行每天都保持一致。"
+
+    def test_base_class_drops_extras_regression_guard(self):
+        """回归守卫：基类 _process_result 会丢弃 extension_words——证明为何必须用子类，禁止改回基类."""
+        import json
+
+        from vocab_qc.core.generators.mnemonic import _MnemonicBase
+
+        raw = {
+            "valid": True, "formula": "f", "chant": "c", "script": "s",
+            "extension_words": "vision (视力)",
+        }
+        dropped = json.loads(_MnemonicBase._process_result(raw)["content"])
+        assert "extension_words" not in dropped  # 这正是当年的 bug 行为
+
+    def test_non_mnemonic_dimension_passthrough(self):
+        """非助记维度（如 chunk）原样返回，不经 _process_result."""
+        from vocab_qc.core.services.production_service import _process_mnemonic_result
+
+        raw = {"content": "a cat", "content_cn": "一只猫"}
+        assert _process_mnemonic_result("chunk", raw) is raw
