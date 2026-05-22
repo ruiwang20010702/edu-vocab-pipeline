@@ -201,8 +201,10 @@ def reset_dimensions_for_regen(
     import json
     from collections import Counter
 
+    from sqlalchemy import and_, exists, or_
+
     from vocab_qc.core.models.prompt import Prompt
-    from vocab_qc.core.models.quality_layer import ReviewItem
+    from vocab_qc.core.models.quality_layer import RetryCounter, ReviewItem
 
     empty = {
         "content_items": 0, "would_reset": 0, "skipped_recently": 0,
@@ -336,6 +338,21 @@ def reset_dimensions_for_regen(
         },
         synchronize_session=False,
     )
+
+    # 同步重置 RetryCounter（review「AI 修复」的真实闸门）：否则前端按 ContentItem.retry_count
+    # 显示可修、但后端按 RetryCounter 拦截，导致一键修复静默跳过（两计数 desync）。
+    session.query(RetryCounter).filter(
+        exists().where(and_(
+            ContentItem.id.in_(eligible_ids),
+            ContentItem.word_id == RetryCounter.word_id,
+            ContentItem.dimension == RetryCounter.dimension,
+            or_(
+                ContentItem.meaning_id == RetryCounter.meaning_id,
+                and_(ContentItem.meaning_id.is_(None), RetryCounter.meaning_id.is_(None)),
+            ),
+        ))
+    ).update({RetryCounter.count: 0}, synchronize_session=False)
+
     session.flush()
     return stats
 

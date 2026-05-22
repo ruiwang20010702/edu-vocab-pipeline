@@ -1389,3 +1389,74 @@ class TestFindPackagesMissingExtraField:
 
         result = find_packages_missing_extra_field(db_session, ["mnemonic_root_affix"])
         assert all(r["package_id"] != pkg.id for r in result["packages"])
+
+
+class TestResetSyncsRetryCounter:
+    """reset_dimensions_for_regen 须同步重置 RetryCounter，避免与 ContentItem.retry_count 失配。
+
+    Bug：补全只归零 ContentItem.retry_count（前端用它判"可AI修复"），未重置 RetryCounter
+    （后端 _regen_preload 的真实闸门）→ 一键修复静默跳过已被旧 counter 拦截的项。
+    """
+
+    def test_reset_zeroes_matching_retry_counter(self, db_session):
+        from vocab_qc.core.models.quality_layer import RetryCounter
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        word = Word(word="careful")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="adj.", definition="小心的")
+        db_session.add(meaning)
+        db_session.flush()
+        pkg = Package(name="rc_sync_test", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+        item = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_exam_app",
+            content='{"formula": "f", "chant": "c", "script": "s", "exam_sentence": "x"}',
+            qc_status=QcStatus.LAYER1_FAILED.value, retry_count=3,
+        )
+        db_session.add(item)
+        db_session.flush()
+        counter = RetryCounter(
+            word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_exam_app",
+            count=3, max_retries=3,
+        )
+        db_session.add(counter)
+        db_session.flush()
+
+        reset_dimensions_for_regen(
+            db_session, pkg.id, {"mnemonic_exam_app"}, skip_if_current_prompt=False,
+        )
+        db_session.refresh(item)
+        db_session.refresh(counter)
+        assert item.retry_count == 0
+        assert counter.count == 0  # 关键：同步归零，否则一键修复被旧 counter 拦
+
+    def test_reset_without_counter_is_noop(self, db_session):
+        """无 RetryCounter 行时 EXISTS 不命中、不报错。"""
+        from vocab_qc.core.services.production_service import reset_dimensions_for_regen
+
+        word = Word(word="friend")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="n.", definition="朋友")
+        db_session.add(meaning)
+        db_session.flush()
+        pkg = Package(name="rc_noop_test", status="completed", total_words=1)
+        db_session.add(pkg)
+        db_session.flush()
+        db_session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+        item = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_exam_app",
+            content='{"formula": "f", "exam_sentence": "x"}',
+            qc_status=QcStatus.APPROVED.value,
+        )
+        db_session.add(item)
+        db_session.flush()
+
+        stats = reset_dimensions_for_regen(
+            db_session, pkg.id, {"mnemonic_exam_app"}, skip_if_current_prompt=False,
+        )
+        assert stats["would_reset"] == 1  # 不抛异常即通过
