@@ -9,7 +9,16 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.logging_config import log_elapsed
-from vocab_qc.core.models import ContentItem, Meaning, Phonetic, QcStatus, Source, Word
+from vocab_qc.core.models import (
+    ContentItem,
+    Meaning,
+    Phonetic,
+    QcStatus,
+    ReviewItem,
+    ReviewStatus,
+    Source,
+    Word,
+)
 from vocab_qc.core.models.enums import MNEMONIC_DIMENSIONS, QC_TERMINAL_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -21,12 +30,13 @@ _MNEMONIC_TYPE_LABELS: dict[str, str] = {
     "mnemonic_exam_app": "考试应用",
 }
 
-# 导出层 POS 规范化映射：去点后若为旧的 art，统一映射到新规范 det
-_POS_NORMALIZE_MAP: dict[str, str] = {"art": "det"}
+# 导出层 POS 规范化：仅去尾部点。
+# 权威清单（2026-05-26 学科同步）art. 与 det. 并列为合规标签，不再强制 art→det 映射。
+_POS_NORMALIZE_MAP: dict[str, str] = {}
 
 
 def _normalize_pos_for_export(pos: str | None) -> str:
-    """导出层规范化 POS：去尾部 '.'，并把旧 'art' 映射到新规范 'det'。"""
+    """导出层规范化 POS：去尾部 '.'，忠于数据库原值。"""
     if not pos:
         return ""
     stripped = pos.rstrip(".")
@@ -90,6 +100,57 @@ def _is_meaning_exportable(items: list["ContentItem"]) -> bool:
         all(ci.qc_status in QC_TERMINAL_STATUSES for ci in items)
         and any(ci.qc_status == QcStatus.APPROVED.value for ci in items)
     )
+
+
+def _collect_reviewers_for_meaning(
+    session: Session,
+    content_item_ids_by_meaning: dict[int, list[int]],
+) -> dict[int, str]:
+    """按义项聚合最终审核人字符串。
+
+    输入：meaning_id -> [content_item_id, ...]（同一义项下所有维度的 ContentItem.id）
+    输出：meaning_id -> "Alice; Bob"（去重排序后 `; ` 拼接，无审核记录返回空串）
+
+    实现要点：
+    - 一次性批量查 ReviewItem，避免 N+1
+    - 同一 content_item_id 有多条历史 resolved 时取 resolved_at 最新那条（Python 侧去重，兼容 SQLite）
+    """
+    if not content_item_ids_by_meaning:
+        return {}
+
+    all_ci_ids = {ci_id for ids in content_item_ids_by_meaning.values() for ci_id in ids}
+    if not all_ci_ids:
+        return {}
+
+    # 一次性拉取所有相关的 resolved ReviewItem，按 resolved_at 倒序
+    # Python 侧按 content_item_id 去重取首条 reviewer（即最新生效的那位审核员）
+    rows = (
+        session.query(
+            ReviewItem.content_item_id,
+            ReviewItem.reviewer,
+            ReviewItem.resolved_at,
+        )
+        .filter(
+            ReviewItem.content_item_id.in_(all_ci_ids),
+            ReviewItem.status == ReviewStatus.RESOLVED.value,
+        )
+        .order_by(ReviewItem.resolved_at.desc().nullslast())
+        .all()
+    )
+
+    reviewer_by_ci: dict[int, str] = {}
+    for ci_id, reviewer, _ in rows:
+        if ci_id in reviewer_by_ci:
+            continue  # 已取过最新那条
+        if reviewer:
+            reviewer_by_ci[ci_id] = reviewer
+
+    # 按义项聚合：收集该义项下所有维度的 reviewer，去重排序后 `; ` 拼接
+    result: dict[int, str] = {}
+    for meaning_id, ci_ids in content_item_ids_by_meaning.items():
+        names = {reviewer_by_ci[ci_id] for ci_id in ci_ids if ci_id in reviewer_by_ci}
+        result[meaning_id] = "; ".join(sorted(names)) if names else ""
+    return result
 
 
 def _iter_approved_batches(session: Session, batch_size: int = 500):
@@ -163,6 +224,14 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
             for s in session.query(Source).filter(Source.meaning_id.in_(meaning_ids)).all():
                 sources_by_meaning[s.meaning_id].append(s)
 
+        # 收集每个可导出义项下所有维度的 ContentItem.id，用于聚合审核人
+        # syllable（meaning_id=None）属于词级，不参与义项聚合
+        ci_ids_by_meaning: dict[int, list[int]] = defaultdict(list)
+        for ci in all_items:
+            if ci.meaning_id and ci.meaning_id in exportable_meaning_ids:
+                ci_ids_by_meaning[ci.meaning_id].append(ci.id)
+        reviewers_by_meaning = _collect_reviewers_for_meaning(session, dict(ci_ids_by_meaning))
+
         # 只取 approved 的 ContentItem 填充内容
         approved_items = [ci for ci in all_items if ci.qc_status == QcStatus.APPROVED.value]
 
@@ -224,6 +293,7 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
                         {"type": m.dimension, "content": m.content}
                         for m in mnemonics_by_meaning.get(meaning.id, [])
                     ],
+                    "reviewer": reviewers_by_meaning.get(meaning.id, ""),
                 }
                 result["meanings"].append(meaning_data)
 
@@ -404,7 +474,7 @@ class ExportService:
         for _, label, cols in mnemonic_types:
             for _, suffix in cols:
                 mn_headers.append(f"{label}·{suffix}")
-        headers = base_headers + mn_headers
+        headers = base_headers + mn_headers + ["审核人"]
 
         # 表头样式
         header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -472,6 +542,9 @@ class ExportService:
                         )
                     col_offset += len(cols)
 
+                # 审核人列（最后一列）
+                ws.cell(row=row, column=col_offset, value=m.get("reviewer", ""))
+
                 for c in range(1, len(headers) + 1):
                     ws.cell(row=row, column=c).alignment = wrap_align
 
@@ -493,7 +566,8 @@ class ExportService:
                 mn_widths += root_affix_mn_widths
             else:
                 mn_widths += basic_mn_widths
-        for i, w in enumerate(base_widths + mn_widths, 1):
+        reviewer_widths: list[int] = [20]
+        for i, w in enumerate(base_widths + mn_widths + reviewer_widths, 1):
             ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
 
         ws.freeze_panes = "A2"

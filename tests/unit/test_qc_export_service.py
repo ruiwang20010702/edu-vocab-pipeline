@@ -1,8 +1,18 @@
 """QcService 与 ExportService 单元测试."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy.orm import Session
-from vocab_qc.core.models import ContentItem, Meaning, QcStatus, Word
+from vocab_qc.core.models import (
+    ContentItem,
+    Meaning,
+    QcStatus,
+    ReviewItem,
+    ReviewReason,
+    ReviewStatus,
+    Word,
+)
 from vocab_qc.core.services.export_service import ExportService
 from vocab_qc.core.services.qc_service import QcService
 
@@ -343,13 +353,16 @@ class TestExportPosNormalization:
         assert pos_values["book"] == "n"
         assert pos_values["kind"] == "adj"
 
-    def test_legacy_art_mapped_to_det_in_export_all(self, db_session: Session):
-        """export_all_approved: 旧 'art.' 映射为新规范 'det'."""
+    def test_art_preserved_in_export_all(self, db_session: Session):
+        """export_all_approved: 'art.' 去点后保持为 'art'（不再映射到 det）。
+
+        2026-05-26 权威清单 art. 与 det. 并存，删除历史 art→det 映射。
+        """
         self._seed_exportable_word(db_session, "the", "art.", "这个")
 
         results = ExportService().export_all_approved(db_session)
         assert len(results) == 1
-        assert results[0]["meanings"][0]["pos"] == "det"
+        assert results[0]["meanings"][0]["pos"] == "art"
 
     def test_new_format_passthrough_in_export_all(self, db_session: Session):
         """export_all_approved: 新格式 'n phr' / 'a phr' / 'n' 保持不变."""
@@ -365,9 +378,165 @@ class TestExportPosNormalization:
         assert pos_values["cat"] == "n"
 
     def test_export_word_path_normalizes_pos(self, db_session: Session):
-        """export_word 单词路径独立规范化（覆盖 L298 调用点）."""
+        """export_word 单词路径独立规范化：去点保持原值。"""
         word = self._seed_exportable_word(db_session, "an", "art.", "一个")
 
         result = ExportService().export_word(db_session, word.id)
         assert result is not None
-        assert result["meanings"][0]["pos"] == "det"
+        assert result["meanings"][0]["pos"] == "art"
+
+
+def _make_review_item(
+    session: Session,
+    content_item: ContentItem,
+    *,
+    reviewer: str,
+    resolved_at: datetime | None = None,
+    status: str = ReviewStatus.RESOLVED.value,
+) -> ReviewItem:
+    """构造一个 resolved ReviewItem 用于审核人列测试。"""
+    ri = ReviewItem(
+        content_item_id=content_item.id,
+        word_id=content_item.word_id,
+        meaning_id=content_item.meaning_id,
+        dimension=content_item.dimension,
+        reason=ReviewReason.LAYER1_FAILED.value,
+        status=status,
+        reviewer=reviewer,
+        resolved_at=resolved_at or datetime.now(UTC),
+    )
+    session.add(ri)
+    session.flush()
+    return ri
+
+
+class TestExportReviewerColumn:
+    """export_all_approved 注入审核人字段，按义项聚合去重排序。"""
+
+    def test_reviewer_single_dimension_single_reviewer(self, db_session: Session):
+        """单义项单维度单审核员 → reviewer 字段 = 单个名字。"""
+        word = _make_word(db_session, "book")
+        meaning = _make_meaning(db_session, word, "n", "书")
+        chunk = _make_content(
+            db_session, word, "chunk", "read a book",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        _make_review_item(db_session, chunk, reviewer="alice")
+
+        results = ExportService().export_all_approved(db_session)
+        assert len(results) == 1
+        assert results[0]["meanings"][0]["reviewer"] == "alice"
+
+    def test_reviewer_multi_dim_same_user_dedup(self, db_session: Session):
+        """同义项多维度同审核员 → 去重为单个名字（典型场景：词维度派发）。"""
+        word = _make_word(db_session, "run")
+        meaning = _make_meaning(db_session, word, "v", "跑")
+
+        chunk = _make_content(
+            db_session, word, "chunk", "run fast",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        sentence = _make_content(
+            db_session, word, "sentence", "I run fast.",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        _make_review_item(db_session, chunk, reviewer="bob")
+        _make_review_item(db_session, sentence, reviewer="bob")
+
+        results = ExportService().export_all_approved(db_session)
+        assert len(results) == 1
+        assert results[0]["meanings"][0]["reviewer"] == "bob"
+
+    def test_reviewer_multi_dim_diff_users_joined(self, db_session: Session):
+        """同义项多维度不同审核员（罕见跨批次场景）→ 排序后 `; ` 拼接。"""
+        word = _make_word(db_session, "fly")
+        meaning = _make_meaning(db_session, word, "v", "飞")
+
+        chunk = _make_content(
+            db_session, word, "chunk", "fly high",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        sentence = _make_content(
+            db_session, word, "sentence", "Birds fly high.",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        _make_review_item(db_session, chunk, reviewer="zoe")
+        _make_review_item(db_session, sentence, reviewer="alice")
+
+        results = ExportService().export_all_approved(db_session)
+        assert len(results) == 1
+        # 排序后应为 alice; zoe
+        assert results[0]["meanings"][0]["reviewer"] == "alice; zoe"
+
+    def test_reviewer_isolated_per_meaning(self, db_session: Session):
+        """不同义项的 reviewer 互不污染（验证按 meaning_id 隔离聚合）。
+
+        说明：同一 ContentItem 历史多条 resolved 取最新那条，靠 `_collect_reviewers_for_meaning`
+        内的 `ORDER BY resolved_at DESC` + Python 侧首条去重保证；该路径在 SQLite 测试环境下
+        受 partial unique index 退化限制无法构造，由 PostgreSQL 集成验证。
+        """
+        word = _make_word(db_session, "open")
+        m1 = _make_meaning(db_session, word, "v", "打开")
+        m2 = _make_meaning(db_session, word, "v", "开始")
+
+        chunk1 = _make_content(
+            db_session, word, "chunk", "open the door",
+            meaning=m1, qc_status=QcStatus.APPROVED.value,
+        )
+        chunk2 = _make_content(
+            db_session, word, "chunk", "open a new chapter",
+            meaning=m2, qc_status=QcStatus.APPROVED.value,
+        )
+
+        old_time = datetime.now(UTC) - timedelta(days=1)
+        new_time = datetime.now(UTC)
+        _make_review_item(db_session, chunk1, reviewer="alice", resolved_at=old_time)
+        _make_review_item(db_session, chunk2, reviewer="bob", resolved_at=new_time)
+
+        results = ExportService().export_all_approved(db_session)
+        assert len(results) == 1
+        meanings_by_def = {m["def"]: m["reviewer"] for m in results[0]["meanings"]}
+        assert meanings_by_def["打开"] == "alice"
+        assert meanings_by_def["开始"] == "bob"
+
+    def test_reviewer_missing_review_returns_empty(self, db_session: Session):
+        """ContentItem 无 ReviewItem 时 reviewer 字段为空字符串。"""
+        word = _make_word(db_session, "pen")
+        meaning = _make_meaning(db_session, word, "n", "笔")
+        _make_content(
+            db_session, word, "chunk", "a pen",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        # 故意不创建 ReviewItem
+
+        results = ExportService().export_all_approved(db_session)
+        assert len(results) == 1
+        assert results[0]["meanings"][0]["reviewer"] == ""
+
+    def test_excel_export_reviewer_header_and_value(self, db_session: Session):
+        """端到端验证 Excel 文件最后一列表头为「审核人」且数据正确。"""
+        from openpyxl import load_workbook
+
+        word = _make_word(db_session, "cat")
+        meaning = _make_meaning(db_session, word, "n", "猫")
+        chunk = _make_content(
+            db_session, word, "chunk", "a lovely cat",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        _make_review_item(db_session, chunk, reviewer="wangrui003")
+
+        buf = ExportService().export_to_excel(db_session)
+        wb = load_workbook(buf)
+        ws = wb.active
+
+        # 表头最后一列
+        last_col_idx = ws.max_column
+        assert ws.cell(row=1, column=last_col_idx).value == "审核人"
+
+        # 数据行最后一列：找到 cat 行
+        for row_idx in range(2, ws.max_row + 1):
+            if ws.cell(row=row_idx, column=1).value == "cat":
+                assert ws.cell(row=row_idx, column=last_col_idx).value == "wangrui003"
+                break
+        else:
+            raise AssertionError("未找到 cat 数据行")

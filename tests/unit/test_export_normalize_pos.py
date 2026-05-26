@@ -23,10 +23,14 @@ class TestNormalizePosForExport:
     def test_strip_trailing_dot(self, raw, expected):
         assert _normalize_pos_for_export(raw) == expected
 
-    # art. / art 都映射为 det
-    @pytest.mark.parametrize("raw", ["art.", "art"])
-    def test_art_maps_to_det(self, raw):
-        assert _normalize_pos_for_export(raw) == "det"
+    # art. / art 忠于原值（不再映射到 det）。
+    # 2026-05-26 权威清单 art. 与 det. 并存，删除历史 art→det 映射。
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [("art.", "art"), ("art", "art"), ("det.", "det"), ("det", "det")],
+    )
+    def test_art_and_det_both_preserved(self, raw, expected):
+        assert _normalize_pos_for_export(raw) == expected
 
     # 已规范化的新格式保持不变
     @pytest.mark.parametrize(
