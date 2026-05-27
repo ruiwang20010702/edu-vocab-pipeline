@@ -540,3 +540,70 @@ class TestExportReviewerColumn:
                 break
         else:
             raise AssertionError("未找到 cat 数据行")
+
+
+class TestExcelPagination:
+    """多 sheet 分页：每 ROWS_PER_SHEET 个义项切到下一个 sheet（27w 义项约 14 个 sheet）。"""
+
+    def test_paginates_when_rows_exceed_threshold(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """ROWS_PER_SHEET=2 + 3 个义项 → 2 个 sheet（2+1 分布），每 sheet 都有完整表头。"""
+        from openpyxl import load_workbook
+        from vocab_qc.core.services import export_service as export_mod
+
+        monkeypatch.setattr(export_mod, "ROWS_PER_SHEET", 2)
+
+        for w in ("alpha", "beta", "gamma"):
+            word = _make_word(db_session, w)
+            meaning = _make_meaning(db_session, word, "n.", f"def-{w}")
+            _make_content(
+                db_session, word, "chunk", f"chunk-{w}",
+                meaning=meaning, qc_status=QcStatus.APPROVED.value,
+            )
+
+        path = ExportService().export_to_excel(db_session)
+        wb = load_workbook(path)
+
+        assert wb.sheetnames == ["词表导出_01", "词表导出_02"], (
+            f"期望 2 个 sheet 命名 词表导出_01/02，实得 {wb.sheetnames}"
+        )
+
+        # sheet 01：表头 + 2 行数据
+        ws1 = wb["词表导出_01"]
+        assert ws1.cell(row=1, column=1).value == "单词"
+        assert ws1.cell(row=1, column=ws1.max_column).value == "审核人"
+        assert ws1.max_row == 3  # 1 表头 + 2 数据
+
+        # sheet 02：表头 + 1 行数据
+        ws2 = wb["词表导出_02"]
+        assert ws2.cell(row=1, column=1).value == "单词"
+        assert ws2.cell(row=1, column=ws2.max_column).value == "审核人"
+        assert ws2.max_row == 2  # 1 表头 + 1 数据
+
+        # 3 个单词分布在两个 sheet 里（顺序不强求，只要齐全）
+        words_seen = set()
+        for ws in (ws1, ws2):
+            for row_idx in range(2, ws.max_row + 1):
+                w = ws.cell(row=row_idx, column=1).value
+                if w:
+                    words_seen.add(w)
+        assert words_seen == {"alpha", "beta", "gamma"}
+
+    def test_single_sheet_when_under_threshold(self, db_session: Session):
+        """默认 ROWS_PER_SHEET=20000，3 个义项 → 单 sheet（命名仍为 _01）。"""
+        from openpyxl import load_workbook
+
+        for w in ("kappa", "lambda", "mu"):
+            word = _make_word(db_session, w)
+            meaning = _make_meaning(db_session, word, "n.", f"def-{w}")
+            _make_content(
+                db_session, word, "chunk", f"chunk-{w}",
+                meaning=meaning, qc_status=QcStatus.APPROVED.value,
+            )
+
+        path = ExportService().export_to_excel(db_session)
+        wb = load_workbook(path)
+
+        assert wb.sheetnames == ["词表导出_01"]
+        assert wb["词表导出_01"].max_row == 4  # 1 表头 + 3 数据

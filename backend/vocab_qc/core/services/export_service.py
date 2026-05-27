@@ -1,9 +1,10 @@
 """导出服务: 仅导出已通过审核的内容."""
 
-import io
 import json
 import logging
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -30,6 +31,11 @@ _MNEMONIC_TYPE_LABELS: dict[str, str] = {
     "mnemonic_sound_meaning": "音义联想",
     "mnemonic_exam_app": "考试应用",
 }
+
+# Excel 单 sheet 分页阈值：每 N 个义项行（不是单词行）切到下一个 sheet。
+# 2 万行 sheet 在普通办公电脑上保持筛选/排序可用；27w 义项约 14 个 sheet。
+# 测试可 monkeypatch 改小值验证分页逻辑。
+ROWS_PER_SHEET: int = 20000
 
 # 导出层 POS 规范化：仅去尾部点。
 # 权威清单（2026-05-26 学科同步）art. 与 det. 并列为合规标签，不再强制 art→det 映射。
@@ -441,18 +447,34 @@ class ExportService:
         logger.info("导出 JSON 完成 filepath=%s count=%d", filepath, count)
         return count
 
-    def export_to_excel(self, session: Session) -> io.BytesIO:
+    def export_to_excel(
+        self,
+        session: Session,
+        output_path: Path | None = None,
+    ) -> Path:
         """导出已通过词汇数据为 Excel，每个义项一行，4 种助记按维度展列。
 
         P-M1: 分批查询 + openpyxl write_only 流式写入，避免在内存里构建整本工作簿对象树。
-        write_only 模式下 ws.append([...]) 流式落盘，单元格不持有反向引用，
-        4000+ 义项规模内存峰值显著低于普通模式；27 万义项规模可线性扩展。
+        P-M2: 写入到临时文件而非 BytesIO，避免在内存中完整持有压缩后的 xlsx 二进制。
+        P-M3: 每 ROWS_PER_SHEET (默认 2 万) 个义项行切到下一个 sheet，单 sheet 保持
+              筛选/排序可用；27 万义项约 14 个 sheet。
+
+        Args:
+            output_path: 落盘路径。None 时自动创建带 .xlsx 后缀的 NamedTemporaryFile，
+                调用方负责清理（API router 用 BackgroundTask）。
+        Returns:
+            写入完成的 xlsx 文件 Path。
         """
         logger.info("导出 Excel 开始")
         from openpyxl import Workbook
         from openpyxl.cell import WriteOnlyCell
         from openpyxl.styles import Alignment, Font, PatternFill
         from openpyxl.utils import get_column_letter
+
+        if output_path is None:
+            tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+            output_path = Path(tmp.name)
+            tmp.close()
 
         # 助记类型与各自要导出的列：通用 3 列；词根词缀额外含"同根词"为 4 列；考试应用含"例句"为 5 列
         basic_mn_cols: list[tuple[str, str]] = [
@@ -486,11 +508,10 @@ class ExportService:
                 mn_headers.append(f"{label}·{suffix}")
         headers = base_headers + mn_headers + ["审核人"]
 
-        # write_only 工作簿不能用 wb.active；要 create_sheet
+        # write_only 工作簿不能用 wb.active；每个 sheet 通过 create_sheet 创建
         wb = Workbook(write_only=True)
-        ws = wb.create_sheet("词表导出")
 
-        # 列宽（write_only 下仍可在 append 之前设 column_dimensions）
+        # 列宽（每个 sheet 独立配置）
         base_widths = [15, 22, 22, 40, 40, 18, 8, 30, 24, 12, 12, 12, 28, 28, 42, 42]
         basic_mn_widths: list[int] = [22, 22, 30]
         root_affix_mn_widths: list[int] = [22, 22, 28, 30]
@@ -504,35 +525,49 @@ class ExportService:
             else:
                 mn_widths += basic_mn_widths
         col_widths = base_widths + mn_widths + [20]  # 末列：审核人
-        for i, w in enumerate(col_widths, 1):
-            ws.column_dimensions[get_column_letter(i)].width = w
-        ws.freeze_panes = "A2"
 
-        # 样式：表头一次性构建；数据行 wrap_text 用一个共享 Alignment 实例（openpyxl
-        # 内部按 hash 去重，所以共享一个对象就能避免重复样式开销）
+        # 样式：所有 sheet 共享同一组样式实例（openpyxl 内部按 hash 去重）
         header_font = Font(bold=True, color="FFFFFF", size=11)
         header_fill = PatternFill(start_color="3B82F6", end_color="3B82F6", fill_type="solid")
         wrap_align = Alignment(wrap_text=True, vertical="top")
 
-        header_cells = []
-        for h in headers:
-            c = WriteOnlyCell(ws, value=h)
-            c.font = header_font
-            c.fill = header_fill
-            c.alignment = wrap_align
-            header_cells.append(c)
-        ws.append(header_cells)
+        def _new_sheet(idx: int):
+            """创建一个新 sheet，写入列宽、freeze panes、表头样式。"""
+            ws_ = wb.create_sheet(f"词表导出_{idx:02d}")
+            for i, w in enumerate(col_widths, 1):
+                ws_.column_dimensions[get_column_letter(i)].width = w
+            ws_.freeze_panes = "A2"
+            header_cells = []
+            for h in headers:
+                c = WriteOnlyCell(ws_, value=h)
+                c.font = header_font
+                c.fill = header_fill
+                c.alignment = wrap_align
+                header_cells.append(c)
+            ws_.append(header_cells)
+            return ws_
 
-        def _wrap_row(values: list[Any]) -> list[Any]:
+        def _wrap_row(ws_, values: list[Any]) -> list[Any]:
             """把一行的值用 WriteOnlyCell + 共享 wrap_align 包一层，保留自动换行。"""
             cells = []
             for v in values:
-                c = WriteOnlyCell(ws, value=v)
+                c = WriteOnlyCell(ws_, value=v)
                 c.alignment = wrap_align
                 cells.append(c)
             return cells
 
-        rows_written = 0
+        sheet_idx = 1
+        ws = _new_sheet(sheet_idx)
+        rows_in_sheet = 0
+        total_rows = 0
+
+        def _maybe_rotate_sheet():
+            nonlocal ws, sheet_idx, rows_in_sheet
+            if rows_in_sheet >= ROWS_PER_SHEET:
+                sheet_idx += 1
+                ws = _new_sheet(sheet_idx)
+                rows_in_sheet = 0
+
         for word_data in _iter_approved_batches(session):
             word = word_data["word"]
             ipa_uk = word_data.get("ipa_uk", "")
@@ -543,13 +578,16 @@ class ExportService:
             meanings = word_data.get("meanings", [])
 
             if not meanings:
+                _maybe_rotate_sheet()
                 row_values: list[Any] = [word, ipa_uk, ipa_us, audio_uk, audio_us, syllables]
                 row_values += [""] * (len(headers) - len(row_values))
-                ws.append(_wrap_row(row_values))
-                rows_written += 1
+                ws.append(_wrap_row(ws, row_values))
+                rows_in_sheet += 1
+                total_rows += 1
                 continue
 
             for m in meanings:
+                _maybe_rotate_sheet()
                 sources = m.get("sources", [])
                 row_values = [
                     word, ipa_uk, ipa_us, audio_uk, audio_us, syllables,
@@ -579,14 +617,13 @@ class ExportService:
                 # 审核人列（最后一列）
                 row_values.append(m.get("reviewer", ""))
 
-                ws.append(_wrap_row(row_values))
-                rows_written += 1
+                ws.append(_wrap_row(ws, row_values))
+                rows_in_sheet += 1
+                total_rows += 1
 
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-        logger.info("导出 Excel 完成 rows=%d", rows_written)
-        return buf
+        wb.save(str(output_path))
+        logger.info("导出 Excel 完成 rows=%d sheets=%d path=%s", total_rows, sheet_idx, output_path)
+        return output_path
 
     def get_export_readiness(self, session: Session) -> dict:
         """检查导出就绪状态."""

@@ -10,7 +10,7 @@ Outputs:
 """
 from __future__ import annotations
 
-import io
+import os
 import sys
 import time
 import tracemalloc
@@ -34,15 +34,21 @@ def main() -> int:
     t0 = time.perf_counter()
     profiler.start()
     try:
-        buf: io.BytesIO = service.export_to_excel(session)
+        # P-M2 之后 export_to_excel 返回临时文件 Path
+        xlsx_path: Path = service.export_to_excel(session)
     finally:
         profiler.stop()
         elapsed = time.perf_counter() - t0
-        current, peak = tracemalloc.get_traced_memory()
+        _current, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         session.close()
 
-    excel_bytes = buf.getbuffer().nbytes
+    excel_bytes = xlsx_path.stat().st_size
+    # 临时文件读完大小就清理，避免 /tmp 累积
+    try:
+        os.unlink(xlsx_path)
+    except OSError:
+        pass
 
     OUT_HTML.write_text(profiler.output_html(), encoding="utf-8")
 

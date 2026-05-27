@@ -1,12 +1,14 @@
 """导出 API 路由."""
 
-import logging
 import json
+import logging
+import os
 from typing import Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from vocab_qc.api.deps import get_db, require_role
 from vocab_qc.api.routers.auth import limiter
@@ -81,12 +83,18 @@ def download_excel(
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin", "reviewer")),
 ):
-    """下载所有已通过词汇数据 (Excel)."""
+    """下载所有已通过词汇数据 (Excel)。
+
+    P-M2/M3: export_to_excel 落盘到临时 xlsx 文件并返回 Path；FileResponse 流式
+    读盘下发；BackgroundTask 在响应完成后清理临时文件。避免在内存中持有完整
+    xlsx 二进制（27w 义项约 200MB+）。
+    """
     logger.info("导出下载 format=excel user=%s", _current_user.email)
     service = ExportService()
-    buf = service.export_to_excel(db)
-    return StreamingResponse(
-        buf,
+    path = service.export_to_excel(db)
+    return FileResponse(
+        path=str(path),
+        filename="vocab_export.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=vocab_export.xlsx"},
+        background=BackgroundTask(os.unlink, str(path)),
     )
