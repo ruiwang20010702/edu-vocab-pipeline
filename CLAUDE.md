@@ -51,7 +51,7 @@ vocab_qc/
 ├── api/            ← HTTP 层：FastAPI routers + Pydantic schemas + 依赖注入
 │   ├── main.py     ← 应用入口（lifespan: prompt同步 + 词素KB预热 + httpx关闭）
 │   ├── deps.py     ← DI：get_db(Session), get_current_user(JWT Cookie/Bearer), require_role()
-│   └── routers/    ← 10 个 router: auth, admin, stats, words, import_, qc, review, batch, export, prompt
+│   └── routers/    ← 11 个 router: auth, admin, stats, words, import_, qc, review, batch, export, prompt, callback
 ├── core/           ← 业务层
 │   ├── config.py   ← Pydantic Settings，所有配置项前缀 VOCAB_QC_（如 VOCAB_QC_DATABASE_URL_SYNC）
 │   ├── db.py       ← SQLAlchemy Engine + SyncSessionLocal（SQLite/PostgreSQL 双模式）
@@ -73,9 +73,11 @@ vocab_qc/
 
 单页应用，7 个页面：数据看板、词表导入、生产监控、质检审核、总表管理、Prompt管理、用户管理（admin-only）。`lib/api.ts` 封装 fetch + JWT 自动注入，`lib/auth.ts` 管理认证状态。Vite 开发服务器代理 `/api/*` 到后端。
 
+总表（MasterTable）已支持：维度子集"重新生产"（含 `dry_run` 预览 + 仅补缺字段项 + 强制覆盖）、"一键补全缺失字段"全量回填按钮（含 `unique_missing` 去重计数预览）。Excel 导出包含审核人列（按义项聚合 ReviewItem.reviewer）。
+
 ### 数据库（PostgreSQL 16 / 测试用 SQLite 内存）
 
-ORM 模型分布在 `core/models/` 下，约 17 张表。测试通过 `conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离。Alembic 管理 17 个迁移版本。
+ORM 模型分布在 `core/models/` 下，共 19 张表。测试通过 `conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离。Alembic 管理 22 个迁移版本。
 
 ## 关键业务规则
 
@@ -85,6 +87,10 @@ ORM 模型分布在 `core/models/` 下，约 17 张表。测试通过 `conftest.
 4. **词包按词关联**：Package 通过 PackageWord（word_id）关联单词，导入/生产/统计均按词维度操作
 5. **生产中锁**：Package 状态为 processing 时，其关联词不会被批次领取（防止生产与审核并发冲突）
 6. **生产编排**：`production_service.py` 按 Package 维度编排 生成→质检→入队审核 全流程，支持并发 AI 调用（`ai_max_concurrency` 控制）
+7. **Prompt 版本指纹**：每条 ContentItem 持久化 `generated_with_prompt_id` + `generated_with_prompt_hash`。重新生产时双指纹与当前 active prompt 完全一致 → 视为最新版自动跳过（取代 24h 窗口启发式）
+8. **仅补缺字段项**：`only_missing_extra_field=True` 忽略指纹去重，只命中 content 非空但缺主 extra 键（如 `extension_words` / `exam_sentence`）的项；总表"一键补全缺失字段"用此模式增量回灌
+9. **维度子集生产**：`/api/batch/produce` 支持 `dimensions` 数组（仅指定维度重生）+ `dry_run` 预览 + `force_overwrite` 强制覆盖。批次模式 `is_regen_mode = dimensions is not None`
+10. **POS 权威标签**：23 个带点标签（`n. / v. / mod. / int. / det. / ...`，2026-05-26 学科同步）。导出层不再做 `art.→det.` 强制映射，保留原始标签
 
 ## 配置体系
 
@@ -99,7 +105,7 @@ ORM 模型分布在 `core/models/` 下，约 17 张表。测试通过 `conftest.
 
 ## 测试体系
 
-831 个测试，分为 `tests/unit/` 和 `tests/integration/` 两层。`conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离（`session` 级 engine，`function` 级 session）。`sample_word` fixture 创建含多义项、多内容项的测试单词。
+68 个测试文件，分为 `tests/unit/` 和 `tests/integration/` 两层。`conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离（`session` 级 engine，`function` 级 session）。`sample_word` fixture 创建含多义项、多内容项的测试单词。
 
 Ruff 配置：line-length=120, target-version=py311, select=[E,F,I,N,W]。
 

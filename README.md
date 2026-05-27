@@ -2,7 +2,7 @@
 
 将人教版中小学英语教材词表整合为标准化词库，为每个词生成音标、释义、语块、例句、助记五个维度的学习内容。最终用户是中小学生，系统的核心设计目标：**学生拿到的每一条数据都必须是对的**。
 
-> 当前状态：前后端均已实现，614+ 个测试全部通过。前端 7 页面 + 后端完整 API + Docker 部署就绪。已完成三轮安全与性能审计，全部修复。
+> 当前状态：前后端均已实现，68 个测试文件覆盖全部业务路径。前端 7 页面 + 后端完整 API + Docker 部署就绪。已完成三轮安全与性能审计，全部修复。
 
 ---
 
@@ -83,6 +83,19 @@ Layer 1（算法规则 22 条）→ Layer 2（AI 语义校验，Unified 策略�
 
 所有 AI 调用失败（生产 + 质检阶段）持久化到 `ai_error_logs` 表，支持按 phase/error_type 统计失败率。
 
+### Prompt 版本指纹与精准回填
+
+每条 ContentItem 持久化生成时使用的 `generated_with_prompt_id` 与 `generated_with_prompt_hash` 双指纹：
+
+- **重新生产去重**：当前 active prompt 的 `prompt_id` + `file_hash` 与 ContentItem 完全一致 → 视为已是最新版，自动跳过（取代旧的 24h 窗口启发式）
+- **仅补缺字段项**（`only_missing_extra_field=True`）：忽略指纹去重，只命中 content 非空但缺主 extra 键（如 `extension_words` / `exam_sentence`）的存量项，精准回填
+- **总表"一键补全缺失字段"**：全量扫描所有词，对缺失维度按当前 active prompt 增量回灌
+- **维度子集生产**：`/api/batch/produce` 接受 `dimensions` 数组，仅重生指定维度；配合 `dry_run` 预览 + `force_overwrite` 强制覆盖
+
+### POS 权威标签
+
+义项词性使用 23 个权威带点标签（`n. / v. / mod. / int. / det. / ...`，2026-05-26 学科同步）。导出层不再做 `art.→det.` 等强制映射，保留原始权威标签。
+
 ---
 
 ## 4. 设计原则
@@ -102,7 +115,7 @@ Layer 1（算法规则 22 条）→ Layer 2（AI 语义校验，Unified 策略�
 |------|------|
 | 前端 | React 19 + Vite 7 + TypeScript 5.9 + Tailwind CSS 4 |
 | 后端 | Python 3.11 + FastAPI + SQLAlchemy 2.0 + AsyncPG + Typer (CLI) |
-| 数据库 | PostgreSQL 16+（17 张表），Alembic 17 版迁移 |
+| 数据库 | PostgreSQL 16+（19 张表），Alembic 22 版迁移 |
 | AI 服务 | Gemini 3 Flash / GPT-5.2（内容生成 + 质检），可通过 Prompt 管理切换 |
 | 部署 | Docker Compose（前后端 + Nginx） |
 
@@ -123,16 +136,16 @@ S9-Vocab-Pipeline/
 │   │   ├── core/
 │   │   │   ├── config.py        ← Pydantic Settings，环境变量前缀 VOCAB_QC_
 │   │   │   ├── db.py            ← 数据库连接（sync + async）
-│   │   │   ├── models/          ← ORM 模型（17 张表）
+│   │   │   ├── models/          ← ORM 模型（19 张表）
 │   │   │   ├── qc/              ← 质检引擎（Layer 1 算法 + Layer 2 AI）
 │   │   │   ├── services/        ← 业务服务层
 │   │   │   └── generators/      ← 内容生成器（chunk/sentence/syllable/mnemonic）
 │   │   ├── api/
-│   │   │   ├── main.py          ← FastAPI 入口（CORS + 10 个 router）
-│   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt
+│   │   │   ├── main.py          ← FastAPI 入口（CORS + 11 个 router）
+│   │   │   ├── routers/         ← auth, admin, stats, words, import_, qc, review, batch, export, prompt, callback
 │   │   │   └── schemas/         ← Pydantic 响应模型
 │   │   └── cli/                 ← Typer CLI 命令
-│   └── alembic/                 ← 数据库迁移脚本（17 个版本）
+│   └── alembic/                 ← 数据库迁移脚本（22 个版本）
 │
 ├── frontend/                    ← React 19 + TypeScript + Tailwind CSS v4
 │   ├── src/
@@ -143,7 +156,7 @@ S9-Vocab-Pipeline/
 │   │   └── pages/               ← 7 个页面（Dashboard/总表/导入/监控/审核/Prompt管理/用户管理）
 │   └── vite.config.ts           ← Vite + Tailwind + API proxy → localhost:8000
 │
-├── tests/                       ← 614+ 个测试
+├── tests/                       ← 68 个测试文件
 │   ├── conftest.py              ← SQLite 内存数据库 + 样例数据 fixture
 │   ├── unit/                    ← 模型 + 规则 + AI + 各服务 + CLI
 │   └── integration/             ← 质检流水线 + 审核流程 + API + RBAC
