@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.logging_config import log_elapsed
@@ -154,7 +155,13 @@ def _collect_reviewers_for_meaning(
 
 
 def _iter_approved_batches(session: Session, batch_size: int = 500):
-    """分批查询已审核通过的词汇数据（按义项级别过滤：所有维度终态才导出）。"""
+    """分批查询已审核通过的词汇数据（按义项级别过滤：所有维度终态才导出）。
+
+    性能策略：主 ContentItem 查询只 select 导出真正用到的 7 列（id / word_id /
+    meaning_id / dimension / qc_status / content / content_cn），避免一并拉
+    `generated_with_prompt_*` / `ai_*` / `retry_*` / 时间戳等无关列。Row 对象
+    支持属性访问，下游 `.content` / `.dimension` 等调用兼容。
+    """
     from collections import defaultdict
 
     from sqlalchemy import distinct
@@ -170,15 +177,20 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
     for i in range(0, len(all_word_ids), batch_size):
         batch_ids = all_word_ids[i : i + batch_size]
 
-        # 加载该批次所有 ContentItem（不限 status）
-        all_items = (
-            session.query(ContentItem)
-            .filter(ContentItem.word_id.in_(batch_ids))
-            .all()
-        )
+        # 加载该批次所有 ContentItem（不限 status）— 只取 7 列
+        stmt = select(
+            ContentItem.id,
+            ContentItem.word_id,
+            ContentItem.meaning_id,
+            ContentItem.dimension,
+            ContentItem.qc_status,
+            ContentItem.content,
+            ContentItem.content_cn,
+        ).where(ContentItem.word_id.in_(batch_ids))
+        all_items = session.execute(stmt).all()
 
-        # 按 (word_id, meaning_id) 分组
-        items_by_key: dict[tuple[int, int | None], list[ContentItem]] = defaultdict(list)
+        # 按 (word_id, meaning_id) 分组（all_items 元素为 sqlalchemy.Row，属性访问与 ORM 对象兼容）
+        items_by_key: dict[tuple[int, int | None], list[Any]] = defaultdict(list)
         for ci in all_items:
             items_by_key[(ci.word_id, ci.meaning_id)].append(ci)
 
@@ -235,8 +247,8 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
         # 只取 approved 的 ContentItem 填充内容
         approved_items = [ci for ci in all_items if ci.qc_status == QcStatus.APPROVED.value]
 
-        content_index: dict[tuple[int, int | None, str], ContentItem] = {}
-        mnemonics_by_meaning: dict[int, list[ContentItem]] = defaultdict(list)
+        content_index: dict[tuple[int, int | None, str], Any] = {}
+        mnemonics_by_meaning: dict[int, list[Any]] = defaultdict(list)
         for ci in approved_items:
             if ci.word_id not in words:
                 continue
@@ -430,19 +442,17 @@ class ExportService:
         return count
 
     def export_to_excel(self, session: Session) -> io.BytesIO:
-        """导出已通过词汇数据为 Excel，每个义项一行，4 种助记各占 3 列。
+        """导出已通过词汇数据为 Excel，每个义项一行，4 种助记按维度展列。
 
-        P-M1: 使用分批查询，避免全量加载到内存。
+        P-M1: 分批查询 + openpyxl write_only 流式写入，避免在内存里构建整本工作簿对象树。
+        write_only 模式下 ws.append([...]) 流式落盘，单元格不持有反向引用，
+        4000+ 义项规模内存峰值显著低于普通模式；27 万义项规模可线性扩展。
         """
         logger.info("导出 Excel 开始")
         from openpyxl import Workbook
+        from openpyxl.cell import WriteOnlyCell
         from openpyxl.styles import Alignment, Font, PatternFill
-
-        data = _iter_approved_batches(session)
-
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "词表导出"
+        from openpyxl.utils import get_column_letter
 
         # 助记类型与各自要导出的列：通用 3 列；词根词缀额外含"同根词"为 4 列；考试应用含"例句"为 5 列
         basic_mn_cols: list[tuple[str, str]] = [
@@ -476,85 +486,12 @@ class ExportService:
                 mn_headers.append(f"{label}·{suffix}")
         headers = base_headers + mn_headers + ["审核人"]
 
-        # 表头样式
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        header_fill = PatternFill(start_color="3B82F6", end_color="3B82F6", fill_type="solid")
-        wrap_align = Alignment(wrap_text=True, vertical="top")
+        # write_only 工作簿不能用 wb.active；要 create_sheet
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet("词表导出")
 
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = wrap_align
-
-        row = 2
-        for word_data in data:
-            word = word_data["word"]
-            ipa_uk = word_data.get("ipa_uk", "")
-            ipa_us = word_data.get("ipa_us", "")
-            audio_uk = word_data.get("audio_url_uk", "") or ""
-            audio_us = word_data.get("audio_url_us", "") or ""
-            syllables = word_data.get("syllables", "")
-            meanings = word_data.get("meanings", [])
-
-            if not meanings:
-                ws.cell(row=row, column=1, value=word)
-                ws.cell(row=row, column=2, value=ipa_uk)
-                ws.cell(row=row, column=3, value=ipa_us)
-                ws.cell(row=row, column=4, value=audio_uk)
-                ws.cell(row=row, column=5, value=audio_us)
-                ws.cell(row=row, column=6, value=syllables)
-                row += 1
-                continue
-
-            for m in meanings:
-                ws.cell(row=row, column=1, value=word)
-                ws.cell(row=row, column=2, value=ipa_uk)
-                ws.cell(row=row, column=3, value=ipa_us)
-                ws.cell(row=row, column=4, value=audio_uk)
-                ws.cell(row=row, column=5, value=audio_us)
-                ws.cell(row=row, column=6, value=syllables)
-                ws.cell(row=row, column=7, value=m.get("pos", ""))
-                ws.cell(row=row, column=8, value=m.get("def", ""))
-                sources = m.get("sources", [])
-                ws.cell(row=row, column=9, value="; ".join(sources) if sources else "")
-                ws.cell(row=row, column=10, value=m.get("textbook_id") or "")
-                ws.cell(row=row, column=11, value=m.get("word_book_id") or "")
-                ws.cell(row=row, column=12, value=m.get("unit_id") or "")
-                ws.cell(row=row, column=13, value=m.get("chunk") or "")
-                ws.cell(row=row, column=14, value=m.get("chunk_cn") or "")
-                ws.cell(row=row, column=15, value=m.get("sentence") or "")
-                ws.cell(row=row, column=16, value=m.get("sentence_cn") or "")
-
-                # 助记：按 type 建索引
-                mn_by_type: dict[str, dict[str, str]] = {}
-                for mn in m.get("mnemonics", []):
-                    mn_by_type[mn["type"]] = _parse_mnemonic_fields(mn.get("content", ""))
-
-                # 各类型按其 columns 写入，缺失（LLM 判定 valid:false / 该维度 rejected）留空
-                col_offset = len(base_headers) + 1
-                for mn_key, _, cols in mnemonic_types:
-                    fields = mn_by_type.get(mn_key)
-                    for i, (field_name, _) in enumerate(cols):
-                        ws.cell(
-                            row=row, column=col_offset + i,
-                            value=(fields[field_name] if fields else ""),
-                        )
-                    col_offset += len(cols)
-
-                # 审核人列（最后一列）
-                ws.cell(row=row, column=col_offset, value=m.get("reviewer", ""))
-
-                for c in range(1, len(headers) + 1):
-                    ws.cell(row=row, column=c).alignment = wrap_align
-
-                row += 1
-
-        # 列宽
+        # 列宽（write_only 下仍可在 append 之前设 column_dimensions）
         base_widths = [15, 22, 22, 40, 40, 18, 8, 30, 24, 12, 12, 12, 28, 28, 42, 42]
-        # 通用助记列宽 = [公式 22, 口诀 22, 话术 30]
-        # 词根词缀 = [公式 22, 口诀 22, 同根词 28, 话术 30]
-        # 考试应用 = [公式 22, 口诀 22, 例句 35, 例句释义 30, 话术 30]
         basic_mn_widths: list[int] = [22, 22, 30]
         root_affix_mn_widths: list[int] = [22, 22, 28, 30]
         exam_mn_widths: list[int] = [22, 22, 35, 30, 30]
@@ -566,16 +503,89 @@ class ExportService:
                 mn_widths += root_affix_mn_widths
             else:
                 mn_widths += basic_mn_widths
-        reviewer_widths: list[int] = [20]
-        for i, w in enumerate(base_widths + mn_widths + reviewer_widths, 1):
-            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
-
+        col_widths = base_widths + mn_widths + [20]  # 末列：审核人
+        for i, w in enumerate(col_widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
         ws.freeze_panes = "A2"
+
+        # 样式：表头一次性构建；数据行 wrap_text 用一个共享 Alignment 实例（openpyxl
+        # 内部按 hash 去重，所以共享一个对象就能避免重复样式开销）
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_fill = PatternFill(start_color="3B82F6", end_color="3B82F6", fill_type="solid")
+        wrap_align = Alignment(wrap_text=True, vertical="top")
+
+        header_cells = []
+        for h in headers:
+            c = WriteOnlyCell(ws, value=h)
+            c.font = header_font
+            c.fill = header_fill
+            c.alignment = wrap_align
+            header_cells.append(c)
+        ws.append(header_cells)
+
+        def _wrap_row(values: list[Any]) -> list[Any]:
+            """把一行的值用 WriteOnlyCell + 共享 wrap_align 包一层，保留自动换行。"""
+            cells = []
+            for v in values:
+                c = WriteOnlyCell(ws, value=v)
+                c.alignment = wrap_align
+                cells.append(c)
+            return cells
+
+        rows_written = 0
+        for word_data in _iter_approved_batches(session):
+            word = word_data["word"]
+            ipa_uk = word_data.get("ipa_uk", "")
+            ipa_us = word_data.get("ipa_us", "")
+            audio_uk = word_data.get("audio_url_uk", "") or ""
+            audio_us = word_data.get("audio_url_us", "") or ""
+            syllables = word_data.get("syllables", "")
+            meanings = word_data.get("meanings", [])
+
+            if not meanings:
+                row_values: list[Any] = [word, ipa_uk, ipa_us, audio_uk, audio_us, syllables]
+                row_values += [""] * (len(headers) - len(row_values))
+                ws.append(_wrap_row(row_values))
+                rows_written += 1
+                continue
+
+            for m in meanings:
+                sources = m.get("sources", [])
+                row_values = [
+                    word, ipa_uk, ipa_us, audio_uk, audio_us, syllables,
+                    m.get("pos", ""),
+                    m.get("def", ""),
+                    "; ".join(sources) if sources else "",
+                    m.get("textbook_id") or "",
+                    m.get("word_book_id") or "",
+                    m.get("unit_id") or "",
+                    m.get("chunk") or "",
+                    m.get("chunk_cn") or "",
+                    m.get("sentence") or "",
+                    m.get("sentence_cn") or "",
+                ]
+
+                # 助记：按 type 建索引
+                mn_by_type: dict[str, dict[str, str]] = {}
+                for mn in m.get("mnemonics", []):
+                    mn_by_type[mn["type"]] = _parse_mnemonic_fields(mn.get("content", ""))
+
+                # 各类型按其 columns 追加，缺失（LLM 判定 valid:false / 该维度 rejected）留空
+                for mn_key, _, cols in mnemonic_types:
+                    fields = mn_by_type.get(mn_key)
+                    for field_name, _ in cols:
+                        row_values.append(fields[field_name] if fields else "")
+
+                # 审核人列（最后一列）
+                row_values.append(m.get("reviewer", ""))
+
+                ws.append(_wrap_row(row_values))
+                rows_written += 1
 
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        logger.info("导出 Excel 完成 rows=%d", row - 2)
+        logger.info("导出 Excel 完成 rows=%d", rows_written)
         return buf
 
     def get_export_readiness(self, session: Session) -> dict:

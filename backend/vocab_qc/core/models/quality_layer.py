@@ -131,6 +131,10 @@ class ReviewItem(Base):
             unique=True,
             postgresql_where=text("status = 'pending'"),
         ),
+        # 导出审核人聚合：WHERE content_item_id IN (...) AND status='resolved'
+        # ORDER BY resolved_at DESC。DDL 中的 DESC NULLS LAST 由 migration 023 显式控制，
+        # 此处声明仅用于 alembic autogen metadata 完整性。
+        Index("ix_review_items_ci_status_resolved", "content_item_id", "status", "resolved_at"),
         CheckConstraint("status IN ('pending', 'in_progress', 'resolved')", name="ck_review_items_status"),
     )
 
