@@ -515,7 +515,7 @@ class TestExportReviewerColumn:
         assert results[0]["meanings"][0]["reviewer"] == ""
 
     def test_excel_export_reviewer_header_and_value(self, db_session: Session):
-        """端到端验证 Excel 文件最后一列表头为「审核人」且数据正确。"""
+        """端到端验证 Excel 末两列：审核人 + 审核时间，且数据正确（含 CST 时区转换）。"""
         from openpyxl import load_workbook
 
         word = _make_word(db_session, "cat")
@@ -524,20 +524,24 @@ class TestExportReviewerColumn:
             db_session, word, "chunk", "a lovely cat",
             meaning=meaning, qc_status=QcStatus.APPROVED.value,
         )
-        _make_review_item(db_session, chunk, reviewer="wangrui003")
+        # 固定 UTC 2026-05-26 06:30 → CST 14:30，验证时区转换
+        fixed_utc = datetime(2026, 5, 26, 6, 30, tzinfo=UTC)
+        _make_review_item(db_session, chunk, reviewer="wangrui003", resolved_at=fixed_utc)
 
         buf = ExportService().export_to_excel(db_session)
         wb = load_workbook(buf)
         ws = wb.active
 
-        # 表头最后一列
+        # 表头末两列：审核人 / 审核时间
         last_col_idx = ws.max_column
-        assert ws.cell(row=1, column=last_col_idx).value == "审核人"
+        assert ws.cell(row=1, column=last_col_idx - 1).value == "审核人"
+        assert ws.cell(row=1, column=last_col_idx).value == "审核时间"
 
-        # 数据行最后一列：找到 cat 行
+        # 数据行：找到 cat 行验证两列值
         for row_idx in range(2, ws.max_row + 1):
             if ws.cell(row=row_idx, column=1).value == "cat":
-                assert ws.cell(row=row_idx, column=last_col_idx).value == "wangrui003"
+                assert ws.cell(row=row_idx, column=last_col_idx - 1).value == "wangrui003"
+                assert ws.cell(row=row_idx, column=last_col_idx).value == "2026-05-26 14:30"
                 break
         else:
             raise AssertionError("未找到 cat 数据行")
@@ -570,16 +574,18 @@ class TestExcelPagination:
             f"期望 2 个 sheet 命名 词表导出_01/02，实得 {wb.sheetnames}"
         )
 
-        # sheet 01：表头 + 2 行数据
+        # sheet 01：表头 + 2 行数据；末两列 审核人 / 审核时间
         ws1 = wb["词表导出_01"]
         assert ws1.cell(row=1, column=1).value == "单词"
-        assert ws1.cell(row=1, column=ws1.max_column).value == "审核人"
+        assert ws1.cell(row=1, column=ws1.max_column - 1).value == "审核人"
+        assert ws1.cell(row=1, column=ws1.max_column).value == "审核时间"
         assert ws1.max_row == 3  # 1 表头 + 2 数据
 
         # sheet 02：表头 + 1 行数据
         ws2 = wb["词表导出_02"]
         assert ws2.cell(row=1, column=1).value == "单词"
-        assert ws2.cell(row=1, column=ws2.max_column).value == "审核人"
+        assert ws2.cell(row=1, column=ws2.max_column - 1).value == "审核人"
+        assert ws2.cell(row=1, column=ws2.max_column).value == "审核时间"
         assert ws2.max_row == 2  # 1 表头 + 1 数据
 
         # 3 个单词分布在两个 sheet 里（顺序不强求，只要齐全）
@@ -608,6 +614,44 @@ class TestExcelPagination:
 
         assert wb.sheetnames == ["词表导出_01"]
         assert wb["词表导出_01"].max_row == 4  # 1 表头 + 3 数据
+
+    def test_resolved_at_picks_max_across_dimensions(self, db_session: Session):
+        """义项内多维度审核 → resolved_at 取最大值（最近的那一次）。"""
+        word = _make_word(db_session, "dog")
+        meaning = _make_meaning(db_session, word, "n", "狗")
+        chunk = _make_content(
+            db_session, word, "chunk", "a cute dog",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+        sentence = _make_content(
+            db_session, word, "sentence", "I have a dog.",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+
+        # chunk 审核较早 (CST 08:00)，sentence 审核较晚 (CST 20:15) — 期望取 20:15
+        early_utc = datetime(2026, 5, 25, 0, 0, tzinfo=UTC)  # CST 08:00
+        late_utc = datetime(2026, 5, 25, 12, 15, tzinfo=UTC)  # CST 20:15
+        _make_review_item(db_session, chunk, reviewer="alice", resolved_at=early_utc)
+        _make_review_item(db_session, sentence, reviewer="bob", resolved_at=late_utc)
+
+        results = ExportService().export_all_approved(db_session)
+        assert len(results) == 1
+        m = results[0]["meanings"][0]
+        assert m["reviewer"] == "alice; bob"
+        assert m["resolved_at"] == "2026-05-25 20:15"
+
+    def test_resolved_at_empty_when_no_review(self, db_session: Session):
+        """无 ReviewItem 时 resolved_at 字段为空串。"""
+        word = _make_word(db_session, "fox")
+        meaning = _make_meaning(db_session, word, "n", "狐")
+        _make_content(
+            db_session, word, "chunk", "quick fox",
+            meaning=meaning, qc_status=QcStatus.APPROVED.value,
+        )
+
+        results = ExportService().export_all_approved(db_session)
+        assert len(results) == 1
+        assert results[0]["meanings"][0]["resolved_at"] == ""
 
     def test_owned_tempfile_cleaned_on_exception(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch,

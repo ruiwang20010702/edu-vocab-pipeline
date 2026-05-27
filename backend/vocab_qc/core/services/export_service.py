@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import tempfile
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,22 @@ _MNEMONIC_TYPE_LABELS: dict[str, str] = {
 # 2 万行 sheet 在普通办公电脑上保持筛选/排序可用；27w 义项约 14 个 sheet。
 # 测试可 monkeypatch 改小值验证分页逻辑。
 ROWS_PER_SHEET: int = 20000
+
+# 审核时间展示用时区：DB 存 UTC（DateTime(timezone=True)），导出转 CST 给国内老师。
+_CST = timezone(timedelta(hours=8))
+
+
+def _format_resolved_at_cst(dt: datetime | None) -> str:
+    """把 UTC datetime 转 CST 字符串 'YYYY-MM-DD HH:MM'；None 或转换失败返回空串。
+
+    容错：测试/历史数据偶现 naive datetime（无 tzinfo），按 UTC 解释后再转 CST，
+    避免 strftime 出现混乱时间。
+    """
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(_CST).strftime("%Y-%m-%d %H:%M")
 
 # 导出层 POS 规范化：仅去尾部点。
 # 权威清单（2026-05-26 学科同步）art. 与 det. 并列为合规标签，不再强制 art→det 映射。
@@ -112,25 +129,29 @@ def _is_meaning_exportable(items: list["ContentItem"]) -> bool:
 def _collect_reviewers_for_meaning(
     session: Session,
     content_item_ids_by_meaning: dict[int, list[int]],
-) -> dict[int, str]:
-    """按义项聚合最终审核人字符串。
+) -> tuple[dict[int, str], dict[int, str]]:
+    """按义项聚合最终审核人 + 最近审核时间。
 
     输入：meaning_id -> [content_item_id, ...]（同一义项下所有维度的 ContentItem.id）
-    输出：meaning_id -> "Alice; Bob"（去重排序后 `; ` 拼接，无审核记录返回空串）
+    输出：
+      - reviewers_by_meaning: meaning_id -> "Alice; Bob"（去重排序后 `; ` 拼接，无审核返回空串）
+      - resolved_at_by_meaning: meaning_id -> "YYYY-MM-DD HH:MM" (CST)，
+        取义项内所有维度 ContentItem 的最大 resolved_at；无审核返回空串
 
     实现要点：
     - 一次性批量查 ReviewItem，避免 N+1
     - 同一 content_item_id 有多条历史 resolved 时取 resolved_at 最新那条（Python 侧去重，兼容 SQLite）
+    - resolved_at 在 DB 存 UTC，导出转 CST 给国内老师
     """
     if not content_item_ids_by_meaning:
-        return {}
+        return {}, {}
 
     all_ci_ids = {ci_id for ids in content_item_ids_by_meaning.values() for ci_id in ids}
     if not all_ci_ids:
-        return {}
+        return {}, {}
 
     # 一次性拉取所有相关的 resolved ReviewItem，按 resolved_at 倒序
-    # Python 侧按 content_item_id 去重取首条 reviewer（即最新生效的那位审核员）
+    # Python 侧按 content_item_id 去重取首条（即最新生效的那位审核员 + 那次审核时间）
     rows = (
         session.query(
             ReviewItem.content_item_id,
@@ -146,18 +167,28 @@ def _collect_reviewers_for_meaning(
     )
 
     reviewer_by_ci: dict[int, str] = {}
-    for ci_id, reviewer, _ in rows:
+    resolved_at_by_ci: dict[int, datetime] = {}
+    for ci_id, reviewer, resolved_at in rows:
         if ci_id in reviewer_by_ci:
             continue  # 已取过最新那条
         if reviewer:
             reviewer_by_ci[ci_id] = reviewer
+            if resolved_at is not None:
+                resolved_at_by_ci[ci_id] = resolved_at
 
-    # 按义项聚合：收集该义项下所有维度的 reviewer，去重排序后 `; ` 拼接
-    result: dict[int, str] = {}
+    # 按义项聚合：reviewer 去重排序拼接；resolved_at 取义项内所有维度的最大值
+    reviewers_by_meaning: dict[int, str] = {}
+    resolved_at_by_meaning: dict[int, str] = {}
     for meaning_id, ci_ids in content_item_ids_by_meaning.items():
         names = {reviewer_by_ci[ci_id] for ci_id in ci_ids if ci_id in reviewer_by_ci}
-        result[meaning_id] = "; ".join(sorted(names)) if names else ""
-    return result
+        reviewers_by_meaning[meaning_id] = "; ".join(sorted(names)) if names else ""
+
+        meaning_times = [resolved_at_by_ci[ci_id] for ci_id in ci_ids if ci_id in resolved_at_by_ci]
+        if meaning_times:
+            resolved_at_by_meaning[meaning_id] = _format_resolved_at_cst(max(meaning_times))
+        else:
+            resolved_at_by_meaning[meaning_id] = ""
+    return reviewers_by_meaning, resolved_at_by_meaning
 
 
 def _iter_approved_batches(session: Session, batch_size: int = 500):
@@ -248,7 +279,9 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
         for ci in all_items:
             if ci.meaning_id and ci.meaning_id in exportable_meaning_ids:
                 ci_ids_by_meaning[ci.meaning_id].append(ci.id)
-        reviewers_by_meaning = _collect_reviewers_for_meaning(session, dict(ci_ids_by_meaning))
+        reviewers_by_meaning, resolved_at_by_meaning = _collect_reviewers_for_meaning(
+            session, dict(ci_ids_by_meaning),
+        )
 
         # 只取 approved 的 ContentItem 填充内容
         approved_items = [ci for ci in all_items if ci.qc_status == QcStatus.APPROVED.value]
@@ -312,6 +345,7 @@ def _iter_approved_batches(session: Session, batch_size: int = 500):
                         for m in mnemonics_by_meaning.get(meaning.id, [])
                     ],
                     "reviewer": reviewers_by_meaning.get(meaning.id, ""),
+                    "resolved_at": resolved_at_by_meaning.get(meaning.id, ""),
                 }
                 result["meanings"].append(meaning_data)
 
@@ -528,7 +562,7 @@ class ExportService:
         for _, label, cols in mnemonic_types:
             for _, suffix in cols:
                 mn_headers.append(f"{label}·{suffix}")
-        headers = base_headers + mn_headers + ["审核人"]
+        headers = base_headers + mn_headers + ["审核人", "审核时间"]
 
         # write_only 工作簿不能用 wb.active；每个 sheet 通过 create_sheet 创建
         wb = Workbook(write_only=True)
@@ -546,7 +580,8 @@ class ExportService:
                 mn_widths += root_affix_mn_widths
             else:
                 mn_widths += basic_mn_widths
-        col_widths = base_widths + mn_widths + [20]  # 末列：审核人
+        # 末两列：审核人 / 审核时间 (YYYY-MM-DD HH:MM 共 16 字符 → 宽度 18 容)
+        col_widths = base_widths + mn_widths + [20, 18]
 
         # 样式：所有 sheet 共享同一组样式实例（openpyxl 内部按 hash 去重）
         header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -636,8 +671,9 @@ class ExportService:
                     for field_name, _ in cols:
                         row_values.append(fields[field_name] if fields else "")
 
-                # 审核人列（最后一列）
+                # 审核人 / 审核时间（末两列）
                 row_values.append(m.get("reviewer", ""))
+                row_values.append(m.get("resolved_at", ""))
 
                 ws.append(_wrap_row(ws, row_values))
                 rows_in_sheet += 1
