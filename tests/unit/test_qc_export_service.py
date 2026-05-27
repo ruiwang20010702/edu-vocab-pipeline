@@ -1,6 +1,7 @@
 """QcService 与 ExportService 单元测试."""
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy.orm import Session
@@ -607,3 +608,53 @@ class TestExcelPagination:
 
         assert wb.sheetnames == ["词表导出_01"]
         assert wb["词表导出_01"].max_row == 4  # 1 表头 + 3 数据
+
+    def test_owned_tempfile_cleaned_on_exception(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """自创 tempfile 路径下，构建过程抛异常时临时文件被清理（防 /tmp 泄漏）。"""
+        from vocab_qc.core.services import export_service as export_mod
+
+        def _explode(_session):
+            raise RuntimeError("simulated DB failure")
+
+        # 让 _iter_approved_batches 在 _write_xlsx 内部抛异常
+        monkeypatch.setattr(export_mod, "_iter_approved_batches", _explode)
+
+        leaked_path: list[Path] = []
+        real_named_tempfile = export_mod.tempfile.NamedTemporaryFile
+
+        def _tracking_tempfile(*args, **kwargs):
+            tmp = real_named_tempfile(*args, **kwargs)
+            leaked_path.append(Path(tmp.name))
+            return tmp
+
+        monkeypatch.setattr(export_mod.tempfile, "NamedTemporaryFile", _tracking_tempfile)
+
+        with pytest.raises(RuntimeError, match="simulated DB failure"):
+            ExportService().export_to_excel(db_session)
+
+        assert leaked_path, "测试桩没拦截到 NamedTemporaryFile 调用"
+        assert not leaked_path[0].exists(), (
+            f"异常路径下自创临时文件应被清理，实际仍存在: {leaked_path[0]}"
+        )
+
+    def test_caller_provided_path_not_unlinked_on_exception(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ):
+        """调用方传入 output_path 时，异常路径下不擅自删除调用方的文件。"""
+        from vocab_qc.core.services import export_service as export_mod
+
+        def _explode(_session):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(export_mod, "_iter_approved_batches", _explode)
+
+        caller_path = tmp_path / "caller_owned.xlsx"
+        caller_path.write_bytes(b"PRE-EXISTING")  # 模拟调用方已有内容
+
+        with pytest.raises(RuntimeError):
+            ExportService().export_to_excel(db_session, output_path=caller_path)
+
+        assert caller_path.exists(), "调用方传入的 output_path 不应被 service 删除"
+        assert caller_path.read_bytes() == b"PRE-EXISTING"

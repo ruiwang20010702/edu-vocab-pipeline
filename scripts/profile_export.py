@@ -43,23 +43,25 @@ def main() -> int:
         tracemalloc.stop()
         session.close()
 
-    excel_bytes = xlsx_path.stat().st_size
-    # 临时文件读完大小就清理，避免 /tmp 累积
     try:
-        os.unlink(xlsx_path)
-    except OSError:
-        pass
+        excel_bytes = xlsx_path.stat().st_size
 
-    OUT_HTML.write_text(profiler.output_html(), encoding="utf-8")
+        OUT_HTML.write_text(profiler.output_html(), encoding="utf-8")
 
-    print("=" * 70)
-    print(f"  Total elapsed         : {elapsed:.2f} s")
-    print(f"  Excel size            : {excel_bytes / 1024:.1f} KB")
-    print(f"  Memory peak (traced)  : {peak / 1024 / 1024:.1f} MB")
-    print(f"  HTML flame graph      : {OUT_HTML}")
-    print("=" * 70)
-    print(profiler.output_text(unicode=True, color=False, show_all=False))
-    return 0
+        print("=" * 70)
+        print(f"  Total elapsed         : {elapsed:.2f} s")
+        print(f"  Excel size            : {excel_bytes / 1024:.1f} KB")
+        print(f"  Memory peak (traced)  : {peak / 1024 / 1024:.1f} MB")
+        print(f"  HTML flame graph      : {OUT_HTML}")
+        print("=" * 70)
+        print(profiler.output_text(unicode=True, color=False, show_all=False))
+        return 0
+    finally:
+        # 无论上方哪一步失败，都清理临时 xlsx 文件避免 /tmp 累积
+        try:
+            os.unlink(xlsx_path)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

@@ -471,10 +471,32 @@ class ExportService:
         from openpyxl.styles import Alignment, Font, PatternFill
         from openpyxl.utils import get_column_letter
 
+        # 区分 service 自创的 tempfile 与调用方传入的 output_path：
+        # 仅在自创路径上做异常 unlink（不擅自删除调用方文件）。
+        _owned_tempfile = False
         if output_path is None:
             tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
             output_path = Path(tmp.name)
             tmp.close()
+            _owned_tempfile = True
+
+        try:
+            return self._write_xlsx(session, output_path)
+        except Exception:
+            # 失败时清理自创临时文件，避免 /tmp 累积；调用方文件保留交由其处理
+            if _owned_tempfile:
+                try:
+                    output_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.exception("清理失败的临时 xlsx 文件出错 path=%s", output_path)
+            raise
+
+    def _write_xlsx(self, session: Session, output_path: Path) -> Path:
+        """构建 workbook 并落盘到 output_path（被 export_to_excel 包 try/except 调用）。"""
+        from openpyxl import Workbook
+        from openpyxl.cell import WriteOnlyCell
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
 
         # 助记类型与各自要导出的列：通用 3 列；词根词缀额外含"同根词"为 4 列；考试应用含"例句"为 5 列
         basic_mn_cols: list[tuple[str, str]] = [
