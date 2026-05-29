@@ -189,7 +189,7 @@ def mark_not_applicable(
 
 
 @router.post("/{review_id}/regenerate", response_model=RegenerateResponse)
-@limiter.limit("20/minute")
+@limiter.limit("100/minute")
 async def regenerate(
     request: Request,
     review_id: int,

@@ -16,7 +16,7 @@ from vocab_qc.core.services import auth_service, user_service
 
 logger = logging.getLogger(__name__)
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+limiter = Limiter(key_func=get_remote_address, default_limits=["600/minute"])
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 
