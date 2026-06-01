@@ -323,3 +323,75 @@ class TestReviewerCannotProduceButCanPreview:
         )
         # preview 是只读 dry-run，reviewer 应可访问
         assert resp.status_code == 200
+
+
+def _seed_processing_package(session, *, hours_ago: float):
+    """模拟卡在 processing 的僵尸批次：started_at 为 hours_ago 小时前，
+    含一个 LAYER1_FAILED + content='' 的僵尸 ContentItem（failed 分支应能复活）。
+    返回 (package_id, zombie_content_item_id)。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    word = Word(word="zombie")
+    session.add(word)
+    session.flush()
+    meaning = Meaning(word_id=word.id, pos="n.", definition="僵尸词")
+    session.add(meaning)
+    session.flush()
+
+    pkg = Package(
+        name="stuck_pkg",
+        status="processing",
+        total_words=1,
+        started_at=datetime.now(timezone.utc) - timedelta(hours=hours_ago),
+    )
+    session.add(pkg)
+    session.flush()
+    session.add(PackageWord(package_id=pkg.id, word_id=word.id))
+
+    zombie = ContentItem(
+        word_id=word.id, meaning_id=meaning.id, dimension="chunk",
+        content="", qc_status=QcStatus.LAYER1_FAILED.value,
+    )
+    session.add(zombie)
+    session.commit()
+    return pkg.id, zombie.id
+
+
+class TestProduceProcessingTimeout:
+    """processing 超时分支：超过阈值强制恢复，未超时拒绝。
+
+    回归锁：该分支历史上误用了 Package 不存在的 updated_at 字段，
+    任何 processing 批次点 produce 都会 AttributeError 500。这两个用例
+    走通整条恢复链，若再退回 updated_at 会立即红灯。
+    """
+
+    def test_processing_timeout_recovers(self, batch_app):
+        """started_at 早于阈值（默认 6h）→ 强制重置 → 复活僵尸 PENDING → 200。"""
+        client, sf, bg_mock = batch_app
+        s = sf()
+        pkg_id, zombie_id = _seed_processing_package(s, hours_ago=7)
+        s.close()
+
+        resp = client.post(f"/api/batches/{pkg_id}/produce")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "processing"
+        bg_mock.assert_called_once()
+
+        # failed 分支应把 LAYER1_FAILED+空内容的僵尸项复活为 PENDING
+        s = sf()
+        z = s.get(ContentItem, zombie_id)
+        assert z.qc_status == QcStatus.PENDING.value
+        s.close()
+
+    def test_processing_not_timed_out_returns_409(self, batch_app):
+        """started_at 在阈值内 → 拒绝，不触发后台生产。"""
+        client, sf, bg_mock = batch_app
+        s = sf()
+        pkg_id, _zombie_id = _seed_processing_package(s, hours_ago=1)
+        s.close()
+
+        resp = client.post(f"/api/batches/{pkg_id}/produce")
+        assert resp.status_code == 409
+        assert "正在生产中" in resp.text
+        bg_mock.assert_not_called()

@@ -583,9 +583,9 @@ def produce_batch(
     # 注意：这里只 flush 不 commit，避免提前释放 with_for_update 行锁；
     #      最终统一由本函数末尾的 db.commit() 提交，保证锁持有到事务结束。
     if pkg.status == "processing":
-        if pkg.updated_at and (
+        if pkg.started_at and (
             datetime.now(timezone.utc)
-            - pkg.updated_at.replace(tzinfo=timezone.utc)
+            - pkg.started_at.replace(tzinfo=timezone.utc)
             > timedelta(hours=settings.package_processing_timeout_hours)
         ):
             logger.warning("Package %d processing 超时，强制重置为 failed", batch_id)
