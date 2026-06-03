@@ -2,8 +2,9 @@
 
 import pytest
 from sqlalchemy.orm import Session
+from vocab_qc.core.config import settings
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, ReviewItem, ReviewReason, Word
-from vocab_qc.core.models.enums import BatchStatus
+from vocab_qc.core.models.enums import BatchStatus, QcStatus, ReviewStatus
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import batch_service
 from vocab_qc.core.services.review_service import ReviewService
@@ -224,3 +225,106 @@ class TestProcessingLock:
         batch = batch_service.assign_batch(db_session, user.id, batch_size=10)
         assert batch is not None
         assert batch.word_count == 1
+
+
+def _create_mnemonic_orphan(
+    db: Session, word_text: str, *, qc_status: str, content: str = "",
+    retry_count: int = 0, dimension: str = "mnemonic_word_in_word",
+) -> tuple[Word, ContentItem, ReviewItem]:
+    """创建一个助记 ContentItem（可设 rejected/空内容/达上限）+ 其 pending ReviewItem。"""
+    word = Word(word=word_text)
+    db.add(word)
+    db.flush()
+    meaning = Meaning(word_id=word.id, pos="v.", definition=f"{word_text} def")
+    db.add(meaning)
+    db.flush()
+    ci = ContentItem(
+        word_id=word.id, meaning_id=meaning.id, dimension=dimension,
+        content=content, qc_status=qc_status, retry_count=retry_count,
+    )
+    db.add(ci)
+    db.flush()
+    review = ReviewService().create_review_item(db, ci, ReviewReason.LAYER2_FAILED)
+    return word, ci, review
+
+
+class TestDeadlockOrphanCleanup:
+    """死锁孤儿自愈：rejected 或 (空内容+达上限) 的 pending review 应被解除，
+    使卡死批次完结；可恢复项（空但未达上限）不应误清。"""
+
+    def test_resolves_rejected_orphan_and_completes_batch(self, db_session: Session):
+        user = _create_user(db_session)
+        _, _, review = _create_mnemonic_orphan(
+            db_session, "confine", qc_status=QcStatus.REJECTED.value, content="",
+        )
+        batch = batch_service.assign_batch(db_session, user.id)
+        assert batch is not None
+
+        n = batch_service._resolve_deadlocked_orphans(db_session, batch.id)
+        assert n == 1
+        db_session.refresh(review)
+        assert review.status == ReviewStatus.RESOLVED.value
+        db_session.refresh(batch)
+        assert batch.status == BatchStatus.COMPLETED.value
+
+    def test_resolves_empty_at_limit_orphan(self, db_session: Session):
+        user = _create_user(db_session)
+        _, _, review = _create_mnemonic_orphan(
+            db_session, "confine2", qc_status=QcStatus.LAYER2_FAILED.value,
+            content="", retry_count=settings.ai_max_retries,
+        )
+        batch = batch_service.assign_batch(db_session, user.id)
+        n = batch_service._resolve_deadlocked_orphans(db_session, batch.id)
+        assert n == 1
+        db_session.refresh(review)
+        assert review.status == ReviewStatus.RESOLVED.value
+
+    def test_keeps_recoverable_orphan(self, db_session: Session):
+        """content='' 但 retry<max 且非 rejected → 可重生，不应被清。"""
+        user = _create_user(db_session)
+        _, _, review = _create_mnemonic_orphan(
+            db_session, "confine3", qc_status=QcStatus.LAYER1_FAILED.value,
+            content="", retry_count=0,
+        )
+        batch = batch_service.assign_batch(db_session, user.id)
+        n = batch_service._resolve_deadlocked_orphans(db_session, batch.id)
+        assert n == 0
+        db_session.refresh(review)
+        assert review.status == ReviewStatus.PENDING.value
+
+    def test_assign_batch_self_heals_deadlocked_batch(self, db_session: Session):
+        """卡死批次（仅含死锁孤儿）在重新 assign 时自愈完结。"""
+        user = _create_user(db_session)
+        _create_mnemonic_orphan(
+            db_session, "confine4", qc_status=QcStatus.REJECTED.value, content="",
+        )
+        batch1 = batch_service.assign_batch(db_session, user.id)
+        assert batch1 is not None
+        # 第二次 assign：旧批次应先自愈→pending 清零→自动完结
+        batch_service.assign_batch(db_session, user.id)
+        db_session.refresh(batch1)
+        assert batch1.status == BatchStatus.COMPLETED.value
+
+    def test_repair_skips_empty_at_limit(self, db_session: Session):
+        """_repair_orphan_failed_items 不给 content='' AND retry>=max 的项补 review。"""
+        word = Word(word="confine5")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="v.", definition="x")
+        db_session.add(meaning)
+        db_session.flush()
+        ci = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_word_in_word",
+            content="", qc_status=QcStatus.LAYER2_FAILED.value,
+            retry_count=settings.ai_max_retries,
+        )
+        db_session.add(ci)
+        db_session.flush()
+
+        batch_service._repair_orphan_failed_items(db_session)
+        cnt = (
+            db_session.query(ReviewItem)
+            .filter_by(content_item_id=ci.id, status=ReviewStatus.PENDING.value)
+            .count()
+        )
+        assert cnt == 0

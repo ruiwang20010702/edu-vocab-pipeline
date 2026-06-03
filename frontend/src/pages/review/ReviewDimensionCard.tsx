@@ -634,7 +634,14 @@ export function MnemonicReviewSection({
 
       {/* Rejected 助记维度 */}
       {rejectedMns.length > 0 && (
-        <RejectedMnemonicsSection mnemonics={rejectedMns} onRegenerated={onRegenerated} />
+        <RejectedMnemonicsSection
+          mnemonics={rejectedMns}
+          reviewItems={reviewItems}
+          actionLoading={actionLoading}
+          resolvedIds={resolvedIds}
+          onMarkNotApplicable={onMarkNotApplicable}
+          onRegenerated={onRegenerated}
+        />
       )}
     </div>
   )
@@ -642,7 +649,14 @@ export function MnemonicReviewSection({
 
 /* ===== 不适用助记维度区块 ===== */
 
-function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: ContentItem[]; onRegenerated: () => void }) {
+function RejectedMnemonicsSection({ mnemonics, reviewItems, actionLoading, resolvedIds, onMarkNotApplicable, onRegenerated }: {
+  mnemonics: ContentItem[]
+  reviewItems: ReviewItem[]
+  actionLoading: number | null
+  resolvedIds: Set<number>
+  onMarkNotApplicable: (reviewId: number) => void
+  onRegenerated: () => void
+}) {
   const [regenLoading, setRegenLoading] = useState<number | null>(null)
   const [regenMsg, setRegenMsg] = useState<{ id: number; ok: boolean; msg: string; issues?: QcIssue[] } | null>(null)
   const [regenCount, setRegenCount] = useState<Map<number, number>>(new Map())
@@ -654,6 +668,15 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: Con
   const [editExamSentenceTranslation, setEditExamSentenceTranslation] = useState('')
   const [editExtensionWords, setEditExtensionWords] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // dimension → 仍 pending 的 ReviewItem，用于渲染"标记不适用"解锁按钮
+  const reviewByDim = useMemo(() => {
+    const m = new Map<string, ReviewItem>()
+    for (const ri of reviewItems) {
+      if (ri.content_item?.dimension) m.set(ri.content_item.dimension, ri)
+    }
+    return m
+  }, [reviewItems])
 
   // setTimeout 清理
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
@@ -789,6 +812,21 @@ function RejectedMnemonicsSection({ mnemonics, onRegenerated }: { mnemonics: Con
               {regenMsg && regenMsg.id === mn.id && (
                 <span className={`text-[10px] font-medium ${regenMsg.ok ? 'text-green-600' : 'text-orange-600'}`}>{regenMsg.msg}</span>
               )}
+              {(() => {
+                const ri = reviewByDim.get(mn.dimension)
+                if (!ri || resolvedIds.has(ri.id)) return null
+                return (
+                  <button
+                    onClick={() => onMarkNotApplicable(ri.id)}
+                    disabled={actionLoading === ri.id}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50"
+                    title="确认放弃此维度并解除批次阻塞"
+                  >
+                    {actionLoading === ri.id ? <Loader2 size={10} className="animate-spin" /> : <Ban size={10} />}
+                    标记不适用
+                  </button>
+                )
+              })()}
               <button
                 onClick={() => handleRegenerate(mn)}
                 disabled={regenLoading === mn.id}

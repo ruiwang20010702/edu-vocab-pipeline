@@ -1460,3 +1460,33 @@ class TestResetSyncsRetryCounter:
             db_session, pkg.id, {"mnemonic_exam_app"}, skip_if_current_prompt=False,
         )
         assert stats["would_reset"] == 1  # 不抛异常即通过
+
+
+class TestAutoApproveResolvesRejected:
+    """2a：_auto_approve_passed 应 resolve rejected 内容残留的 pending review，
+    避免重新生产判定"助记不适用"后留下永久 pending 孤儿、卡死批次。"""
+
+    def test_rejected_content_resolves_pending_review(self, db_session):
+        from vocab_qc.core.models.enums import ReviewReason, ReviewStatus
+        from vocab_qc.core.services.production_service import _auto_approve_passed
+        from vocab_qc.core.services.review_service import ReviewService
+
+        word = Word(word="confine")
+        db_session.add(word)
+        db_session.flush()
+        meaning = Meaning(word_id=word.id, pos="v.", definition="限制")
+        db_session.add(meaning)
+        db_session.flush()
+        ci = ContentItem(
+            word_id=word.id, meaning_id=meaning.id, dimension="mnemonic_word_in_word",
+            content="", qc_status=QcStatus.REJECTED.value,
+        )
+        db_session.add(ci)
+        db_session.flush()
+        review = ReviewService().create_review_item(db_session, ci, ReviewReason.LAYER2_FAILED)
+        assert review.status == ReviewStatus.PENDING.value
+
+        _auto_approve_passed(db_session, {word.id})
+
+        db_session.refresh(review)
+        assert review.status == ReviewStatus.RESOLVED.value

@@ -482,6 +482,37 @@ def _auto_approve_passed(session: Session, word_ids: set[int]) -> int:
                 logger.info("清理已批准内容的残留审核项 count=%d", resolved.rowcount)
                 session.flush()
 
+    # 清理已 rejected 内容对应的 pending review_items（valid=False 助记不适用）。
+    # 与 count 无关：rejected 在 Step 1 生成阶段就已置位，若残留 pending 会让批次
+    # 永远完不成而卡死（assign_batch 见 pending_count>0 即提前 return）。
+    from vocab_qc.core.models.enums import ReviewResolution, ReviewStatus
+    from vocab_qc.core.models.quality_layer import ReviewItem
+    rejected_ci_ids = [
+        row[0] for row in
+        session.query(ContentItem.id)
+        .filter(
+            ContentItem.word_id.in_(word_ids),
+            ContentItem.qc_status == QcStatus.REJECTED.value,
+        )
+        .all()
+    ]
+    if rejected_ci_ids:
+        resolved_rej = session.execute(
+            update(ReviewItem)
+            .where(
+                ReviewItem.content_item_id.in_(rejected_ci_ids),
+                ReviewItem.status == ReviewStatus.PENDING.value,
+            )
+            .values(
+                status=ReviewStatus.RESOLVED.value,
+                resolution=ReviewResolution.REGENERATE.value,
+                resolved_at=datetime.now(UTC),
+            )
+        )
+        if resolved_rej.rowcount:
+            logger.info("清理已拒绝内容的残留审核项 count=%d", resolved_rej.rowcount)
+            session.flush()
+
     return count
 
 

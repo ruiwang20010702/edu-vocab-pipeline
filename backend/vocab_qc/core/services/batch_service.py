@@ -6,12 +6,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import distinct, exists, func, select, update
+from sqlalchemy import and_, distinct, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.content_layer import ContentItem
-from vocab_qc.core.models.enums import BatchStatus, QcStatus, ReviewReason, ReviewStatus
+from vocab_qc.core.models.enums import BatchStatus, QcStatus, ReviewReason, ReviewResolution, ReviewStatus
 from vocab_qc.core.models.quality_layer import ReviewItem
 
 
@@ -25,6 +25,7 @@ def _repair_orphan_failed_items(session: Session) -> int:
     使用 savepoint 隔离，避免内部 IntegrityError 回滚影响外层事务。
     每次最多处理 500 条，超出部分留给下次 assign 处理。
     """
+    from vocab_qc.core.config import settings
     from vocab_qc.core.services.review_service import ReviewService
 
     orphan_items = (
@@ -43,6 +44,14 @@ def _repair_orphan_failed_items(session: Session) -> int:
                     ReviewItem.status == ReviewStatus.PENDING.value,
                 )
             ),
+        )
+        # 排除"空内容且重试耗尽"的死锁项：给它们补 review 无意义（前端无重生出口），
+        # 反而制造永久 pending 孤儿。这类由 _resolve_deadlocked_orphans 负责清理。
+        .filter(
+            ~and_(
+                func.coalesce(ContentItem.content, "") == "",
+                ContentItem.retry_count >= settings.ai_max_retries,
+            )
         )
         .limit(500)
         .all()
@@ -92,6 +101,64 @@ def _repair_orphan_failed_items(session: Session) -> int:
     return count
 
 
+def _resolve_deadlocked_orphans(session: Session, batch_id: Optional[int] = None) -> int:
+    """自动解除"无 UI 出口"的死锁孤儿 pending ReviewItem。
+
+    死锁定义：pending ReviewItem 指向的 content_item 满足下列任一：
+    - qc_status='rejected'（AI 判定助记不适用，本应 resolved）；
+    - content='' 且 retry_count >= ai_max_retries（空内容且重试耗尽，前端无重生出口）。
+
+    这类项被前端归入"已拒绝助记"只读区且无解锁按钮，会让批次 pending_count 永远 >0
+    而卡死、领不了下一批。在 assign 时主动 resolve 它们，使卡死批次自愈完结。
+
+    batch_id 为 None 时全局清理（供一次性运维脚本复用）。
+    用 savepoint 隔离，避免内部异常影响外层 assign 事务。
+    """
+    from vocab_qc.core.config import settings
+    max_retries = settings.ai_max_retries
+    query = (
+        session.query(ReviewItem)
+        .join(ContentItem, ContentItem.id == ReviewItem.content_item_id)
+        .filter(ReviewItem.status == ReviewStatus.PENDING.value)
+        .filter(
+            or_(
+                ContentItem.qc_status == QcStatus.REJECTED.value,
+                and_(
+                    func.coalesce(ContentItem.content, "") == "",
+                    ContentItem.retry_count >= max_retries,
+                ),
+            )
+        )
+    )
+    if batch_id is not None:
+        query = query.filter(ReviewItem.batch_id == batch_id)
+    orphans = query.all()
+    if not orphans:
+        return 0
+
+    nested = session.begin_nested()
+    try:
+        affected_batches = set()
+        for ri in orphans:
+            ri.status = ReviewStatus.RESOLVED.value
+            ri.resolution = ReviewResolution.REGENERATE.value
+            ri.reviewer = "system:deadlock-cleanup"
+            ri.resolved_at = datetime.now(UTC)
+            if ri.batch_id is not None:
+                affected_batches.add(ri.batch_id)
+        session.flush()
+        for bid in affected_batches:
+            update_batch_progress(session, bid)
+        nested.commit()
+    except Exception:
+        nested.rollback()
+        logger.exception("死锁孤儿自愈写入失败，跳过")
+        return 0
+
+    logger.warning("自动解除死锁孤儿 ReviewItem: %d 条 (batch_id=%s)", len(orphans), batch_id)
+    return len(orphans)
+
+
 def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Optional[ReviewBatch]:
     """原子领取一批待审单词。
 
@@ -105,6 +172,8 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
         .first()
     )
     if existing is not None:
+        # 先自愈：解除本批次内"无 UI 出口"的死锁孤儿，避免它们让批次永久卡死、领不了下一批
+        _resolve_deadlocked_orphans(session, existing.id)
         # 检查是否还有待审核项
         pending_count = (
             session.query(func.count())
