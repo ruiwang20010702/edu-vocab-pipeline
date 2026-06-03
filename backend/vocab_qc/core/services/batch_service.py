@@ -7,7 +7,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 from sqlalchemy import and_, distinct, exists, func, or_, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.content_layer import ContentItem
@@ -129,6 +129,7 @@ def _resolve_deadlocked_orphans(session: Session, batch_id: Optional[int] = None
                 ),
             )
         )
+        .options(joinedload(ReviewItem.content_item_rel))
     )
     if batch_id is not None:
         query = query.filter(ReviewItem.batch_id == batch_id)
@@ -139,11 +140,30 @@ def _resolve_deadlocked_orphans(session: Session, batch_id: Optional[int] = None
     nested = session.begin_nested()
     try:
         affected_batches = set()
+        # 按 dimension 缓存 active prompt 指纹，避免逐条查 DB
+        from vocab_qc.core.services.prompt_service import get_active_prompt
+        prompt_fp_cache: dict[str, Optional[tuple[int, str]]] = {}
         for ri in orphans:
             ri.status = ReviewStatus.RESOLVED.value
             ri.resolution = ReviewResolution.REGENERATE.value
             ri.reviewer = "system:deadlock-cleanup"
             ri.resolved_at = datetime.now(UTC)
+            # 关键：空内容死锁项的 ContentItem 必须落终态 rejected。否则 ReviewItem 虽
+            # resolve，但 qc_status 停在 layer2_failed（非终态），整词永远 in_progress
+            # 且不可导出（导出门禁要求该词所有维度 ∈ {approved, rejected}）→ 幽灵词。
+            # 与 mark_not_applicable 对齐：落 rejected + 记录 prompt 指纹（reset 时跳过，
+            # prompt 升级后才重做）。qc_status 已是 rejected 的（A 类）跳过，避免覆盖。
+            ci = ri.content_item_rel
+            if ci is not None and ci.qc_status != QcStatus.REJECTED.value:
+                ci.qc_status = QcStatus.REJECTED.value
+                if ci.dimension not in prompt_fp_cache:
+                    active = get_active_prompt(session, "generation", ci.dimension)
+                    prompt_fp_cache[ci.dimension] = (
+                        (active.id, active.file_hash) if active else None
+                    )
+                fp = prompt_fp_cache[ci.dimension]
+                if fp is not None:
+                    ci.generated_with_prompt_id, ci.generated_with_prompt_hash = fp
             if ri.batch_id is not None:
                 affected_batches.add(ri.batch_id)
         session.flush()

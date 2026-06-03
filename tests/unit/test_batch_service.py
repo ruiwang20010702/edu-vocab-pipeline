@@ -283,7 +283,7 @@ class TestDeadlockOrphanCleanup:
 
     def test_resolves_empty_at_limit_orphan(self, db_session: Session):
         user = _create_user(db_session)
-        _, _, review = _create_mnemonic_orphan(
+        _, ci, review = _create_mnemonic_orphan(
             db_session, "confine2", qc_status=QcStatus.LAYER2_FAILED.value,
             content="", retry_count=settings.ai_max_retries,
         )
@@ -292,6 +292,25 @@ class TestDeadlockOrphanCleanup:
         assert n == 1
         db_session.refresh(review)
         assert review.status == ReviewStatus.RESOLVED.value
+        # 修复验证：空内容死锁项的 ContentItem 必须落终态 rejected。否则 qc_status 停在
+        # layer2_failed（非终态），整词永远 in_progress 且不可导出（导出门禁要求所有维度
+        # ∈ {approved, rejected}）→ 幽灵词。
+        db_session.refresh(ci)
+        assert ci.qc_status == QcStatus.REJECTED.value
+
+    def test_empty_orphan_word_becomes_exportable_after_cleanup(self, db_session: Session):
+        """端到端：空内容死锁项清理后，整词所有维度落终态 → 可完成、可导出。"""
+        from vocab_qc.core.models.enums import QC_TERMINAL_STATUSES
+        user = _create_user(db_session)
+        word, ci, review = _create_mnemonic_orphan(
+            db_session, "confine_export", qc_status=QcStatus.LAYER2_FAILED.value,
+            content="", retry_count=settings.ai_max_retries,
+        )
+        batch = _put_review_in_batch(db_session, user, review)
+        batch_service._resolve_deadlocked_orphans(db_session, batch.id)
+        # 整词所有 ContentItem 必须 ∈ 终态（导出门禁前提）
+        db_session.refresh(word)
+        assert all(c.qc_status in QC_TERMINAL_STATUSES for c in word.content_items)
 
     def test_keeps_recoverable_orphan(self, db_session: Session):
         """content='' 但 retry<max 且非 rejected → 可重生，不应被清。"""
