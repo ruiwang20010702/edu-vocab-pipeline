@@ -199,6 +199,11 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
         .all()
     }
 
+    # 领取前全局自愈死锁孤儿：content='' 且达上限 / rejected 的 pending 项被 resolve，
+    # 使其不进入下方 status=pending 的捞取，避免被打包进新批次卡住审核员（点开无内容）。
+    # existing 分支（上方）的局部清理只治"上一批"，这里补全"新建批次"路径的同源缺口。
+    _resolve_deadlocked_orphans(session)
+
     # 孤儿修复：失败的 ContentItem 无 pending ReviewItem 时自动补建
     _repair_orphan_failed_items(session)
 

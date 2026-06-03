@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.orm import Session
 from vocab_qc.core.config import settings
 from vocab_qc.core.models import ContentItem, Meaning, Phonetic, ReviewItem, ReviewReason, Word
+from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.enums import BatchStatus, QcStatus, ReviewStatus
 from vocab_qc.core.models.user import User
 from vocab_qc.core.services import batch_service
@@ -248,6 +249,20 @@ def _create_mnemonic_orphan(
     return word, ci, review
 
 
+def _put_review_in_batch(db: Session, user: User, review: ReviewItem) -> ReviewBatch:
+    """手动把 pending review 挂进一个 in_progress 批次，模拟根治前已打包孤儿的存量批次。"""
+    batch = ReviewBatch(
+        user_id=user.id, status=BatchStatus.IN_PROGRESS.value,
+        word_count=1, reviewed_count=0,
+    )
+    db.add(batch)
+    db.flush()
+    review.batch_id = batch.id
+    review.assigned_to_id = user.id
+    db.flush()
+    return batch
+
+
 class TestDeadlockOrphanCleanup:
     """死锁孤儿自愈：rejected 或 (空内容+达上限) 的 pending review 应被解除，
     使卡死批次完结；可恢复项（空但未达上限）不应误清。"""
@@ -257,8 +272,7 @@ class TestDeadlockOrphanCleanup:
         _, _, review = _create_mnemonic_orphan(
             db_session, "confine", qc_status=QcStatus.REJECTED.value, content="",
         )
-        batch = batch_service.assign_batch(db_session, user.id)
-        assert batch is not None
+        batch = _put_review_in_batch(db_session, user, review)
 
         n = batch_service._resolve_deadlocked_orphans(db_session, batch.id)
         assert n == 1
@@ -273,7 +287,7 @@ class TestDeadlockOrphanCleanup:
             db_session, "confine2", qc_status=QcStatus.LAYER2_FAILED.value,
             content="", retry_count=settings.ai_max_retries,
         )
-        batch = batch_service.assign_batch(db_session, user.id)
+        batch = _put_review_in_batch(db_session, user, review)
         n = batch_service._resolve_deadlocked_orphans(db_session, batch.id)
         assert n == 1
         db_session.refresh(review)
@@ -293,14 +307,13 @@ class TestDeadlockOrphanCleanup:
         assert review.status == ReviewStatus.PENDING.value
 
     def test_assign_batch_self_heals_deadlocked_batch(self, db_session: Session):
-        """卡死批次（仅含死锁孤儿）在重新 assign 时自愈完结。"""
+        """存量卡死批次（根治前已打包孤儿）在重新 assign 时由 existing 分支自愈完结。"""
         user = _create_user(db_session)
-        _create_mnemonic_orphan(
+        _, _, review = _create_mnemonic_orphan(
             db_session, "confine4", qc_status=QcStatus.REJECTED.value, content="",
         )
-        batch1 = batch_service.assign_batch(db_session, user.id)
-        assert batch1 is not None
-        # 第二次 assign：旧批次应先自愈→pending 清零→自动完结
+        batch1 = _put_review_in_batch(db_session, user, review)
+        # 再次 assign：existing 分支应先自愈 batch1 → pending 清零 → 自动完结
         batch_service.assign_batch(db_session, user.id)
         db_session.refresh(batch1)
         assert batch1.status == BatchStatus.COMPLETED.value
@@ -328,3 +341,43 @@ class TestDeadlockOrphanCleanup:
             .count()
         )
         assert cnt == 0
+
+    def test_assign_does_not_pack_deadlock_orphan_into_new_batch(self, db_session: Session):
+        """根治：领取新批次前全局自愈，死锁孤儿不应被打包进新批次。
+
+        旧逻辑只清理 existing 旧批次的孤儿，新建批次时仍按 status=pending 捞取，
+        会把 content='' 且达上限的孤儿一并打包进新批次，卡住审核员（点开无内容）。
+        """
+        user = _create_user(db_session)
+        _, _, orphan_review = _create_mnemonic_orphan(
+            db_session, "calculus", qc_status=QcStatus.LAYER2_FAILED.value,
+            content="", retry_count=settings.ai_max_retries,
+        )
+        batch = batch_service.assign_batch(db_session, user.id)
+        # 仅有死锁孤儿、无真任务 → 领取前被全局自愈，不应领到批次
+        assert batch is None
+        db_session.refresh(orphan_review)
+        assert orphan_review.status == ReviewStatus.RESOLVED.value
+        assert orphan_review.batch_id is None
+
+    def test_assign_packs_real_task_and_resolves_orphan(self, db_session: Session):
+        """混合场景：有内容的真待审项正常领取，死锁孤儿同时被自愈、不混入批次。"""
+        user = _create_user(db_session)
+        _, _, real_review = _create_mnemonic_orphan(
+            db_session, "decoration", qc_status=QcStatus.LAYER2_FAILED.value,
+            content="some real content", retry_count=settings.ai_max_retries,
+        )
+        _, _, orphan_review = _create_mnemonic_orphan(
+            db_session, "calculus2", qc_status=QcStatus.LAYER2_FAILED.value,
+            content="", retry_count=settings.ai_max_retries,
+        )
+        batch = batch_service.assign_batch(db_session, user.id)
+        assert batch is not None
+        # 真任务（content 非空）正常进批次
+        db_session.refresh(real_review)
+        assert real_review.batch_id == batch.id
+        assert real_review.status == ReviewStatus.PENDING.value
+        # 死锁孤儿被自愈，不进批次
+        db_session.refresh(orphan_review)
+        assert orphan_review.status == ReviewStatus.RESOLVED.value
+        assert orphan_review.batch_id is None
