@@ -459,17 +459,12 @@ def _run_production_bg(batch_id: int, dimensions: set[str] | None = None) -> Non
         else:
             consecutive_failures = 0  # 成功则重置计数
 
-    # 全部批次完成 → finalize（有失败批次时标记 failed）
+    # 全部批次完成 → finalize。无论是否有失败子批，都批准已通过质检的内容；
+    # 有失败子批时 status 标 failed（失败项已进审核队列，不牵连已通过的好内容）。
     session = SyncSessionLocal()
     try:
-        if any_failed:
-            pkg = session.query(Package).filter_by(id=batch_id).first()
-            if pkg:
-                pkg.status = "failed"
-            session.commit()
-        else:
-            step_finalize(session, batch_id)
-            session.commit()
+        step_finalize(session, batch_id, failed=any_failed)
+        session.commit()
     except Exception:
         session.rollback()
         logger.exception("后台生产流水线 finalize 失败 batch_id=%s", batch_id)

@@ -293,6 +293,29 @@ class TestStepFunctions:
         assert pkg.status == "completed"
         assert pkg.processed_words == 1
 
+    def test_step_finalize_failed_still_approves(self, prod_session):
+        """生产部分失败(failed=True)时，仍批准已通过全部质检的内容。
+
+        Prove-It：避免「any_failed 一刀切跳过自动批准」导致好内容卡 layer2_passed、
+        合格率虚低。失败态下 layer2_passed→approved，status=failed，不设 completed_at。
+        """
+        pkg, word, meaning, items = _seed_package_with_items(prod_session)
+        # 模拟：部分内容已通过全部质检，等待自动批准
+        items[0].qc_status = QcStatus.LAYER2_PASSED.value
+        items[1].qc_status = QcStatus.LAYER2_PASSED.value
+        prod_session.commit()
+
+        step_finalize(prod_session, pkg.id, failed=True)
+        prod_session.commit()
+
+        prod_session.refresh(pkg)
+        prod_session.refresh(items[0])
+        prod_session.refresh(items[1])
+        assert items[0].qc_status == QcStatus.APPROVED.value
+        assert items[1].qc_status == QcStatus.APPROVED.value
+        assert pkg.status == "failed"
+        assert pkg.completed_at is None
+
     def test_multi_session_isolation(self, prod_engine):
         """验证每步使用独立 session 时数据正确持久化。"""
         session_factory = sessionmaker(bind=prod_engine)

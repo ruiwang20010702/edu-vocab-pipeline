@@ -152,17 +152,25 @@ def step_qc_layer2(
     return {"passed": result["passed"], "failed": result["failed"]}
 
 
-def step_finalize(session: Session, package_id: int) -> None:
-    """标记 Package 为 completed，更新 processed_words，自动批准通过项。"""
+def step_finalize(session: Session, package_id: int, *, failed: bool = False) -> None:
+    """收尾：自动批准已通过质检的内容 + 标记 Package 终态。
+
+    无论生产是否有失败子批，都批准已通过全部质检的内容——失败项只影响它们自身
+    （已进审核队列），不该牵连已通过的好内容。failed=True 时只标 status=failed
+    并保留循环累加的真实 processed_words（不设 completed_at）；否则标 completed。
+    """
     pkg = session.query(Package).filter_by(id=package_id).first()
     if pkg is None:
         return
 
     word_ids = _get_word_ids_for_package(session, package_id)
     _auto_approve_passed(session, word_ids)
-    pkg.processed_words = len(word_ids)
-    pkg.completed_at = datetime.now(UTC)
-    pkg.status = "completed"
+    if failed:
+        pkg.status = "failed"
+    else:
+        pkg.processed_words = len(word_ids)
+        pkg.completed_at = datetime.now(UTC)
+        pkg.status = "completed"
     session.flush()
 
 
