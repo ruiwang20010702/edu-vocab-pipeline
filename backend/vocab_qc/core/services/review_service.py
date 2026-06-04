@@ -453,6 +453,10 @@ class ReviewService:
         """Phase 3: 写入生成结果 + 运行质检 + 更新状态，返回最终 response dict。"""
         from vocab_qc.core.models.quality_layer import AiUsageLog, QcRuleResult
 
+        # Phase 1 已 commit 释放连接，ctx 内 ORM 对象处于 expired 状态；expire_all 后
+        # 下面首次访问触发自动 reload（重新取连接），与 _batch_regenerate_bg Phase 3 一致。
+        session.expire_all()
+
         content_item = ctx["content_item"]
         review = ctx["review"]
         counter = ctx["counter"]
@@ -560,11 +564,20 @@ class ReviewService:
         reviewer: str,
         user_id: Optional[int] = None,
     ) -> dict:
-        """异步重新生成：preload(sync→thread) → AI生成(async) → 写回+QC(sync→thread)。"""
-        # Phase 1: DB 预加载
-        ctx = await asyncio.to_thread(
-            self._regen_preload, session, review_id, reviewer, user_id
-        )
+        """异步重新生成：preload+commit(释放连接/锁) → AI生成(async) → 写回+QC。
+
+        关键：Phase 1 预加载后立即 commit，释放 DB 连接与 review/counter 行锁。否则
+        AI 生成（数十~数百秒）期间连接挂 idle-in-transaction、行锁长期持有，高并发审核
+        下耗尽连接池、阻塞同项操作。与 _batch_regenerate_bg 的安全范式一致。
+        """
+        # Phase 1: DB 预加载 + commit 释放连接和行锁
+        # （commit 后 ctx 内 ORM 对象 expire 但仍 attached，Phase 3 expire_all 后自动 reload）
+        def _preload_and_commit() -> dict[str, Any]:
+            _ctx = self._regen_preload(session, review_id, reviewer, user_id)
+            session.commit()
+            return _ctx
+
+        ctx = await asyncio.to_thread(_preload_and_commit)
         if ctx.get("early_return"):
             return ctx["early_return"]
 

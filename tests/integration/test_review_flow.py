@@ -137,3 +137,40 @@ def test_get_pending_reviews(db_session, sample_word, review_service):
     sentence_reviews, sentence_total = review_service.get_pending_reviews(db_session, dimension="sentence")
     assert len(sentence_reviews) == 2
     assert sentence_total == 2
+
+
+async def test_regenerate_async_commits_before_ai(db_session, review_with_item):
+    """重构核心：regenerate_async 在 await AI 之前 commit，释放连接 + review/counter 行锁。
+
+    旧实现 Phase 1 预加载（FOR UPDATE 锁 review + UPDATE counter）后不 commit，整个 AI
+    生成期间连接挂 idle-in-transaction、行锁长期持有，高并发审核下耗尽连接池。重构后
+    Phase 1 立即 commit。spy_commit 只记录不真提交，以保持 fixture 的 transaction+rollback
+    隔离；仅校验「commit 发生在 AI 调用之前」这一顺序。
+    """
+    from unittest.mock import patch
+
+    from vocab_qc.core.services.production_service import _GENERATORS
+
+    review = review_with_item["review"]
+    ci = review_with_item["content_item"]
+    gen = _GENERATORS[ci.dimension]
+
+    order: list[str] = []
+
+    def spy_commit():
+        order.append("commit")  # 不调真 commit，避免破坏 fixture 隔离
+
+    async def fake_gen(**kwargs):
+        order.append("ai")
+        return {"content": "regen-ok"}
+
+    svc = ReviewService(max_retries=3)
+    with patch.object(db_session, "commit", spy_commit), \
+         patch.object(gen, "generate_async", fake_gen):
+        result = await svc.regenerate_async(db_session, review.id, "tester", user_id=None)
+
+    assert result["success"] is True
+    assert result["retry_count"] == 1
+    assert "commit" in order, f"Phase 1 未 commit → AI 期间持锁/占连接（泄漏）。order={order}"
+    assert order.index("commit") < order.index("ai"), \
+        f"commit 必须在 AI 之前（先释放连接/锁再 await AI）。order={order}"
