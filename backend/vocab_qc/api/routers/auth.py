@@ -16,7 +16,30 @@ from vocab_qc.core.services import auth_service, user_service
 
 logger = logging.getLogger(__name__)
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["600/minute"])
+
+def get_user_or_ip(request: Request) -> str:
+    """限流键：已认证请求按 user_id，未认证 fallback 到 IP。
+
+    审核员常处于同一办公网络（同一 NAT 出口 IP），按 IP 限流会让 N 人共享一份配额、
+    高峰期集体撞 429。改按 user_id 后每人各自配额；登录/注册等无 token 场景仍按 IP。
+    解析失败一律降级到 IP，绝不因限流键解析问题阻断请求。
+    """
+    token = request.cookies.get(settings.cookie_name)
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if token:
+        try:
+            uid = auth_service.decode_jwt(token).get("user_id")
+            if uid is not None:
+                return f"user:{uid}"
+        except Exception:
+            pass
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_user_or_ip, default_limits=["600/minute"])
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 
