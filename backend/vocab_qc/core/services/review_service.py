@@ -268,6 +268,30 @@ class ReviewService:
         self._update_batch_progress(session, review.batch_id)
         return review
 
+    def _auto_reject_if_empty_at_limit(
+        self, session: Session, content_item: ContentItem, review: ReviewItem, reviewer: str,
+    ) -> bool:
+        """达重试上限时：空内容（AI 生成反复失败、做不出来）→ 自动 reject 留空 + resolve
+        review，返回 True；有内容（质检反复不过）→ 不处理，返回 False（留给人工）。
+
+        与 mark_not_applicable 对齐：reject 同时记录 prompt 指纹，避免下次 reset 重复重生。
+        _update_batch_progress 前依赖 SQLAlchemy autoflush 将 review.status 刷库。"""
+        if (content_item.content or "").strip():
+            return False
+        content_item.qc_status = QcStatus.REJECTED.value
+        from vocab_qc.core.services.prompt_service import get_active_prompt
+        active = get_active_prompt(session, "generation", content_item.dimension)
+        if active:
+            content_item.generated_with_prompt_id = active.id
+            content_item.generated_with_prompt_hash = active.file_hash
+        review.status = ReviewStatus.RESOLVED.value
+        review.resolution = ReviewResolution.REGENERATE.value
+        review.reviewer = reviewer
+        review.resolved_at = datetime.now(UTC)
+        session.flush()
+        self._update_batch_progress(session, review.batch_id)
+        return True
+
     def regenerate(
         self,
         session: Session,
@@ -295,6 +319,12 @@ class ReviewService:
             .values(count=RetryCounter.count + 1, last_retry_at=datetime.now(UTC))
         )
         if result.rowcount == 0:
+            # 达上限：空内容自动 reject，有内容留人工（与异步 _regen_preload 一致）
+            if self._auto_reject_if_empty_at_limit(session, content_item, review, reviewer):
+                return {
+                    "success": True, "qc_passed": True, "retry_count": counter.count,
+                    "message": "AI 多次生成失败，已将该维度标记为不适用（留空）",
+                }
             return {
                 "success": False,
                 "qc_passed": False,
@@ -402,6 +432,13 @@ class ReviewService:
             .values(count=RetryCounter.count + 1, last_retry_at=datetime.now(UTC))
         )
         if result.rowcount == 0:
+            # 达重试上限：空内容（AI 生成反复失败）→ 自动 reject 留空；有内容 → 留人工。
+            if self._auto_reject_if_empty_at_limit(session, content_item, review, reviewer):
+                return {"early_return": {
+                    "success": True, "qc_passed": True, "retry_count": counter.count,
+                    "message": "AI 多次生成失败，已将该维度标记为不适用（留空）",
+                    "new_content": None, "new_content_cn": None, "new_issues": [],
+                }}
             return {"early_return": {
                 "success": False, "qc_passed": False,
                 "retry_count": counter.count, "message": "已达到最大重试次数，请手动修改",

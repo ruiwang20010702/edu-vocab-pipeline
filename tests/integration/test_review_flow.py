@@ -98,6 +98,30 @@ def test_regenerate_max_retries(db_session, review_with_item, review_service):
     assert "最大重试次数" in result["message"]
 
 
+def test_regenerate_max_retries_empty_content_auto_rejects(db_session, review_with_item, review_service):
+    """达上限 + 空内容（AI 生成反复失败）→ 自动 reject 留空，不进人工队列。
+
+    对照 test_regenerate_max_retries（有内容达上限 → "请手动修改"留人工）。
+    """
+    content_item = review_with_item["content_item"]
+    content_item.content = ""  # AI 生成反复失败导致的空内容（不是质检失败）
+    counter = review_service._get_or_create_counter(db_session, content_item)
+    counter.count = 3
+    content_item.retry_count = 3
+    db_session.flush()
+
+    review2 = review_service.create_review_item(db_session, content_item, ReviewReason.LAYER1_FAILED)
+    result = review_service.regenerate(db_session, review2.id, reviewer="tester")
+
+    # 空内容达上限 → 自动 reject（区别于有内容的"请手动修改"）
+    assert result["success"] is True
+    assert "不适用" in result["message"]
+    db_session.refresh(content_item)
+    assert content_item.qc_status == QcStatus.REJECTED.value
+    db_session.refresh(review2)
+    assert review2.status == ReviewStatus.RESOLVED.value
+
+
 def test_manual_edit(db_session, review_with_item, review_service):
     review = review_with_item["review"]
     result = review_service.manual_edit(

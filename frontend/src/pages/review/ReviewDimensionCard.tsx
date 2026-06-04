@@ -477,7 +477,9 @@ export function MnemonicReviewSection({
     return m
   }, [reviewItems])
 
-  // 分类：用合并后的实时数据判断 rejected（避免 stale wordDetail 误分类）
+  // 分类：仅 qc_status==='rejected'（AI 判定不适用）才归"不适用"区。
+  // 不能用 !content：空内容但 layer1/layer2_failed 的是「AI 生成失败、待重生」，不是"不适用"，
+  // 应走正常渲染显示"异常 + 重新生成"，否则审核员会以为不用管而不去重生（988 项卡死的根因之一）。
   const rejectedMns = ALL_MNEMONIC_DIMS
     .map(d => {
       const mn = mnMap.get(d)
@@ -485,7 +487,7 @@ export function MnemonicReviewSection({
       const ri = reviewMap.get(d)
       return ri?.content_item ? { ...mn, ...ri.content_item } : mn
     })
-    .filter((mn): mn is ContentItem => !!mn && (mn.qc_status === 'rejected' || !mn.content))
+    .filter((mn): mn is ContentItem => !!mn && mn.qc_status === 'rejected')
 
   return (
     <div className="space-y-3 pt-2 border-t border-slate-100">
@@ -500,7 +502,7 @@ export function MnemonicReviewSection({
         const typeLabel = DIMENSION_LABELS[dim] ?? dim
         const reviewItem = reviewMap.get(dim)
         const live = reviewItem?.content_item ? { ...mn, ...reviewItem.content_item } : mn
-        const isRejected = live.qc_status === 'rejected' || !live.content
+        const isRejected = live.qc_status === 'rejected'  // 仅真 rejected；空内容失败项走正常渲染（异常 + 重新生成）
 
         if (isRejected) return null // 下面统一渲染 rejected
 
