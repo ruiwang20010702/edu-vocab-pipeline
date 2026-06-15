@@ -1,0 +1,4 @@
+# 钉钉问答机器人依赖（独立于主项目）
+dingtalk-stream>=0.21.0   # 钉钉 Stream 模式官方 SDK
+httpx>=0.27              # 调用 51talk AI Gateway（后续任务）
+python-dotenv>=1.0       # 本地 .env 加载（可选）

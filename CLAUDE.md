@@ -58,7 +58,7 @@ vocab_qc/
 │   ├── models/     ← ORM 模型，按层组织（data_layer / content_layer / quality_layer / batch_layer / package_layer / user / prompt）
 │   ├── services/   ← 业务服务（auth / user / generation / production / review / qc / export / stats / prompt / audit / batch / import / word）
 │   ├── generators/ ← 内容生成器（chunk / sentence / mnemonic×4 / syllable），base.py 含 AI 调用 + 熔断器
-│   └── qc/         ← 质检引擎：Layer 1（22条算法规则）+ Layer 2（AI语义校验），装饰器注册机制
+│   └── qc/         ← 质检引擎：Layer 1（25 条算法规则）+ Layer 2（AI语义校验），装饰器注册机制
 └── cli/            ← Typer CLI（qc_commands + review_commands + cleanup/create-admin）
 ```
 
@@ -131,3 +131,15 @@ Task Queue 模式（`ai_use_task_queue=True`）：批量提交（batch_size=20, 
 - Prompt injection 防护（`sanitize_prompt_input`）+ 熔断器 + AI 单任务超时
 - 生产环境禁用 Swagger/ReDoc，强制安全头（CSP / HSTS / X-Frame-Options）
 - Docker 网络隔离（internal + external），后端不直接暴露端口
+
+## 钉钉问答机器人（`dingtalk_bot/`，独立子服务）
+
+`dingtalk_bot/` 是一个**与主项目同仓、但运行与部署完全独立**的钉钉问答机器人，面向审核员团队回答"操作怎么做"和"业务规则"问题（只读、不碰业务数据库）。技术形态：钉钉企业内部应用 + Stream 模式（WebSocket 外拨，免公网回调）+ 51talk AI Gateway 同步问答。完整说明见 `dingtalk_bot/README.md` 与 `docs/钉钉机器人MVP方案.md`。
+
+**与盖娅/主部署的边界（重要，勿混淆）**：
+
+- 盖娅构建用的是 `gaea/Dockerfile`，它**只 COPY `backend/` + 前端 + `docs/prompts/`，不包含 `dingtalk_bot/`**。因此 push 代码 + 走盖娅部署主项目，**部署的仍只是 vocab-pipeline 主应用，机器人不会被构建/部署，也不影响主应用**。
+- 机器人与主应用**不能共用一个容器/部署**：入口不同（主应用 `gunicorn ... main:app` 开 :80；机器人 `python stream_client.py` 长连 WebSocket、不开端口），环境不同（机器人需 `DINGTALK_APP_KEY/SECRET`）。
+- 要上线机器人需**单独的部署单元**：用 `dingtalk_bot/Dockerfile` 单独构建（盖娅另建一个应用指向它，或放任意能外拨连钉钉的机器常驻）。
+- 机器人复用主项目的 51talk AI Gateway 凭证，但用独立 `biz_type=vocab_qc_bot` 以便单独统计 AI 成本。
+- 机器人有自己的依赖与测试（`dingtalk_bot/requirements.txt`、`dingtalk_bot/tests/`、`dingtalk_bot/.venv`），与主项目的 pytest/依赖互不干扰。

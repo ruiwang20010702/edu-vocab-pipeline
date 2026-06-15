@@ -71,7 +71,7 @@ kind
 ### 双层质检 + 人工审核
 
 ```
-Layer 1（算法规则 22 条）→ Layer 2（AI 语义校验，Unified 策略）→ 人工审核（最多 3 次重新生成）→ 导出门禁
+Layer 1（算法规则 25 条）→ Layer 2（AI 语义校验，Unified 策略）→ 人工审核（最多 3 次重新生成）→ 导出门禁
 ```
 
 - **Layer 1**：格式校验、长度检查、敏感词检测等算法规则
@@ -304,3 +304,5 @@ PYTHONPATH=backend vocab review edit <id> "new content" # 人工修改
 - `docs/design/output-schema.md` — 输出数据 Schema
 - `docs/prompts/` — AI Prompt 模板（生产 + 质检）
 - `docs/pending-fixes-v2.md` — 第二轮审计未修复项清单
+- `dingtalk_bot/README.md` — 钉钉问答机器人（**独立子服务**，同仓但与盖娅/主部署隔离，详见 CLAUDE.md 同名章节）
+- `docs/钉钉机器人MVP方案.md` — 钉钉机器人方案与实现状态
