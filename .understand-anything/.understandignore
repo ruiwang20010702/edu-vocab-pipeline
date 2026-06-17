@@ -1,0 +1,39 @@
+# .understandignore — 排除分析的文件/目录 (gitignore 语法)
+# 用户选择全库分析；以下均为注释(不额外排除)，仅内置默认排除 node_modules/.venv/dist 等噪音
+#
+# --- 来自 .gitignore (取消注释以排除) ---
+
+# *.py[cod]
+# *.egg-info/
+# .eggs/
+# *.swp
+# .pytest_cache/
+# .coverage
+# coverage.json
+# htmlcov/
+# *.db
+# *.sqlite3
+# .env
+# .env.local
+# docs/gaea-production-env.md
+# docs/production-env-template.env
+# .DS_Store
+# Thumbs.db
+# ~$*
+# *.xlsx
+# backup/
+# plans/
+# scripts/profile_export.html
+# scripts/profile_deep.txt
+# .claude/
+
+# --- 检测到的目录 (取消注释以排除) ---
+
+# tests/
+# docs/
+# scripts/
+
+# --- 测试文件模式 ---
+
+# *.test.*
+# *.spec.*

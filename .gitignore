@@ -50,3 +50,6 @@ scripts/profile_deep.txt
 
 # Claude Code 本地配置（每个开发者各异，不入库）
 .claude/
+.understand-anything/intermediate/
+.understand-anything/tmp/
+.understand-anything/.trash-*/

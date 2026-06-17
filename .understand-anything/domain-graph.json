@@ -1,0 +1,1924 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "S9-Vocab-Pipeline",
+    "languages": [
+      "python",
+      "typescript",
+      "markdown",
+      "json",
+      "csv",
+      "yaml",
+      "dockerfile",
+      "toml",
+      "css",
+      "html"
+    ],
+    "frameworks": [
+      "FastAPI",
+      "SQLAlchemy",
+      "Alembic",
+      "Pydantic",
+      "Typer",
+      "React",
+      "Vite",
+      "Tailwind CSS",
+      "Docker"
+    ],
+    "description": "教育词汇数据生产系统——人教版中小学英语教材词表整合为标准化词库，生成音标/释义/语块/例句/助记五维学习内容，含双层质检引擎",
+    "analyzedAt": "2026-06-17T08:23:16.000Z",
+    "gitCommitHash": "7afca85487a7f1a853c88eea18f3cdd58466ab20"
+  },
+  "nodes": [
+    {
+      "id": "domain:vocab-import",
+      "type": "domain",
+      "name": "词表导入与词库整合",
+      "summary": "把 12 份人教版教材词表（约 3310 词条）导入为标准化词库，按文本一致性合并释义来源（一致则合并、不同则拆为独立义项），并为每个义项生成五维内容占位。是整条生产流水线的数据源头。",
+      "tags": [
+        "import",
+        "vocabulary",
+        "data-ingestion",
+        "merge"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "Package",
+          "PackageWord",
+          "Word",
+          "WordMeaning",
+          "ContentItem"
+        ],
+        "businessRules": [
+          "释义文本一致→合并来源；不同→独立义项",
+          "上传文件需魔数校验防伪造",
+          "导入后为每个义项生成五维内容占位"
+        ],
+        "crossDomainInteractions": [
+          "导入完成后触发内容生成域",
+          "词包归入词包与生产编排域管理"
+        ]
+      }
+    },
+    {
+      "id": "domain:content-generation",
+      "type": "domain",
+      "name": "五维内容生成",
+      "summary": "为每个义项/单词生成音标、释义、语块(chunk)、例句(sentence)、助记(mnemonic×4)、音节(syllable)五维学习内容。生成器经 AI Gateway（直连或 51talk 网关异步轮询）调用大模型，受熔断器与任务队列保护，内容按义项挂载。",
+      "tags": [
+        "generation",
+        "ai-gateway",
+        "llm",
+        "content"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "ContentItem",
+          "WordMeaning",
+          "AiTaskQueue",
+          "Prompt"
+        ],
+        "businessRules": [
+          "内容按义项挂载，助记含 4 种策略子类",
+          "AI 调用受熔断器保护，连续失败快速熔断",
+          "支持直连并发与网关异步轮询两条执行路径",
+          "词根词缀助记需注入词素知识库"
+        ],
+        "crossDomainInteractions": [
+          "消费导入域产出的内容占位",
+          "生成结果进入质检域",
+          "依赖 Prompt 管理域取提示词",
+          "受生产编排域统一调度"
+        ]
+      }
+    },
+    {
+      "id": "domain:quality-control",
+      "type": "domain",
+      "name": "双层质检",
+      "summary": "对生成内容做两层质量校验：Layer1 用 25+ 条算法规则做格式/结构校验，Layer2 调 AI 做语义校验（搭配地道性、语法、释义匹配等）。质量红线保障——未通过质检与人工审核的内容绝不进入最终产出。",
+      "tags": [
+        "qc",
+        "quality",
+        "layer1",
+        "layer2",
+        "ai-validation",
+        "fail-safe"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "QcRun",
+          "QcRuleResult",
+          "RuleRegistry",
+          "ContentItem"
+        ],
+        "businessRules": [
+          "Layer1 算法规则先行，Layer2 AI 语义校验在后",
+          "质检规则按维度经装饰器自注册到 RuleRegistry",
+          "Layer2 AI 调用带并发信号量+熔断器+指数退避",
+          "fail-safe：质检不过不得放行导出"
+        ],
+        "crossDomainInteractions": [
+          "消费内容生成域产出",
+          "质检结果驱动人工审核域排队",
+          "由生产编排域串联调度"
+        ]
+      }
+    },
+    {
+      "id": "domain:human-review",
+      "type": "domain",
+      "name": "人工审核",
+      "summary": "审核员对质检后的内容逐条复核：通过、标记不适用或触发重新生成（同一内容最多 3 次重生成）。是生产流水线在导出前的人工把关节点。",
+      "tags": [
+        "review",
+        "human-in-the-loop",
+        "approval",
+        "retry"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "ContentItem",
+          "ReviewService",
+          "User",
+          "AuditLog"
+        ],
+        "businessRules": [
+          "单条内容最多重新生成 3 次",
+          "审核动作含通过/标记不适用/重生成/手工编辑",
+          "审核操作写审计日志"
+        ],
+        "crossDomainInteractions": [
+          "消费质检域结果",
+          "重生成回调内容生成域",
+          "审核状态决定导出门禁",
+          "依赖用户与权限域校验审核员身份"
+        ]
+      }
+    },
+    {
+      "id": "domain:export-gate",
+      "type": "domain",
+      "name": "导出门禁",
+      "summary": "生产流水线的 fail-safe 出口：只有当目标范围内全部内容均审核通过(approved)时才放行导出，支持导出就绪度检查、全量 JSON 流式下载与 Excel 下载。任何未通过项都会阻断导出。",
+      "tags": [
+        "export",
+        "gate",
+        "fail-safe",
+        "release"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "ContentItem",
+          "ExportService",
+          "Package"
+        ],
+        "businessRules": [
+          "全部 approved 才放行导出（fail-safe 出口）",
+          "仅导出已通过审核的内容",
+          "支持导出就绪度预检"
+        ],
+        "crossDomainInteractions": [
+          "消费人工审核域的最终通过状态",
+          "按词包/批次维度从生产编排域取范围"
+        ]
+      }
+    },
+    {
+      "id": "domain:production-orchestration",
+      "type": "domain",
+      "name": "生产编排与词包管理",
+      "summary": "支撑域：按 Package 编排「生成→质检 Layer1/2→入队审核」全流程，含维度重生成、自动通过与排队生成；词包/词条按词关联(Package/PackageWord)；批次分配、领取、跳词、完成、释放与孤儿/死锁条目修复；生产中加锁防并发。",
+      "tags": [
+        "orchestration",
+        "package",
+        "batch",
+        "concurrency",
+        "locking"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "Package",
+          "PackageWord",
+          "Batch",
+          "AiTaskQueue",
+          "ProductionService",
+          "BatchService"
+        ],
+        "businessRules": [
+          "按 Package 为单位编排生产全流程",
+          "生产中加锁防止并发重复生产",
+          "批次支持领取/释放/跳词与孤儿/死锁修复",
+          "任务队列支持中断恢复与过期清理"
+        ],
+        "crossDomainInteractions": [
+          "驱动内容生成域与质检域顺序执行",
+          "完成后入队人工审核域",
+          "为导出门禁域界定导出范围"
+        ]
+      }
+    },
+    {
+      "id": "domain:prompt-management",
+      "type": "domain",
+      "name": "Prompt 管理",
+      "summary": "支撑域：管理生成与质检使用的提示词，提供增删改查、激活、归档/恢复、默认种子与文件同步，采用三级 fallback 与版本指纹，仅 admin 可操作。",
+      "tags": [
+        "prompt",
+        "versioning",
+        "fallback",
+        "admin"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "Prompt",
+          "PromptService"
+        ],
+        "businessRules": [
+          "三级 fallback 取提示词，带版本指纹",
+          "prompt 管理接口限 admin 角色",
+          "支持归档/恢复与默认种子初始化"
+        ],
+        "crossDomainInteractions": [
+          "为内容生成域与质检域提供提示词",
+          "依赖用户与权限域做 admin 鉴权"
+        ]
+      }
+    },
+    {
+      "id": "domain:auth-user",
+      "type": "domain",
+      "name": "用户与权限",
+      "summary": "支撑域：基于邮箱验证码登录、JWT 令牌签发与角色权限（admin/审核员）。含邮箱域名白名单、验证码哈希、限速与用户增删改停用管理。",
+      "tags": [
+        "auth",
+        "jwt",
+        "rbac",
+        "user-management",
+        "security"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "User",
+          "AuthService",
+          "UserService"
+        ],
+        "businessRules": [
+          "邮箱验证码登录 + JWT 鉴权",
+          "邮箱域名白名单限制",
+          "按邮箱/IP 限速防爆破",
+          "admin 角色才可管理用户与 Prompt"
+        ],
+        "crossDomainInteractions": [
+          "为审核、Prompt 管理等域提供身份与角色鉴权"
+        ]
+      }
+    },
+    {
+      "id": "domain:stats-dashboard",
+      "type": "domain",
+      "name": "统计看板",
+      "summary": "支撑域：提供数据仪表盘、AI 用量统计、生产记录查询（含 Excel 导出）与任务队列/批次进度统计，带缓存与失效控制。",
+      "tags": [
+        "stats",
+        "dashboard",
+        "reporting",
+        "cache"
+      ],
+      "complexity": "simple",
+      "domainMeta": {
+        "entities": [
+          "StatsService",
+          "AiTaskQueue",
+          "Batch"
+        ],
+        "businessRules": [
+          "统计高频读取走 TTL 内存缓存",
+          "生产记录支持 XLSX 导出"
+        ],
+        "crossDomainInteractions": [
+          "读取生产编排、生成、质检各域的运行数据做汇总"
+        ]
+      }
+    },
+    {
+      "id": "domain:dingtalk-bot",
+      "type": "domain",
+      "name": "钉钉问答机器人",
+      "summary": "独立子域：面向审核员答疑的钉钉 Stream 模式问答机器人，只读知识库（Markdown 拼接），不碰业务库，独立部署。编排输入清洗→AI 问答→Markdown 回复→问答落盘，并做 prompt 注入防护。",
+      "tags": [
+        "dingtalk",
+        "chatbot",
+        "qa",
+        "standalone",
+        "prompt-injection-defense"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "BotConfig",
+          "QaChatbotHandler",
+          "KnowledgeLoader"
+        ],
+        "businessRules": [
+          "只读知识库，不读写业务库",
+          "独立部署、独立配置",
+          "用户输入清洗与标签包裹做注入防护",
+          "AI 异常时降级回复并落盘"
+        ],
+        "crossDomainInteractions": [
+          "与主业务系统解耦，复用 51talk AI Gateway 但隔离运行"
+        ]
+      }
+    },
+    {
+      "id": "flow:import-wordlist",
+      "type": "flow",
+      "name": "词表上传导入",
+      "summary": "审核员上传 JSON/CSV/Excel 词表，系统预览后后台异步导入并生成内容占位。",
+      "tags": [
+        "import",
+        "upload",
+        "async"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "POST /api/import (upload)",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:import-wordlist:preview",
+      "type": "step",
+      "name": "文件预览",
+      "summary": "上传前预览词表内容，确认结构正确。",
+      "tags": [
+        "preview"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/api/routers/import_.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:import-wordlist:validate",
+      "type": "step",
+      "name": "文件校验",
+      "summary": "魔数校验防伪造，字段规范化。",
+      "tags": [
+        "validation",
+        "security"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/import_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:import-wordlist:merge-meaning",
+      "type": "step",
+      "name": "释义合并判定",
+      "summary": "文本一致的释义合并来源，不同的拆为独立义项。",
+      "tags": [
+        "merge",
+        "business-rule"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/services/import_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:import-wordlist:create-package",
+      "type": "step",
+      "name": "创建词包与词条",
+      "summary": "创建 Package/PackageWord 并按词关联词条。",
+      "tags": [
+        "package"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/import_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:import-wordlist:seed-content",
+      "type": "step",
+      "name": "生成内容占位",
+      "summary": "为每个义项生成五维内容占位待生产。",
+      "tags": [
+        "content-placeholder"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/import_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:generate-content",
+      "type": "flow",
+      "name": "五维内容生成",
+      "summary": "生产编排触发各维度生成器经 AI Gateway 产出音标/释义/语块/例句/助记/音节内容。",
+      "tags": [
+        "generation",
+        "ai"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "ProductionService.generate (内部编排)",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:generate-content:load-prompt",
+      "type": "step",
+      "name": "加载提示词",
+      "summary": "按维度从 Prompt 管理三级 fallback 取提示词。",
+      "tags": [
+        "prompt"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/generators/base.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:generate-content:build-request",
+      "type": "step",
+      "name": "构建 AI 请求",
+      "summary": "ContentGenerator 基类构建请求与成本估算。",
+      "tags": [
+        "ai-request"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/generators/base.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:generate-content:gateway-call",
+      "type": "step",
+      "name": "调用 AI Gateway",
+      "summary": "直连并发或 51talk 网关异步提交+轮询。",
+      "tags": [
+        "ai-gateway",
+        "async"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/generators/base.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:generate-content:circuit-guard",
+      "type": "step",
+      "name": "熔断保护",
+      "summary": "连续失败超阈值快速熔断，冷却后半开重试。",
+      "tags": [
+        "circuit-breaker",
+        "resilience"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/circuit_breaker.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:generate-content:gen-dimensions",
+      "type": "step",
+      "name": "各维度生成",
+      "summary": "chunk/sentence/syllable/mnemonic×4 按义项或单词生成。",
+      "tags": [
+        "generators"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/generators/mnemonic.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:generate-content:attach-meaning",
+      "type": "step",
+      "name": "内容挂载义项",
+      "summary": "解析 AI 输出并按义项挂载到 ContentItem。",
+      "tags": [
+        "content"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/generation_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:ai-callback",
+      "type": "flow",
+      "name": "AI 网关异步回调",
+      "summary": "51talk AI Gateway 异步任务完成后回调，归一化结果写回任务队列。",
+      "tags": [
+        "callback",
+        "async",
+        "webhook"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/callback",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "step:ai-callback:ip-whitelist",
+      "type": "step",
+      "name": "IP 白名单校验",
+      "summary": "校验回调来源 IP 防伪造回调。",
+      "tags": [
+        "security"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/api/routers/callback.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:ai-callback:normalize",
+      "type": "step",
+      "name": "结果归一化",
+      "summary": "归一化 AI 返回结果格式。",
+      "tags": [
+        "normalize"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/api/routers/callback.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:ai-callback:write-queue",
+      "type": "step",
+      "name": "写回任务队列",
+      "summary": "更新 AiTaskQueue 状态并推进批次进度。",
+      "tags": [
+        "task-queue"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/task_queue.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:qc-layer1",
+      "type": "flow",
+      "name": "Layer1 算法质检",
+      "summary": "从规则注册中心取算法规则逐项校验内容格式与结构，落库 QcRun/QcRuleResult。",
+      "tags": [
+        "qc",
+        "layer1",
+        "algorithm"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "POST /api/qc/run",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:qc-layer1:load-rules",
+      "type": "step",
+      "name": "加载维度规则",
+      "summary": "从 RuleRegistry 按维度取 Layer1 规则。",
+      "tags": [
+        "registry"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/core/qc/registry.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:qc-layer1:check-format",
+      "type": "step",
+      "name": "格式结构校验",
+      "summary": "音标/释义/语块/例句/助记/音节维度逐项 check。",
+      "tags": [
+        "validation"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/qc/runner.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:qc-layer1:persist-result",
+      "type": "step",
+      "name": "落库质检结果",
+      "summary": "写入 QcRun 与 QcRuleResult。",
+      "tags": [
+        "persistence"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/qc/runner.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:qc-layer2",
+      "type": "flow",
+      "name": "Layer2 AI 语义质检",
+      "summary": "按维度装配 AI 检查器做语义校验（搭配地道性/语法/释义匹配/内容安全等），落库结果与用量。",
+      "tags": [
+        "qc",
+        "layer2",
+        "ai-validation"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "QcService.run_layer2 (内部编排)",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:qc-layer2:assemble-checker",
+      "type": "step",
+      "name": "装配 AI 检查器",
+      "summary": "按维度选 unified full prompt 或 per-rule 检查器。",
+      "tags": [
+        "ai-checker"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/qc/layer2/runner.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:qc-layer2:ai-call",
+      "type": "step",
+      "name": "AI 语义校验调用",
+      "summary": "AiClient 并发信号量+熔断器+指数退避调 AI。",
+      "tags": [
+        "ai",
+        "resilience"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/qc/layer2/ai_base.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:qc-layer2:semantic-judge",
+      "type": "step",
+      "name": "多维语义判定",
+      "summary": "释义匹配/语块地道/语法难度/内容安全等判定。",
+      "tags": [
+        "semantic"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/qc/layer2/per_rule/sentence_checkers.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:qc-layer2:persist-usage",
+      "type": "step",
+      "name": "落库结果与用量",
+      "summary": "写 QcRuleResult/错误日志/AI 用量统计。",
+      "tags": [
+        "persistence",
+        "usage"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/qc/layer2/runner.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:review-item",
+      "type": "flow",
+      "name": "内容审核处理",
+      "summary": "审核员复核内容并执行通过/标记不适用/重生成/手工编辑，重生成最多 3 次。",
+      "tags": [
+        "review",
+        "approval"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/review/{id}/approve|regenerate|edit",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:review-item:list-pending",
+      "type": "step",
+      "name": "拉取待审列表",
+      "summary": "查询待审核内容及质检结果。",
+      "tags": [
+        "query"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/api/routers/review.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:review-item:decide",
+      "type": "step",
+      "name": "审核裁决",
+      "summary": "通过/标记不适用/重生成/手工编辑。",
+      "tags": [
+        "decision"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/review_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:review-item:retry-guard",
+      "type": "step",
+      "name": "重试次数控制",
+      "summary": "同一内容最多重新生成 3 次。",
+      "tags": [
+        "retry",
+        "business-rule"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/review_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:review-item:audit-log",
+      "type": "step",
+      "name": "写审计日志",
+      "summary": "记录审核动作到审计日志。",
+      "tags": [
+        "audit"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/core/services/audit_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:export-release",
+      "type": "flow",
+      "name": "导出门禁放行",
+      "summary": "导出前检查就绪度，仅当全部内容 approved 才放行 JSON/Excel 导出（fail-safe 出口）。",
+      "tags": [
+        "export",
+        "gate"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "GET /api/export (readiness/json/xlsx)",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:export-release:readiness-check",
+      "type": "step",
+      "name": "导出就绪度检查",
+      "summary": "校验范围内是否全部审核通过。",
+      "tags": [
+        "gate",
+        "fail-safe"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/api/routers/export.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:export-release:collect-approved",
+      "type": "step",
+      "name": "收集已通过内容",
+      "summary": "仅收集 approved 内容并格式化助记/释义。",
+      "tags": [
+        "filter"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/export_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:export-release:stream-download",
+      "type": "step",
+      "name": "流式导出下载",
+      "summary": "全量 JSON 流式下载或 Excel 下载。",
+      "tags": [
+        "download"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/api/routers/export.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:orchestrate-production",
+      "type": "flow",
+      "name": "Package 生产编排",
+      "summary": "按 Package 串联 生成→质检 Layer1/2→入队审核 全流程，含维度重生成与自动通过。",
+      "tags": [
+        "orchestration",
+        "pipeline"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "ProductionService.run (内部编排)",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:orchestrate-production:acquire-lock",
+      "type": "step",
+      "name": "获取生产锁",
+      "summary": "生产中加锁防并发重复生产。",
+      "tags": [
+        "locking",
+        "concurrency"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/production_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:orchestrate-production:chain-gen-qc",
+      "type": "step",
+      "name": "串联生成与质检",
+      "summary": "依次跑生成→Layer1→Layer2。",
+      "tags": [
+        "pipeline"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/services/production_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:orchestrate-production:auto-pass",
+      "type": "step",
+      "name": "自动通过与重生成",
+      "summary": "按规则自动通过或对失败维度重生成。",
+      "tags": [
+        "auto-pass"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/core/services/production_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:orchestrate-production:enqueue-review",
+      "type": "step",
+      "name": "入队人工审核",
+      "summary": "将待审内容排队进入人工审核。",
+      "tags": [
+        "queue"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/production_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:manage-batch",
+      "type": "flow",
+      "name": "批次生产管理",
+      "summary": "批次智能分批、领取/释放/跳词、后台生产任务与孤儿/死锁条目修复。",
+      "tags": [
+        "batch",
+        "concurrency"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "POST /api/batch (claim/release/skip)",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:manage-batch:split-batch",
+      "type": "step",
+      "name": "智能分批",
+      "summary": "按规模将词条智能分配到批次。",
+      "tags": [
+        "batching"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/api/routers/batch.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:manage-batch:claim-release",
+      "type": "step",
+      "name": "领取与释放",
+      "summary": "审核员领取/释放/跳词批次条目。",
+      "tags": [
+        "claim"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/batch_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:manage-batch:background-produce",
+      "type": "step",
+      "name": "后台生产任务",
+      "summary": "触发批次后台生产与维度子集重生。",
+      "tags": [
+        "background"
+      ],
+      "complexity": "complex",
+      "filePath": "backend/vocab_qc/api/routers/batch.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:manage-batch:repair-orphan",
+      "type": "step",
+      "name": "孤儿死锁修复",
+      "summary": "修复孤儿/死锁条目并更新进度。",
+      "tags": [
+        "repair",
+        "resilience"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/batch_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:manage-prompt",
+      "type": "flow",
+      "name": "Prompt 管理",
+      "summary": "admin 维护生成/质检提示词：增删改查、激活、归档恢复、种子初始化与文件同步。",
+      "tags": [
+        "prompt",
+        "admin"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST/GET /api/prompt",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:manage-prompt:crud",
+      "type": "step",
+      "name": "增删改查",
+      "summary": "prompt 列表与增删改操作（限 admin）。",
+      "tags": [
+        "crud"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/api/routers/prompt.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:manage-prompt:activate-version",
+      "type": "step",
+      "name": "激活与版本指纹",
+      "summary": "激活提示词并记录版本指纹。",
+      "tags": [
+        "versioning"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/prompt_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:manage-prompt:archive-restore",
+      "type": "step",
+      "name": "归档与恢复",
+      "summary": "归档/恢复提示词。",
+      "tags": [
+        "archive"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/core/services/prompt_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:manage-prompt:sync-seed",
+      "type": "step",
+      "name": "文件同步与种子",
+      "summary": "默认种子初始化与文件同步。",
+      "tags": [
+        "seed",
+        "sync"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/prompt_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:login",
+      "type": "flow",
+      "name": "邮箱验证码登录",
+      "summary": "发送邮箱验证码、校验登录、签发 JWT Cookie 令牌，含限速。",
+      "tags": [
+        "auth",
+        "jwt"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/auth (send-code/login/logout)",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:login:send-code",
+      "type": "step",
+      "name": "发送验证码",
+      "summary": "按邮箱域名白名单与限速发送验证码。",
+      "tags": [
+        "rate-limit",
+        "whitelist"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/api/routers/auth.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:login:verify-code",
+      "type": "step",
+      "name": "校验验证码",
+      "summary": "验证码哈希校验。",
+      "tags": [
+        "validation"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/auth_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:login:issue-jwt",
+      "type": "step",
+      "name": "签发 JWT",
+      "summary": "签发 JWT 并写 Cookie 令牌。",
+      "tags": [
+        "jwt"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/auth_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:manage-user",
+      "type": "flow",
+      "name": "用户管理",
+      "summary": "admin 创建/列出/更新/停用用户并获取当前用户信息。",
+      "tags": [
+        "user-management",
+        "admin",
+        "rbac"
+      ],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "POST/GET /api/admin/users",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:manage-user:create-user",
+      "type": "step",
+      "name": "创建用户",
+      "summary": "admin 创建用户并分配角色。",
+      "tags": [
+        "create"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/api/routers/admin.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:manage-user:update-deactivate",
+      "type": "step",
+      "name": "更新与停用",
+      "summary": "更新或停用用户账户。",
+      "tags": [
+        "update"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/core/services/user_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:view-dashboard",
+      "type": "flow",
+      "name": "数据看板查询",
+      "summary": "查询数据仪表盘、AI 用量、生产记录（含 Excel 导出）与批次/队列进度，带缓存。",
+      "tags": [
+        "stats",
+        "dashboard"
+      ],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "GET /api/stats",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:view-dashboard:dashboard-stats",
+      "type": "step",
+      "name": "仪表盘统计",
+      "summary": "聚合生产/质检/审核进度统计。",
+      "tags": [
+        "aggregate",
+        "cache"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/core/services/stats_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:view-dashboard:ai-usage",
+      "type": "step",
+      "name": "AI 用量统计",
+      "summary": "统计 AI 调用用量与成本。",
+      "tags": [
+        "usage"
+      ],
+      "complexity": "simple",
+      "filePath": "backend/vocab_qc/core/services/stats_service.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:view-dashboard:export-records",
+      "type": "step",
+      "name": "生产记录导出",
+      "summary": "生产记录查询与 XLSX 导出。",
+      "tags": [
+        "export"
+      ],
+      "complexity": "moderate",
+      "filePath": "backend/vocab_qc/api/routers/stats.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "flow:qa-chat",
+      "type": "flow",
+      "name": "钉钉问答应答",
+      "summary": "钉钉 Stream 消息触发：输入清洗→加载知识库→AI 问答→Markdown 回复→问答落盘。",
+      "tags": [
+        "chatbot",
+        "qa",
+        "standalone"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "钉钉 Stream message callback",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "step:qa-chat:sanitize",
+      "type": "step",
+      "name": "输入清洗与防注入",
+      "summary": "清洗用户输入并用标签包裹防 prompt 注入。",
+      "tags": [
+        "sanitize",
+        "security"
+      ],
+      "complexity": "moderate",
+      "filePath": "dingtalk_bot/prompt.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:qa-chat:load-kb",
+      "type": "step",
+      "name": "加载知识库",
+      "summary": "拼接 Markdown 知识库（只读，不碰业务库）。",
+      "tags": [
+        "knowledge"
+      ],
+      "complexity": "simple",
+      "filePath": "dingtalk_bot/knowledge_loader.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:qa-chat:ai-answer",
+      "type": "step",
+      "name": "AI 问答",
+      "summary": "调 51talk AI Gateway 获取回答。",
+      "tags": [
+        "ai"
+      ],
+      "complexity": "moderate",
+      "filePath": "dingtalk_bot/ai_client.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:qa-chat:reply-log",
+      "type": "step",
+      "name": "回复与落盘",
+      "summary": "Markdown 回复并将问答记录落盘（失败降级）。",
+      "tags": [
+        "reply",
+        "logging"
+      ],
+      "complexity": "simple",
+      "filePath": "dingtalk_bot/stream_client.py",
+      "lineRange": [
+        0,
+        0
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "domain:vocab-import",
+      "target": "flow:import-wordlist",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:import-wordlist",
+      "target": "step:import-wordlist:preview",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:import-wordlist",
+      "target": "step:import-wordlist:validate",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:import-wordlist",
+      "target": "step:import-wordlist:merge-meaning",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:import-wordlist",
+      "target": "step:import-wordlist:create-package",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:import-wordlist",
+      "target": "step:import-wordlist:seed-content",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:content-generation",
+      "target": "flow:generate-content",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:generate-content",
+      "target": "step:generate-content:load-prompt",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:generate-content",
+      "target": "step:generate-content:build-request",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:generate-content",
+      "target": "step:generate-content:gateway-call",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:generate-content",
+      "target": "step:generate-content:circuit-guard",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:generate-content",
+      "target": "step:generate-content:gen-dimensions",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:generate-content",
+      "target": "step:generate-content:attach-meaning",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:content-generation",
+      "target": "flow:ai-callback",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:ai-callback",
+      "target": "step:ai-callback:ip-whitelist",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:ai-callback",
+      "target": "step:ai-callback:normalize",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:ai-callback",
+      "target": "step:ai-callback:write-queue",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "domain:quality-control",
+      "target": "flow:qc-layer1",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:qc-layer1",
+      "target": "step:qc-layer1:load-rules",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:qc-layer1",
+      "target": "step:qc-layer1:check-format",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:qc-layer1",
+      "target": "step:qc-layer1:persist-result",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "domain:quality-control",
+      "target": "flow:qc-layer2",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:qc-layer2",
+      "target": "step:qc-layer2:assemble-checker",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:qc-layer2",
+      "target": "step:qc-layer2:ai-call",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:qc-layer2",
+      "target": "step:qc-layer2:semantic-judge",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:qc-layer2",
+      "target": "step:qc-layer2:persist-usage",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:human-review",
+      "target": "flow:review-item",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:review-item",
+      "target": "step:review-item:list-pending",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:review-item",
+      "target": "step:review-item:decide",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:review-item",
+      "target": "step:review-item:retry-guard",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:review-item",
+      "target": "step:review-item:audit-log",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:export-gate",
+      "target": "flow:export-release",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:export-release",
+      "target": "step:export-release:readiness-check",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:export-release",
+      "target": "step:export-release:collect-approved",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:export-release",
+      "target": "step:export-release:stream-download",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "domain:production-orchestration",
+      "target": "flow:orchestrate-production",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:orchestrate-production",
+      "target": "step:orchestrate-production:acquire-lock",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:orchestrate-production",
+      "target": "step:orchestrate-production:chain-gen-qc",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:orchestrate-production",
+      "target": "step:orchestrate-production:auto-pass",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:orchestrate-production",
+      "target": "step:orchestrate-production:enqueue-review",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:production-orchestration",
+      "target": "flow:manage-batch",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:manage-batch",
+      "target": "step:manage-batch:split-batch",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:manage-batch",
+      "target": "step:manage-batch:claim-release",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:manage-batch",
+      "target": "step:manage-batch:background-produce",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:manage-batch",
+      "target": "step:manage-batch:repair-orphan",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:prompt-management",
+      "target": "flow:manage-prompt",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:manage-prompt",
+      "target": "step:manage-prompt:crud",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:manage-prompt",
+      "target": "step:manage-prompt:activate-version",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:manage-prompt",
+      "target": "step:manage-prompt:archive-restore",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:manage-prompt",
+      "target": "step:manage-prompt:sync-seed",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:auth-user",
+      "target": "flow:login",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:login",
+      "target": "step:login:send-code",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:login",
+      "target": "step:login:verify-code",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:login",
+      "target": "step:login:issue-jwt",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "domain:auth-user",
+      "target": "flow:manage-user",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:manage-user",
+      "target": "step:manage-user:create-user",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:manage-user",
+      "target": "step:manage-user:update-deactivate",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:stats-dashboard",
+      "target": "flow:view-dashboard",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:view-dashboard",
+      "target": "step:view-dashboard:dashboard-stats",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:view-dashboard",
+      "target": "step:view-dashboard:ai-usage",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:view-dashboard",
+      "target": "step:view-dashboard:export-records",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "domain:dingtalk-bot",
+      "target": "flow:qa-chat",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:qa-chat",
+      "target": "step:qa-chat:sanitize",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:qa-chat",
+      "target": "step:qa-chat:load-kb",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:qa-chat",
+      "target": "step:qa-chat:ai-answer",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:qa-chat",
+      "target": "step:qa-chat:reply-log",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:vocab-import",
+      "target": "domain:content-generation",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "导入完成后为义项生成五维内容占位并触发生成",
+      "weight": 0.7
+    },
+    {
+      "source": "domain:content-generation",
+      "target": "domain:quality-control",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "生成结果进入双层质检",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:quality-control",
+      "target": "domain:human-review",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "质检结果驱动内容入队人工审核",
+      "weight": 0.7
+    },
+    {
+      "source": "domain:human-review",
+      "target": "domain:content-generation",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "审核重生成回调内容生成（最多 3 次）",
+      "weight": 0.5
+    },
+    {
+      "source": "domain:human-review",
+      "target": "domain:export-gate",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "审核全部通过后才放行导出",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:production-orchestration",
+      "target": "domain:content-generation",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "按 Package 调度内容生成",
+      "weight": 0.7
+    },
+    {
+      "source": "domain:production-orchestration",
+      "target": "domain:quality-control",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "按 Package 调度质检执行",
+      "weight": 0.7
+    },
+    {
+      "source": "domain:production-orchestration",
+      "target": "domain:export-gate",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "为导出界定词包/批次范围",
+      "weight": 0.5
+    },
+    {
+      "source": "domain:prompt-management",
+      "target": "domain:content-generation",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "为生成器提供版本化提示词",
+      "weight": 0.6
+    },
+    {
+      "source": "domain:prompt-management",
+      "target": "domain:quality-control",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "为 Layer2 AI 校验提供提示词",
+      "weight": 0.6
+    },
+    {
+      "source": "domain:auth-user",
+      "target": "domain:human-review",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "校验审核员身份与角色",
+      "weight": 0.6
+    },
+    {
+      "source": "domain:auth-user",
+      "target": "domain:prompt-management",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "为 Prompt 管理做 admin 鉴权",
+      "weight": 0.5
+    },
+    {
+      "source": "domain:stats-dashboard",
+      "target": "domain:production-orchestration",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "读取生产运行数据做汇总",
+      "weight": 0.4
+    }
+  ],
+  "layers": [],
+  "tour": []
+}
