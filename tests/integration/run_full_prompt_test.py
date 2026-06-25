@@ -10,9 +10,9 @@ import time
 
 from vocab_qc.core.config import settings
 from vocab_qc.core.qc.layer2.ai_base import AiClient
+from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
 from vocab_qc.core.qc.layer2.unified.mnemonic_unified import UnifiedMnemonicChecker
 from vocab_qc.core.qc.layer2.unified.sentence_unified import UnifiedSentenceChecker
-from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
 from vocab_qc.core.qc.layer2.unified.syllable_unified import UnifiedSyllableChecker
 
 # ---------------------------------------------------------------------------
@@ -196,9 +196,9 @@ async def main():
     print(f"  异常: {error_count}")
 
     if total_elapsed < 60:
-        print(f"  耗时: OK (< 60s)")
+        print("  耗时: OK (< 60s)")
     else:
-        print(f"  耗时: WARN (>= 60s，但并行已最优)")
+        print("  耗时: WARN (>= 60s，但并行已最优)")
 
     # 坏内容(#2)必须检出问题
     if not isinstance(results_list[1], Exception):

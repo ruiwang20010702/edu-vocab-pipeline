@@ -2,9 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from sqlalchemy.orm import Session
-
 from vocab_qc.core.models.ai_task_queue import AiTaskQueue, AiTaskStatus
 from vocab_qc.core.task_queue import TaskQueueService, TaskSpec
 

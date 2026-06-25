@@ -1,7 +1,6 @@
 """stats_service 单元测试."""
 
 import pytest
-
 from vocab_qc.core.models import ContentItem, QcStatus, Word
 from vocab_qc.core.services import stats_service
 from vocab_qc.core.services.stats_service import invalidate_stats_cache

@@ -5,7 +5,6 @@ import logging
 import time
 
 import pytest
-
 from vocab_qc.core.logging_config import (
     JsonFormatter,
     RequestIdFilter,
@@ -15,7 +14,6 @@ from vocab_qc.core.logging_config import (
     log_elapsed,
     set_request_id,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

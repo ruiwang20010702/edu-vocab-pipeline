@@ -6,18 +6,16 @@
 3. 回归验证：其他维度仍用精简 prompt + JSON 格式正常工作
 """
 
-import asyncio
 import time
 
 import pytest
-
 from vocab_qc.core.config import settings
 from vocab_qc.core.qc.layer2.ai_base import AiClient
+from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
 from vocab_qc.core.qc.layer2.unified.mnemonic_unified import (
     UnifiedMnemonicChecker,
 )
 from vocab_qc.core.qc.layer2.unified.sentence_unified import UnifiedSentenceChecker
-from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
 
 # 跳过条件：无 API 配置
 pytestmark = pytest.mark.skipif(
@@ -173,7 +171,7 @@ class TestPerformance:
         )
         elapsed = time.monotonic() - t0
 
-        print(f"\n--- 耗时验证 ---")
+        print("\n--- 耗时验证 ---")
         print(f"完整 prompt 耗时: {elapsed:.1f}s")
         for r in results:
             print(f"  {r.rule_id}: {'PASS' if r.passed else 'FAIL'} | {r.detail}")
@@ -203,7 +201,7 @@ class TestOtherDimensionsRegression:
             meaning="去",
             content_cn="她每天去上学。",
         )
-        print(f"\n--- 例句回归 ---")
+        print("\n--- 例句回归 ---")
         for r in results:
             print(f"  {r.rule_id}: {'PASS' if r.passed else 'FAIL'} | {r.detail}")
 
@@ -223,7 +221,7 @@ class TestOtherDimensionsRegression:
             word="go",
             meaning="去",
         )
-        print(f"\n--- 语块回归 ---")
+        print("\n--- 语块回归 ---")
         for r in results:
             print(f"  {r.rule_id}: {'PASS' if r.passed else 'FAIL'} | {r.detail}")
 

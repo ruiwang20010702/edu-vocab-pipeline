@@ -1,6 +1,6 @@
 """AI Gateway 回调请求 Schema."""
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 

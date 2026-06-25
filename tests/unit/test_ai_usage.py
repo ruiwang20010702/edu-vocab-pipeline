@@ -1,7 +1,6 @@
 """AI 用量追踪工具函数测试."""
 
 import pytest
-
 from vocab_qc.core.generators.base import AiUsageInfo, estimate_cost, extract_usage
 
 

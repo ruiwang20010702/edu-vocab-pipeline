@@ -6,13 +6,11 @@ import time
 import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
-
 from vocab_qc.core.logging_config import (
     AccessLogMiddleware,
     RequestIdMiddleware,
     _request_id_var,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

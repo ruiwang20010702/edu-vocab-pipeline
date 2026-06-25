@@ -10,9 +10,9 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from vocab_qc.core.generators.base import build_ai_request
 from vocab_qc.core.qc.base import RuleResult
+from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
 from vocab_qc.core.qc.layer2.unified.full_prompt import (
     DIMENSION_FILE_MAP,
     load_full_prompt,
@@ -20,9 +20,7 @@ from vocab_qc.core.qc.layer2.unified.full_prompt import (
 )
 from vocab_qc.core.qc.layer2.unified.mnemonic_unified import UnifiedMnemonicChecker
 from vocab_qc.core.qc.layer2.unified.sentence_unified import UnifiedSentenceChecker
-from vocab_qc.core.qc.layer2.unified.chunk_unified import UnifiedChunkChecker
 from vocab_qc.core.qc.layer2.unified.syllable_unified import UnifiedSyllableChecker
-
 
 # ---------------------------------------------------------------------------
 # build_ai_request: use_json_format 参数

@@ -1,6 +1,5 @@
 """Alembic 迁移环境配置."""
 
-import os
 from logging.config import fileConfig
 
 # 确保所有模型被导入，否则 autogenerate 检测不到

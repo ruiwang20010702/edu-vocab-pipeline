@@ -500,10 +500,6 @@ class ExportService:
             写入完成的 xlsx 文件 Path。
         """
         logger.info("导出 Excel 开始")
-        from openpyxl import Workbook
-        from openpyxl.cell import WriteOnlyCell
-        from openpyxl.styles import Alignment, Font, PatternFill
-        from openpyxl.utils import get_column_letter
 
         # 区分 service 自创的 tempfile 与调用方传入的 output_path：
         # 仅在自创路径上做异常 unlink（不擅自删除调用方文件）。

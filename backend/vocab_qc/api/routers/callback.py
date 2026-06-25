@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from vocab_qc.api.deps import get_current_user, get_db, require_role
+from vocab_qc.api.deps import get_db, require_role
 from vocab_qc.api.schemas.callback import AiTaskCallbackPayload
 from vocab_qc.core.config import settings
 from vocab_qc.core.models.ai_task_queue import AiTaskQueue, AiTaskStatus

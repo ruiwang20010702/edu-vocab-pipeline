@@ -1,7 +1,6 @@
 """熔断器单元测试."""
 
 import time
-from unittest.mock import patch
 
 from vocab_qc.core.circuit_breaker import CircuitBreaker
 

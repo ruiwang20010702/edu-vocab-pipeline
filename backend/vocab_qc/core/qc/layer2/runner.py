@@ -49,9 +49,8 @@ class Layer2Runner:
 
     def load_dimension_configs(self, session) -> None:
         """从 DB 加载质检维度的 AI 配置，为不同维度创建独立 AiClient。"""
-        from vocab_qc.core.services.prompt_service import get_active_prompt
-
         from vocab_qc.core.config import settings as _settings
+        from vocab_qc.core.services.prompt_service import get_active_prompt
 
         for dim in self._unified_checkers:
             prompt = get_active_prompt(session, "quality", dim)

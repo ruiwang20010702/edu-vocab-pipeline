@@ -31,7 +31,6 @@ from vocab_qc.core.security import reject_html_input
 from vocab_qc.core.services.audit_service import log_action
 from vocab_qc.core.services.review_service import ReviewService, _lookup_package_id
 
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/reviews", tags=["审核"])
@@ -352,9 +351,9 @@ async def _batch_regenerate_bg(
             # 避免逐条 L2 QC 串行等 gateway 回调（26条×10s→4min），改为1次批量提交
             def _phase3_writeback_and_l1() -> tuple[int, list[tuple[int, dict]]]:
                 """第一轮：写回 AI 结果 + 运行 L1 QC，返回 (fail_count, l1_passed_items)."""
+                from vocab_qc.core.models.data_layer import Meaning, Phonetic, Word
                 from vocab_qc.core.models.quality_layer import AiUsageLog
                 from vocab_qc.core.qc.runner import Layer1Runner
-                from vocab_qc.core.models.data_layer import Meaning, Phonetic, Word
 
                 f = 0
                 session.expire_all()

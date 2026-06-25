@@ -1,11 +1,8 @@
 """PollingPool 和任务队列生产流程单元测试."""
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
-from vocab_qc.core.models.ai_task_queue import AiTaskQueue, AiTaskStatus
 from vocab_qc.core.polling_pool import PollingPool, _poll_interval_for_count
 from vocab_qc.core.task_queue import TaskQueueService, TaskSpec
 

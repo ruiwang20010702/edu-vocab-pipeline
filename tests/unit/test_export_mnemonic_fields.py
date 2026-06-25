@@ -4,7 +4,6 @@ import json
 
 from vocab_qc.core.services.export_service import _parse_mnemonic_fields
 
-
 _EMPTY = {
     "formula": "", "chant": "",
     "extension_words": "",

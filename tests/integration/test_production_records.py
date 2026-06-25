@@ -2,10 +2,9 @@
 
 import pytest
 from sqlalchemy.orm import Session
-
+from vocab_qc.core.models.data_layer import Word
 from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import AiUsageLog
-from vocab_qc.core.models.data_layer import Word
 from vocab_qc.core.services.stats_service import get_production_records, stats_cache
 
 
@@ -207,9 +206,9 @@ class TestExportProductionRecordsXlsx:
 
     def test_export_xlsx(self, db_session: Session):
         """验证导出的 xlsx 格式正确。"""
-        from openpyxl import load_workbook
         import io
 
+        from openpyxl import load_workbook
         from vocab_qc.core.services.stats_service import export_production_records_xlsx
 
         pkg = _make_package(db_session, "export-test", total_words=5)

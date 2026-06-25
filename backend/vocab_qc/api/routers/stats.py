@@ -91,7 +91,6 @@ def get_task_queue_stats(
     ).scalar() or 0
 
     # 平均耗时（提交到完成）
-    from sqlalchemy import extract
     completed_tasks = q.filter(
         AiTaskQueue.submitted_at.isnot(None),
         AiTaskQueue.completed_at.isnot(None),

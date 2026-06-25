@@ -5,7 +5,6 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-
 from vocab_qc.api.main import app
 from vocab_qc.core.config import settings
 from vocab_qc.core.models.ai_task_queue import AiTaskQueue, AiTaskStatus

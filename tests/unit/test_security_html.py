@@ -2,7 +2,6 @@
 
 import pytest
 from fastapi import HTTPException
-
 from vocab_qc.core.security import reject_html_input
 
 

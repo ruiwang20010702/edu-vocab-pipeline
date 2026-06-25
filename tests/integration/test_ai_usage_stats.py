@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
-
 from vocab_qc.core.models.quality_layer import AiUsageLog
 from vocab_qc.core.services.stats_service import get_ai_usage_stats, stats_cache
 

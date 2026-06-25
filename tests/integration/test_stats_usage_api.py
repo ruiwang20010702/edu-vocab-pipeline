@@ -1,7 +1,6 @@
 """AI 用量统计 API 集成测试."""
 
 from fastapi.testclient import TestClient
-
 from vocab_qc.api.deps import get_current_user, get_db
 from vocab_qc.api.main import app
 
