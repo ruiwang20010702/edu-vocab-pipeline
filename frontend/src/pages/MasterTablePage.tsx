@@ -18,6 +18,16 @@ interface MasterMeaning {
   sentence?: ContentItem
   mnemonics?: ContentItem[]
 }
+
+/** 异步导出任务状态（后端 /export/excel/async 与 /export/jobs/{id} 返回值） */
+interface ExportJobOut {
+  id: number
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  file_name?: string | null
+  file_size?: number | null
+  error_message?: string | null
+  download_ready: boolean
+}
 import WordDetailModal from './mastertable/WordDetailModal'
 import PackagePanel from './mastertable/PackagePanel'
 import { ALL_MNEMONIC_DIMS, MNEMONIC_TYPE_LABELS } from './review/constants'
@@ -35,6 +45,9 @@ export default function MasterTablePage() {
   const [detailWord, setDetailWord] = useState<WordDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
+  const [exportElapsed, setExportElapsed] = useState(0)
+  const exportAbortRef = useRef(false)
+  useEffect(() => () => { exportAbortRef.current = true }, [])
   const [statusFilter, setStatusFilter] = useState<'approved' | 'in_progress' | null>('approved')
   const [statusCounts, setStatusCounts] = useState<StatusCounts>({ approved: 0, in_progress: 0, total: 0 })
   const { showToast } = useToast()
@@ -100,19 +113,34 @@ export default function MasterTablePage() {
   }
 
   const handleExport = async () => {
+    // 异步导出：发起任务 → 轮询 → 完成后下载，避免同步导出撞 120s 网关超时
     setExportLoading(true)
+    setExportElapsed(0)
+    exportAbortRef.current = false
+    const startedAt = Date.now()
     try {
-      const blob = await api.blob('/export/excel')
+      const started = await api.post<ExportJobOut>('/export/excel/async')
+      let job = started
+      while (job.status === 'pending' || job.status === 'running') {
+        await new Promise(r => setTimeout(r, 2000))
+        if (exportAbortRef.current) return
+        setExportElapsed(Math.round((Date.now() - startedAt) / 1000))
+        job = await api.get<ExportJobOut>(`/export/jobs/${started.id}`)
+      }
+      if (job.status === 'failed') {
+        showToast('error', job.error_message || '导出失败，请重试')
+        return
+      }
+      const blob = await api.blob(`/export/jobs/${started.id}/download`)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `vocab_export_${new Date().toISOString().slice(0, 10)}.xlsx`
+      a.download = job.file_name || `vocab_export_${new Date().toISOString().slice(0, 10)}.xlsx`
       a.click()
       URL.revokeObjectURL(url)
+      showToast('success', '导出完成')
     } catch (e) {
-      console.error('导出失败', e)
-      const err = e as { detail?: string; message?: string }
-      alert(err?.detail || err?.message || '导出失败，请重试')
+      showToast('error', e instanceof ApiError ? e.detail : '导出失败，请重试')
     } finally {
       setExportLoading(false)
     }
@@ -144,7 +172,7 @@ export default function MasterTablePage() {
             className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-600/20 hover:bg-blue-700 hover:-translate-y-0.5 active:scale-95 transition-all disabled:opacity-50"
           >
             {exportLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            {exportLoading ? '导出中...' : '导出已通过'}
+            {exportLoading ? `导出中… ${exportElapsed}s` : '导出已通过'}
           </button>
         </div>
       </div>

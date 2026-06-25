@@ -16,6 +16,11 @@ from vocab_qc.core.models.enums import (
     ReviewStatus,
     UserRole,
 )
+from vocab_qc.core.models.export_job import (
+    EXPORT_TERMINAL_STATUSES,
+    ExportJob,
+    ExportJobStatus,
+)
 from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.prompt import Prompt
 from vocab_qc.core.models.quality_layer import (
@@ -42,6 +47,9 @@ __all__ = [
     "ReviewBatch",
     "ContentDimension",
     "ContentItem",
+    "EXPORT_TERMINAL_STATUSES",
+    "ExportJob",
+    "ExportJobStatus",
     "Meaning",
     "MnemonicType",
     "Package",
