@@ -75,9 +75,11 @@ vocab_qc/
 
 总表（MasterTable）已支持：维度子集"重新生产"（含 `dry_run` 预览 + 仅补缺字段项 + 强制覆盖）、"一键补全缺失字段"全量回填按钮（含 `unique_missing` 去重计数预览）。Excel 导出包含审核人列（按义项聚合 ReviewItem.reviewer）。
 
+Excel 导出为**异步后台任务**：`POST /api/export/excel/async` 建任务立即返回 → 后台线程串行构建落盘 → 前端每 2s 轮询 `GET /api/export/jobs/{id}` → 完成后下载 `/jobs/{id}/download`。避免同步导出大数据量（3.8w 义项 ~159s）撞网关 120s 超时被掐断。任务态存 `export_jobs` 表，含并发去重、僵尸超时（>20min 判 failed）、24h TTL 文件清理。旧同步端点 `/api/export/excel` 保留向后兼容。
+
 ### 数据库（PostgreSQL 16 / 测试用 SQLite 内存）
 
-ORM 模型分布在 `core/models/` 下，共 19 张表。测试通过 `conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离。Alembic 管理 22 个迁移版本。
+ORM 模型分布在 `core/models/` 下，共 20 张表。测试通过 `conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离。Alembic 管理 24 个迁移版本。
 
 ## 关键业务规则
 
@@ -105,7 +107,7 @@ ORM 模型分布在 `core/models/` 下，共 19 张表。测试通过 `conftest.
 
 ## 测试体系
 
-68 个测试文件，分为 `tests/unit/` 和 `tests/integration/` 两层。`conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离（`session` 级 engine，`function` 级 session）。`sample_word` fixture 创建含多义项、多内容项的测试单词。
+71 个测试文件，分为 `tests/unit/` 和 `tests/integration/` 两层。`conftest.py` 使用 SQLite 内存数据库 + 事务回滚隔离（`session` 级 engine，`function` 级 session）。`sample_word` fixture 创建含多义项、多内容项的测试单词。
 
 Ruff 配置：line-length=120, target-version=py311, select=[E,F,I,N,W]。
 

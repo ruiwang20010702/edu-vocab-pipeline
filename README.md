@@ -292,6 +292,7 @@ PYTHONPATH=backend vocab review edit <id> "new content" # 人工修改
 - CSP + SecurityHeaders + 生产关闭 /docs
 - 前端全局 Toast 错误提示 + regenerate AbortController 防并发
 - Excel 导出分批查询（每批 500），避免大数据量内存溢出
+- Excel 导出改异步后台任务（建任务→后台构建→轮询→下载），避免同步导出撞网关 120s 超时
 
 详见 `docs/pending-fixes-v2.md` 了解修复记录。
 
