@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     production_batch_size: int = 50  # 大批量生产时每批处理的词数（fallback）
     production_max_items_per_batch: int = 500  # 智能分批：每批 ContentItem 数上限
     package_processing_timeout_hours: int = 6  # Package processing 状态超时（小时）
+    review_batch_idle_timeout_hours: int = 6  # 审核批次空闲超时（小时）：超此无审核动作的 in_progress 批次自动回收 pending 项回池
 
     max_regenerate_retries: int = 3
     max_upload_size_mb: int = 10

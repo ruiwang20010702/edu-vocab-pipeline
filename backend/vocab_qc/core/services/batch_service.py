@@ -1,10 +1,8 @@
 """批次派发服务: 按词分配审核批次，防并发碰撞."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Optional
-
-logger = logging.getLogger(__name__)
 
 from sqlalchemy import and_, distinct, exists, func, or_, select, update
 from sqlalchemy.orm import Session, joinedload
@@ -13,6 +11,8 @@ from vocab_qc.core.models.batch_layer import ReviewBatch
 from vocab_qc.core.models.content_layer import ContentItem
 from vocab_qc.core.models.enums import BatchStatus, QcStatus, ReviewReason, ReviewResolution, ReviewStatus
 from vocab_qc.core.models.quality_layer import ReviewItem
+
+logger = logging.getLogger(__name__)
 
 
 def _repair_orphan_failed_items(session: Session) -> int:
@@ -179,6 +179,120 @@ def _resolve_deadlocked_orphans(session: Session, batch_id: Optional[int] = None
     return len(orphans)
 
 
+def _release_batch_pending_items(session: Session, batch: ReviewBatch) -> None:
+    """释放批次的 pending 项回池（batch_id/assigned_to_id 置空）+ 批次置 completed。
+
+    供 release_batch（用户主动）与 _reclaim_stale_batches（自动回收）共用，行为一致。
+    """
+    session.execute(
+        update(ReviewItem)
+        .where(
+            ReviewItem.batch_id == batch.id,
+            ReviewItem.status == ReviewStatus.PENDING.value,
+        )
+        .values(batch_id=None, assigned_to_id=None)
+    )
+    batch.status = BatchStatus.COMPLETED.value
+    batch.completed_at = datetime.now(UTC)
+    session.flush()
+
+
+def _reclaim_stale_batches(session: Session) -> int:
+    """回收长时间无审核动作的 in_progress 批次：pending 项回池 + 批次置 completed。
+
+    判据：批次最近一次审核动作（其 ReviewItem.resolved_at 最大值，无则 batch.created_at）
+    距今 > review_batch_idle_timeout_hours（默认 6h）。用"空闲"而非"创建时间"——审核员每
+    resolve 一项就刷新计时，避免误伤正在缓慢审核的批次，只回收真停手的。
+
+    懒触发，挂在 assign_batch，与 Package processing 6h 超时同款范式。根治"审核员领了
+    不做就锁死全池"：废弃批次的 pending 项自动回池，后续审核员可重新领取。
+    """
+    from vocab_qc.core.config import settings
+
+    cutoff = datetime.now(UTC) - timedelta(hours=settings.review_batch_idle_timeout_hours)
+    last_activity = (
+        session.query(
+            ReviewBatch.id.label("bid"),
+            func.max(ReviewItem.resolved_at).label("last_resolved"),
+        )
+        .select_from(ReviewBatch)
+        .outerjoin(ReviewItem, ReviewItem.batch_id == ReviewBatch.id)
+        .filter(ReviewBatch.status == BatchStatus.IN_PROGRESS.value)
+        .group_by(ReviewBatch.id)
+        .subquery()
+    )
+    stale = (
+        session.query(ReviewBatch)
+        .join(last_activity, last_activity.c.bid == ReviewBatch.id)
+        .filter(func.coalesce(last_activity.c.last_resolved, ReviewBatch.created_at) < cutoff)
+        .all()
+    )
+    if not stale:
+        return 0
+    for batch in stale:
+        _release_batch_pending_items(session, batch)
+    logger.warning(
+        "回收陈旧 in_progress 批次: %d 个（空闲 > %dh）",
+        len(stale), settings.review_batch_idle_timeout_hours,
+    )
+    return len(stale)
+
+
+def _reject_dead_empty_orphans(session: Session) -> int:
+    """空内容且重试耗尽、又无 pending 审核项的死锁 CI → 直接置 rejected 终态出列。
+
+    补 _resolve_deadlocked_orphans 的盲区：后者只在 CI 仍挂 pending ReviewItem 时清理；
+    若上个 ReviewItem 已 resolved/regenerate、重生又产出空内容（layer2_failed），CI 非
+    终态却无 pending 项——两个现有自愈都够不着 → 永卡"待处理"且不可导出。这里直接落
+    rejected，并记 prompt 指纹（与 _resolve_deadlocked_orphans 一致，prompt 升级后才重做）。
+    """
+    from vocab_qc.core.config import settings
+    from vocab_qc.core.services.prompt_service import get_active_prompt
+
+    cis = (
+        session.query(ContentItem)
+        .filter(
+            ContentItem.qc_status.in_([
+                QcStatus.LAYER1_FAILED.value,
+                QcStatus.LAYER2_FAILED.value,
+            ]),
+            func.coalesce(ContentItem.content, "") == "",
+            ContentItem.retry_count >= settings.ai_max_retries,
+            ~exists(
+                select(ReviewItem.id).where(
+                    ReviewItem.content_item_id == ContentItem.id,
+                    ReviewItem.status == ReviewStatus.PENDING.value,
+                )
+            ),
+        )
+        .limit(500)
+        .all()
+    )
+    if not cis:
+        return 0
+
+    nested = session.begin_nested()
+    try:
+        prompt_fp_cache: dict[str, Optional[tuple[int, str]]] = {}
+        for ci in cis:
+            ci.qc_status = QcStatus.REJECTED.value
+            if ci.dimension not in prompt_fp_cache:
+                active = get_active_prompt(session, "generation", ci.dimension)
+                prompt_fp_cache[ci.dimension] = (active.id, active.file_hash) if active else None
+            fp = prompt_fp_cache[ci.dimension]
+            if fp is not None:
+                ci.generated_with_prompt_id, ci.generated_with_prompt_hash = fp
+        session.flush()
+        nested.commit()
+    except Exception:
+        nested.rollback()
+        logger.exception("空内容死锁 CI 自愈写入失败，跳过")
+        return 0
+
+    logger.warning("自动 reject 空内容死锁 CI: %d 条", len(cis))
+    return len(cis)
+
+
 def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Optional[ReviewBatch]:
     """原子领取一批待审单词。
 
@@ -219,10 +333,17 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
         .all()
     }
 
+    # 回收陈旧批次：空闲超 6h 的 in_progress 批次自动释放 pending 项回池，
+    # 根治"审核员领了不做就锁死全池"——废弃批次的词重新可领。
+    _reclaim_stale_batches(session)
+
     # 领取前全局自愈死锁孤儿：content='' 且达上限 / rejected 的 pending 项被 resolve，
     # 使其不进入下方 status=pending 的捞取，避免被打包进新批次卡住审核员（点开无内容）。
     # existing 分支（上方）的局部清理只治"上一批"，这里补全"新建批次"路径的同源缺口。
     _resolve_deadlocked_orphans(session)
+
+    # 补盲区：空内容+重试耗尽+无 pending 项的死锁 CI 直接 reject 出列（resolved/regenerate 后重生空的情形）
+    _reject_dead_empty_orphans(session)
 
     # 孤儿修复：失败的 ContentItem 无 pending ReviewItem 时自动补建
     _repair_orphan_failed_items(session)
@@ -271,7 +392,10 @@ def assign_batch(session: Session, user_id: int, batch_size: int = 10) -> Option
 
     session.flush()
 
-    logger.info("批次领取 batch_id=%d user_id=%d word_count=%d item_count=%d", batch.id, user_id, len(actual_word_ids), len(items))
+    logger.info(
+        "批次领取 batch_id=%d user_id=%d word_count=%d item_count=%d",
+        batch.id, user_id, len(actual_word_ids), len(items),
+    )
 
     return batch
 
@@ -401,22 +525,8 @@ def release_batch(session: Session, batch_id: int, user_id: int) -> ReviewBatch:
     if batch.status != BatchStatus.IN_PROGRESS.value:
         raise ValueError("该批次不可释放")
 
-    # 批量释放所有 PENDING 状态的 ReviewItem（直接 UPDATE，省去 SELECT）
-    session.execute(
-        update(ReviewItem)
-        .where(
-            ReviewItem.batch_id == batch_id,
-            ReviewItem.status == ReviewStatus.PENDING.value,
-        )
-        .values(batch_id=None, assigned_to_id=None)
-    )
-
-    batch.status = BatchStatus.COMPLETED.value
-    batch.completed_at = datetime.now(UTC)
-    session.flush()
-
+    _release_batch_pending_items(session, batch)
     logger.info("批次释放 batch_id=%d user_id=%d", batch_id, user_id)
-
     return batch
 
 
