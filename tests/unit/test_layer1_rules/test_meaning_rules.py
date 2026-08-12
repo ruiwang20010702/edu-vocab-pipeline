@@ -1,6 +1,7 @@
 """Meaning 规则单元测试."""
 
 import pytest
+from vocab_qc.core.pos_tags import AUTHORITATIVE_POS_TAGS
 from vocab_qc.core.qc.layer1.meaning_rules import (
     M3PosTagFormat,
     M4PosNewlineSeparation,
@@ -33,6 +34,11 @@ class TestM3PosTagFormat:
     )
     def test_valid_new_pos_tags(self, pos):
         result = self.checker.check("友好的", "kind", pos=pos)
+        assert result.passed
+
+    @pytest.mark.parametrize("pos", sorted(AUTHORITATIVE_POS_TAGS))
+    def test_all_23_authoritative_dotted_tags_pass(self, pos):
+        result = self.checker.check("释义", "word", pos=pos)
         assert result.passed
 
     @pytest.mark.parametrize("pos", ["noun", "verb", "x", "", "名词", "n.phr", "n_phr"])

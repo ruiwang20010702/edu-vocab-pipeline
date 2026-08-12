@@ -24,6 +24,10 @@ from vocab_qc.core.models.data_layer import Meaning, Phonetic, Source, Word
 from vocab_qc.core.models.enums import QcStatus
 from vocab_qc.core.models.package_layer import Package, PackageWord
 from vocab_qc.core.models.quality_layer import RetryCounter, ReviewItem
+from vocab_qc.core.pos_tags import (
+    AUTHORITATIVE_POS_BARE_TAGS,
+    LEGACY_COMPAT_POS_BARE_TAGS,
+)
 
 
 def _truncate_field(value: str, max_len: int, field_name: str, word: str) -> str:
@@ -36,11 +40,7 @@ def _truncate_field(value: str, max_len: int, field_name: str, word: str) -> str
 
 # 项目约定：内部存储统一为带点裸标签格式（n. / v. / adj. ...），导出层去点。
 # 见 export_service._normalize_pos_for_export。
-_POS_BARE_TAGS = frozenset({
-    "n", "v", "vi", "vt", "adj", "adv", "pron", "prep", "num",
-    "conj", "interj", "det", "aux", "abbr", "art", "phr",
-    "modal v", "phr v",
-})
+_POS_BARE_TAGS = AUTHORITATIVE_POS_BARE_TAGS | LEGACY_COMPAT_POS_BARE_TAGS
 
 # 项目约定：释义内统一为全角中文标点。
 # QC 规则 meaning_rules.py 依赖全角分号 `；` 作为合法多义项分隔符。
@@ -220,20 +220,34 @@ def import_from_json(session: Session, data: list[dict[str, Any]], batch_name: s
 
             imported_meanings.append((word, meaning))
 
-            source_extra = {
+            entry_source_extra = {
                 "textbook_id": entry.get("textbook_id"),
                 "word_book_id": entry.get("word_book_id"),
                 "unit_id": entry.get("unit_id"),
             }
+            source_records = m_data.get("source_records", [])
             sources = m_data.get("sources", [])
-            has_source_ids = any(v is not None for v in source_extra.values())
             m_key = f"{word.id}:{pos}:{definition}"
-            if sources:
+            if source_records:
+                for record in source_records:
+                    if not isinstance(record, dict):
+                        continue
+                    source_extra = {
+                        "textbook_id": record.get("textbook_id"),
+                        "word_book_id": record.get("word_book_id"),
+                        "unit_id": record.get("unit_id"),
+                    }
+                    source_name = str(record.get("source_name") or "").strip()
+                    if source_name or any(v is not None for v in source_extra.values()):
+                        pending_source_entries.append((
+                            word_text, m_key, source_name or batch_name, source_extra,
+                        ))
+            elif sources:
                 for src_name in sources:
-                    pending_source_entries.append((word_text, m_key, src_name, source_extra))
-            elif has_source_ids:
+                    pending_source_entries.append((word_text, m_key, src_name, entry_source_extra))
+            elif any(v is not None for v in entry_source_extra.values()):
                 # 无 source 列但有教材 ID → 用批次名作 source_name
-                pending_source_entries.append((word_text, m_key, batch_name, source_extra))
+                pending_source_entries.append((word_text, m_key, batch_name, entry_source_extra))
 
     # ── 统一 flush：新 Phonetic + 新 Meaning ──
     if new_phonetics:
@@ -346,7 +360,7 @@ def _parse_csv_text(text: str) -> tuple[list[dict[str, Any]], list[str]]:
             entries[word]["ipa_uk"] = ipa_uk
         if ipa_us and not entries[word].get("ipa_us"):
             entries[word]["ipa_us"] = ipa_us
-        # 教材结构化 ID
+        # 教材结构化 ID。每一行都随对应义项保存，避免同词多来源时只保留首行 ID。
         tb = row.get("textbook_id", "").strip()
         wb = row.get("word_book_id", "").strip()
         ui = row.get("unit_id", "").strip()
@@ -357,10 +371,17 @@ def _parse_csv_text(text: str) -> tuple[list[dict[str, Any]], list[str]]:
         if ui and not entries[word].get("unit_id"):
             entries[word]["unit_id"] = ui
         if pos and definition:
+            source_record = {
+                "source_name": source,
+                "textbook_id": tb or None,
+                "word_book_id": wb or None,
+                "unit_id": ui or None,
+            }
             entries[word]["meanings"].append({
                 "pos": pos,
                 "definition": definition,
                 "sources": [source] if source else [],
+                "source_records": [source_record] if source or tb or wb or ui else [],
             })
         elif not definition and word not in warned_words:
             warnings.append(f"单词 '{word}' 缺失释义，已跳过该义项")
@@ -468,7 +489,7 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
             entries[word]["audio_url_uk"] = audio_uk
         if audio_us and not entries[word].get("audio_url_us"):
             entries[word]["audio_url_us"] = audio_us
-        # 教材结构化 ID
+        # 教材结构化 ID。保留 entry 级首值以兼容旧调用，同时在义项上保存逐行来源。
         def _safe_str(val: object) -> str | None:
             if val is None:
                 return None
@@ -482,10 +503,17 @@ def _parse_excel(file_content: bytes) -> list[dict[str, Any]]:
         if "unit_id" in col_map and not entries[word].get("unit_id"):
             entries[word]["unit_id"] = _safe_str(row[col_map["unit_id"]])
         if pos and definition:
+            source_record = {
+                "source_name": source,
+                "textbook_id": _safe_str(row[col_map["textbook_id"]]) if "textbook_id" in col_map else None,
+                "word_book_id": _safe_str(row[col_map["word_book_id"]]) if "word_book_id" in col_map else None,
+                "unit_id": _safe_str(row[col_map["unit_id"]]) if "unit_id" in col_map else None,
+            }
             entries[word]["meanings"].append({
                 "pos": pos,
                 "definition": definition,
                 "sources": [source] if source else [],
+                "source_records": [source_record] if source or any(source_record.values()) else [],
             })
         elif not definition and word not in warned_words:
             warnings.append(f"单词 '{word}' 缺失释义，已跳过该义项")

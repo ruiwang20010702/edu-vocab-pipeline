@@ -1,10 +1,13 @@
 """import_service 单元测试."""
 
 import json
+from io import BytesIO
 
 import pytest
+from openpyxl import Workbook
 from vocab_qc.core.models import ContentItem, Meaning, Source, Word
 from vocab_qc.core.models.package_layer import Package
+from vocab_qc.core.pos_tags import AUTHORITATIVE_POS_TAGS
 from vocab_qc.core.services import import_service
 
 
@@ -56,6 +59,47 @@ class TestImportFromJson:
 
         sources = db_session.query(Source).filter_by(meaning_id=meanings[0].id).all()
         assert len(sources) == 2
+
+    def test_source_records_preserve_row_level_ids(self, db_session):
+        """同词同义的不同教材来源必须保留各自行级结构化 ID。"""
+        data = [{
+            "word": "run",
+            "meanings": [
+                {
+                    "pos": "v.",
+                    "definition": "跑",
+                    "source_records": [{
+                        "source_name": "教材A",
+                        "textbook_id": "course-a",
+                        "word_book_id": "book-a",
+                        "unit_id": "unit-a",
+                    }],
+                },
+                {
+                    "pos": "v.",
+                    "definition": "跑",
+                    "source_records": [{
+                        "source_name": "教材B",
+                        "textbook_id": "course-b",
+                        "word_book_id": "book-b",
+                        "unit_id": "unit-b",
+                    }],
+                },
+            ],
+        }]
+
+        import_service.import_from_json(db_session, data, "source_records_test")
+
+        word = db_session.query(Word).filter_by(word="run").one()
+        meaning = db_session.query(Meaning).filter_by(word_id=word.id).one()
+        sources = db_session.query(Source).filter_by(meaning_id=meaning.id).all()
+        assert {
+            (source.source_name, source.textbook_id, source.word_book_id, source.unit_id)
+            for source in sources
+        } == {
+            ("教材A", "course-a", "book-a", "unit-a"),
+            ("教材B", "course-b", "book-b", "unit-b"),
+        }
 
     def test_package_created(self, db_session):
         data = [{"word": "test", "meanings": [{"pos": "n.", "definition": "测试", "sources": []}]}]
@@ -176,6 +220,35 @@ class TestParseUpload:
         with pytest.raises(ValueError, match="不支持"):
             import_service.parse_upload(b"data", "test.txt")
 
+    def test_excel_preserves_source_ids_per_row(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.append([
+            "word", "pos", "definition", "source",
+            "textbook_id", "word_book_id", "unit_id",
+        ])
+        ws.append(["run", "v.", "跑", "教材A", "course-a", "book-a", "unit-a"])
+        ws.append(["run", "v.", "跑", "教材B", "course-b", "book-b", "unit-b"])
+        buffer = BytesIO()
+        wb.save(buffer)
+
+        result, warnings = import_service.parse_upload(buffer.getvalue(), "sources.xlsx")
+
+        assert warnings == []
+        assert len(result) == 1
+        assert result[0]["meanings"][0]["source_records"] == [{
+            "source_name": "教材A",
+            "textbook_id": "course-a",
+            "word_book_id": "book-a",
+            "unit_id": "unit-a",
+        }]
+        assert result[0]["meanings"][1]["source_records"] == [{
+            "source_name": "教材B",
+            "textbook_id": "course-b",
+            "word_book_id": "book-b",
+            "unit_id": "unit-b",
+        }]
+
 
 class TestNormalizePos:
     """词性规范化：内部统一为带点裸标签格式。"""
@@ -200,6 +273,10 @@ class TestNormalizePos:
     ])
     def test_normalize_pos(self, inp, expected):
         assert import_service._normalize_pos(inp) == expected
+
+    @pytest.mark.parametrize("pos", sorted(AUTHORITATIVE_POS_TAGS))
+    def test_all_authoritative_pos_tags_are_stable(self, pos):
+        assert import_service._normalize_pos(pos) == pos
 
 
 class TestNormalizeDefinition:
